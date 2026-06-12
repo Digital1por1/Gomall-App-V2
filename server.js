@@ -1,0 +1,181 @@
+import express from "express";
+import path from "path";
+import { GoogleGenAI } from "@google/genai";
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3005;
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || ""
+  });
+
+  app.use(express.json({ limit: "50mb" }));
+
+  app.post("/api/generate", async (req, res) => {
+    try {
+      const { prompt, genType, tempImproveImage, activeLayout, textParts } = req.body;
+
+      const isStory = activeLayout === "story";
+      const ratioBlock = isStory
+        ? "ASPECT RATIO: vertical 9:16 (portrait, taller than wide)."
+        : "ASPECT RATIO: portrait 4:5 (slightly taller than wide).";
+
+      const textWidthCap = isStory ? "40%" : "70%";
+      const sideMargin = isStory ? "25%" : "8%";
+
+      const storyExtra = isStory
+        ? `\n6. STORY-SPECIFIC: this is a 9:16 vertical canvas. The vertical space is abundant, the horizontal space is NARROW. Treat every headline as a vertical stack of short lines (one short word per line is ideal). NEVER render a long word horizontally across the full width. Example: a 7-letter word like "HOTSALE" must be drawn either (a) split as "HOT" on one line and "SALE" on the line below, or (b) at a smaller size where it occupies less than 40% of the frame width. A single horizontal "HOTSALE" spanning more than half the width is FORBIDDEN.\n7. STORY-SPECIFIC: the safe drawing column is only the central 50% of the frame width (from 25% to 75% horizontally). Anything outside that column will be cropped by the platform UI and is unacceptable.`
+        : "";
+
+      const safeZoneBlock = `HARD LAYOUT CONSTRAINTS — DO NOT VIOLATE:
+1. Any rendered word, letter or headline MUST have at least ${sideMargin} of empty padding on the LEFT side and ${sideMargin} of empty padding on the RIGHT side of the frame. The text bounding box is forbidden from touching those margins.
+2. The total horizontal width of any text element MUST be at most ${textWidthCap} of the frame width. If the headline does not fit at that size, you MUST break it into 2 or 3 stacked shorter lines — never let a single line span the full canvas.
+3. The top ${isStory ? "15%" : "8%"} and bottom ${isStory ? "16%" : "8%"} of the frame are reserved UI bands. Do not place text or critical product details there.
+4. Before finalizing the image, mentally check: "is every letter fully visible and surrounded by background on all sides?" If a letter is cut, cropped, or kissing an edge — the image is WRONG, re-compose with smaller text.
+5. The product / main subject should be clearly framed inside the central safe area, not floating off-canvas.${storyExtra}
+
+VERIFICATION: imagine the frame divided into a 10x10 grid. Text is only allowed in the inner ${isStory ? "4x6" : "8x8"} cells. Outside cells must remain background or empty.`;
+
+      const creativeBlock = `CREATIVE DIRECTION:
+- DEFAULT STYLE: photorealistic commercial photography. Real camera, real lens, real lighting, real materials, real textures. The image must look like a photo taken with a high-end DSLR or mirrorless camera, NOT like a digital illustration, 3D render, painting, or AI-generic art.
+- Only deviate from photorealism (surreal, illustrated, 3D, painterly, etc.) if the USER REQUEST below explicitly asks for it.
+- Within photorealism, still aim for high production value: tasteful art direction, cinematic color grading, well-controlled shadows, realistic depth of field, atmosphere. Avoid sterile flat backgrounds and plastic studio softbox looks unless the user asks for catalog/packshot.
+- Composition: thoughtful framing, rule of thirds, generous negative space, asymmetry when it serves the subject.
+- Never produce obvious AI tell-tales: overly smooth skin, plasticky reflections, melted hands, perfect symmetry, repeating patterns.`;
+
+      if (genType === "image" || genType === "improve") {
+        const parts = [];
+
+        if (genType === "improve" && tempImproveImage) {
+          const imgString = String(tempImproveImage);
+          const base64Data = imgString.includes(",") ? imgString.split(",")[1] : imgString;
+          const mimeMatch = imgString.match(/^data:([^;]+);base64,/);
+          const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+
+          parts.push({ inlineData: { data: String(base64Data), mimeType } });
+          parts.push({
+            text: `You are a senior advertising creative director re-imagining the attached product photo into a bold campaign visual.
+
+PRODUCT FIDELITY (NON-NEGOTIABLE):
+- Keep the product 100% IDENTICAL: same exact shape, label artwork, colors, proportions, logo, materials, textures. Never redesign, restyle, recolor or replace it.
+- The product should remain the unambiguous hero of the image.
+- The product's own existing label/logo IS allowed and must be preserved exactly. Do NOT add new logos.
+
+${ratioBlock}
+
+${creativeBlock}
+
+${safeZoneBlock}
+
+TEXT & LOGO POLICY (STRICT):
+- DO NOT render any text, letters, words, numbers, headlines, captions, watermarks, signatures, slogans, prices, percentages, or typographic elements unless the USER INSTRUCTIONS below explicitly request specific text.
+- DO NOT invent or add brand logos, badges, stickers, seals, or graphic marks that are not already part of the original product itself.
+- If the user does not mention text or logos, the image must be completely free of any added typography or branding.
+- If the user does ask for text, every letter must obey the HARD LAYOUT CONSTRAINTS above — break long words into stacked lines rather than letting them bleed off the canvas.
+
+USER INSTRUCTIONS: ${String(prompt)}`
+          });
+        } else {
+          parts.push({
+            text: `You are a senior art director creating a high-end advertising image for social media.
+
+${ratioBlock}
+
+${creativeBlock}
+
+${safeZoneBlock}
+
+TEXT & LOGO POLICY (STRICT):
+- DO NOT render any text, letters, words, numbers, headlines, captions, watermarks, signatures, slogans, prices, percentages, or typographic elements unless the USER REQUEST below explicitly asks for specific text.
+- DO NOT invent or add brand logos, badges, stickers, seals, or graphic marks unless the user explicitly asks for them.
+- By default the image must be completely free of any typography or branding.
+- If the user does ask for text, then: pick a font weight and size such that the text occupies at most ${textWidthCap} of the frame width; split long headlines into 2 or 3 stacked lines so each line stays within the safe area; center horizontally; confirm the first and last letters have clear margin from the frame edges.
+
+USER REQUEST: ${String(prompt)}`
+          });
+        }
+
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash-image",
+          contents: [{ role: "user", parts }],
+          config: {
+            imageConfig: {
+              aspectRatio: isStory ? "9:16" : "4:5"
+            }
+          }
+        });
+
+        let foundImageUrl = "";
+        const candidateParts = response?.candidates?.[0]?.content?.parts || [];
+        for (const part of candidateParts) {
+          if (part && part.inlineData) {
+            foundImageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+        if (!foundImageUrl) {
+          console.error("No image in response:", JSON.stringify(response).slice(0, 500));
+        }
+        res.json({ imageUrl: foundImageUrl });
+      } else if (genType === "copy") {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts: textParts }]
+        });
+        let text = "";
+        if (typeof response?.text === "string") {
+          text = response.text;
+        } else {
+          const parts = response?.candidates?.[0]?.content?.parts || [];
+          text = parts.map(p => p?.text || "").join("").trim();
+        }
+        res.json({ text });
+      } else if (genType === "simple_image") {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash-image",
+          contents: [{
+            role: "user",
+            parts: [{ text: String(prompt) }]
+          }],
+          config: {
+            imageConfig: { aspectRatio: "1:1" }
+          }
+        });
+
+        let foundImageUrl = "";
+        const candidateParts = response?.candidates?.[0]?.content?.parts || [];
+        for (const part of candidateParts) {
+          if (part && part.inlineData) {
+            foundImageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+        res.json({ imageUrl: foundImageUrl });
+      } else {
+        res.status(400).json({ error: "Invalid genType" });
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error generating content" });
+    }
+  });
+
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+
+  app.use((err, req, res, next) => {
+    console.error("Express Error:", err);
+    res.status(err.status || 500).json({
+      error: err.message || "Internal Server Error"
+    });
+  });
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+startServer();
