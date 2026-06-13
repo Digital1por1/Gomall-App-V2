@@ -84,9 +84,14 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
     setTones(prev => prev.includes(tone) ? prev.filter(t => t !== tone) : [...prev, tone]);
   };
 
+  const MIN_STORY = 10;
   const step1Valid = Boolean(name.trim() && business.trim());
-  const step2Valid = companyStory.trim().length >= 20 && resolvedIndustry.length > 0;
+  const step2Valid = companyStory.trim().length >= MIN_STORY && resolvedIndustry.length > 0;
   const step3Valid = logos.length > 0;
+
+  const step2Missing: string[] = [];
+  if (!resolvedIndustry) step2Missing.push('elegí un rubro');
+  if (companyStory.trim().length < MIN_STORY) step2Missing.push(`escribí una descripción (mínimo ${MIN_STORY} caracteres)`);
 
   const handleFinish = async () => {
     if (!step3Valid) return;
@@ -202,7 +207,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
             <div className="space-y-2">
               <label className={labelClass}>Historia de la empresa</label>
               <textarea placeholder="Contanos qué hace tu marca, qué la hace especial, a quién le habla..." rows={5} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none" value={companyStory} onChange={(e) => setCompanyStory(e.target.value)} />
-              <p className="text-[9px] text-slate-300 font-bold px-1">{companyStory.trim().length < 20 ? `Escribe al menos 20 caracteres (${companyStory.trim().length}/20)` : 'Perfecto ✓'}</p>
+              <p className="text-[9px] text-slate-300 font-bold px-1">{companyStory.trim().length < MIN_STORY ? `Escribí al menos ${MIN_STORY} caracteres (${companyStory.trim().length}/${MIN_STORY})` : 'Perfecto ✓'}</p>
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Tono de marca</label>
@@ -301,6 +306,9 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
             >{saving ? 'Guardando...' : 'Empezar a crear'}</button>
           )}
         </div>
+        {step === 2 && !step2Valid && step2Missing.length > 0 && (
+          <p className="text-[9px] text-[#EA5B25] font-bold text-center">Para continuar: {step2Missing.join(' y ')}.</p>
+        )}
         {step === 3 && !step3Valid && (
           <p className="text-[9px] text-slate-300 font-bold text-center">Subí al menos un logo para continuar.</p>
         )}
