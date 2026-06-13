@@ -19,7 +19,7 @@ import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyA2fyVpo-4zvsMrbIO36N7enIMh9aEgetA",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "gomall-studio-v2.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "gomall-studio-v2",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "gomall-studio-v2.firebasestorage.app",
@@ -413,10 +413,25 @@ const App: React.FC = () => {
   ]);
 
   const handleLogin = async () => {
-    try { 
-      await auth.signInWithPopup(googleProvider); 
-    } catch (e) { 
-      alert("Error al iniciar sesión con Google."); 
+    try {
+      await auth.signInWithPopup(googleProvider);
+    } catch (e: any) {
+      const code = e?.code || '';
+      // Mensajes claros segun el motivo real del fallo
+      if (code === 'auth/unauthorized-domain') {
+        alert("Este dominio no está autorizado en Firebase.\n\nAgregá tu dominio en: Firebase Console → Authentication → Settings → Authorized domains.");
+      } else if (code === 'auth/operation-not-allowed') {
+        alert("El proveedor de Google no está habilitado.\n\nActivalo en: Firebase Console → Authentication → Sign-in method → Google.");
+      } else if (code === 'auth/invalid-api-key' || code === 'auth/api-key-not-valid' || code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.') {
+        alert("La API key de Firebase no es válida o no se cargó en el build. Revisá las variables VITE_FIREBASE_* en Hostinger y volvé a hacer deploy.");
+      } else if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user') {
+        // El navegador bloqueó el popup → reintentar con redirección
+        try { await auth.signInWithRedirect(googleProvider); return; } catch {}
+        alert("El navegador bloqueó la ventana de Google. Permití los popups e intentá de nuevo.");
+      } else {
+        alert(`Error al iniciar sesión con Google: ${code || e?.message || 'desconocido'}`);
+      }
+      console.error("Login error:", code, e?.message);
     }
   };
 
