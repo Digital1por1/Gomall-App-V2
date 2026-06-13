@@ -84,14 +84,12 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
     setTones(prev => prev.includes(tone) ? prev.filter(t => t !== tone) : [...prev, tone]);
   };
 
-  const MIN_STORY = 10;
   const step1Valid = Boolean(name.trim() && business.trim());
-  const step2Valid = companyStory.trim().length >= MIN_STORY && resolvedIndustry.length > 0;
-  const step3Valid = logos.length > 0;
+  const step2Valid = resolvedIndustry.length > 0; // solo el rubro es obligatorio
+  const step3Valid = true; // el logo es opcional, no bloquea
 
   const step2Missing: string[] = [];
   if (!resolvedIndustry) step2Missing.push('elegí un rubro');
-  if (companyStory.trim().length < MIN_STORY) step2Missing.push(`escribí una descripción (mínimo ${MIN_STORY} caracteres)`);
 
   const handleFinish = async () => {
     if (!step3Valid) return;
@@ -205,9 +203,9 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
               )}
             </div>
             <div className="space-y-2">
-              <label className={labelClass}>Historia de la empresa</label>
+              <label className={labelClass}>Historia de la empresa <span className="text-slate-300 normal-case font-bold">(opcional)</span></label>
               <textarea placeholder="Contanos qué hace tu marca, qué la hace especial, a quién le habla..." rows={5} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none" value={companyStory} onChange={(e) => setCompanyStory(e.target.value)} />
-              <p className="text-[9px] text-slate-300 font-bold px-1">{companyStory.trim().length < MIN_STORY ? `Escribí al menos ${MIN_STORY} caracteres (${companyStory.trim().length}/${MIN_STORY})` : 'Perfecto ✓'}</p>
+              <p className="text-[9px] text-slate-300 font-bold px-1">Cuanto más detalle, mejores recomendaciones hace la IA.</p>
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Tono de marca</label>
@@ -225,7 +223,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
             {/* Logos */}
             <div className="space-y-2">
-              <label className={labelClass}>Logos <span className="text-[#EA5B25]">*</span></label>
+              <label className={labelClass}>Logos <span className="text-slate-300 normal-case font-bold">(recomendado)</span></label>
               <div className="grid grid-cols-4 gap-2">
                 {logos.map((url, idx) => (
                   <div key={idx} className="relative aspect-square bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center overflow-hidden group">
