@@ -1087,7 +1087,7 @@ const App: React.FC = () => {
         <div className="w-1/4"></div>
         <div className="flex-1 flex flex-col items-center justify-center text-center">
           <h2 className="text-lg sm:text-2xl font-[900] uppercase tracking-tight text-[#0F172A] leading-tight truncate max-w-full">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'ADMINISTRADOR' : (profile?.business || 'NEGOCIO')}</h2>
-          <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] sm:tracking-[0.5em] text-[#94A3B8] mt-1 sm:mt-1.5 truncate max-w-full">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'GOMALL STUDIO' : (profile?.type === 'mall' ? 'GOMALL STUDIO' : (profile?.mall || 'CENTRO COMERCIAL'))}</span>
+          <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] sm:tracking-[0.5em] text-[#94A3B8] mt-1 sm:mt-1.5 truncate max-w-full">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'GOMALL STUDIO' : (profile?.industry || 'GOMALL STUDIO')}</span>
           
           <div className="flex items-center justify-center gap-2 sm:gap-3 mt-2 sm:mt-2.5">
             <span className="text-[9px] sm:text-xs font-black text-[#EA5B25] uppercase tracking-tight whitespace-nowrap">

@@ -26,10 +26,8 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
   const [saving, setSaving] = useState(false);
 
   // Paso 1 — Perfil
-  const [type, setType] = useState<'comercio' | 'mall'>('comercio');
   const [name, setName] = useState('');
   const [business, setBusiness] = useState('');
-  const [mall, setMall] = useState('');
 
   // Paso 2 — Historia de marca
   const [companyStory, setCompanyStory] = useState('');
@@ -49,8 +47,6 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
   const logoInputRef = useRef<HTMLInputElement>(null);
   const resourceInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
-
-  const isComercio = type === 'comercio';
 
   const handleImageUpload = async (file: File, target: 'logo' | 'resource') => {
     const reader = new FileReader();
@@ -88,7 +84,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
     setTones(prev => prev.includes(tone) ? prev.filter(t => t !== tone) : [...prev, tone]);
   };
 
-  const step1Valid = isComercio ? (name.trim() && business.trim() && mall.trim()) : (name.trim() && mall.trim());
+  const step1Valid = Boolean(name.trim() && business.trim());
   const step2Valid = companyStory.trim().length >= 20 && resolvedIndustry.length > 0;
   const step3Valid = logos.length > 0;
 
@@ -97,7 +93,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
     setSaving(true);
     try {
       const initialUsage = { tokensUsed: 0, lastReset: Date.now() };
-      const tokenLimit = isComercio ? 1000000 : 2000000;
+      const tokenLimit = 1000000;
       const kitFont = fonts.length > 0 ? fonts[0].family : 'Inter';
 
       const defaultKit: BrandKit = {
@@ -120,9 +116,8 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
 
       await firebase.firestore().collection('profiles').doc(user.uid).set({
         name: name.trim(),
-        business: isComercio ? business.trim() : (mall.trim() || 'Administración'),
-        mall: mall.trim(),
-        type,
+        business: business.trim(),
+        mall: '',
         email: user.email,
         usage: initialUsage,
         tokenLimit,
@@ -178,23 +173,13 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
         {/* Paso 1 */}
         {step === 1 && (
           <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
-            <div className="flex p-1 bg-slate-100 rounded-2xl">
-              <button onClick={() => setType('comercio')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isComercio ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Comercio</button>
-              <button onClick={() => setType('mall')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!isComercio ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Centro Comercial</button>
-            </div>
             <div className="space-y-2">
               <label className={labelClass}>Tu Nombre</label>
               <input type="text" placeholder="Ej: Juan Pérez" className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-            {isComercio && (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                <label className={labelClass}>Nombre del Comercio</label>
-                <input type="text" placeholder="Ej: Boutique Elegance" className={inputClass} value={business} onChange={(e) => setBusiness(e.target.value)} />
-              </div>
-            )}
             <div className="space-y-2">
-              <label className={labelClass}>{isComercio ? 'Centro Comercial al que pertenece' : 'Nombre del Centro Comercial'}</label>
-              <input type="text" placeholder="Ej: Mall del Sol" className={inputClass} value={mall} onChange={(e) => setMall(e.target.value)} />
+              <label className={labelClass}>Nombre de tu negocio o marca</label>
+              <input type="text" placeholder="Ej: Boutique Elegance" className={inputClass} value={business} onChange={(e) => setBusiness(e.target.value)} />
             </div>
           </div>
         )}
