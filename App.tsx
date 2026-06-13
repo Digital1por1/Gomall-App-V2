@@ -5,7 +5,11 @@ import SidebarModules from './components/SidebarModules';
 import EditorCanvas from './components/EditorCanvas';
 import QuickEditDrawer from './components/QuickEditDrawer';
 import AdminDashboard from './components/AdminDashboard';
+import BrandOnboarding from './components/BrandOnboarding';
+import CampaignStudio from './components/CampaignStudio';
+import ReelStudio from './components/ReelStudio';
 import * as htmlToImage from 'html-to-image';
+import { CampaignPiece } from './types';
 
 const ADMIN_EMAILS = ['digital@1por1.com.ar'];
 
@@ -126,6 +130,10 @@ const App: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showCampaigns, setShowCampaigns] = useState(false);
+  const [showReels, setShowReels] = useState(false);
+  const [reelCopy, setReelCopy] = useState<string | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -249,6 +257,7 @@ const App: React.FC = () => {
         type: 'comercio',
         tokenLimit: 500000,
         usage: { tokensUsed: 0, lastReset: Date.now() },
+        onboardingCompleted: true,
         logoLibrary: [],
         resourceLibrary: [],
         backgroundLibrary: []
@@ -496,6 +505,44 @@ const App: React.FC = () => {
     if (isBlocked) return;
     setState(prev => ({ ...prev, ...updates }));
   }, [isBlocked]);
+
+  const handleUsePiece = (piece: CampaignPiece) => {
+    // Las piezas de reel van al editor de video
+    if (piece.type === 'reel') {
+      setReelCopy(piece.copy || null);
+      setShowCampaigns(false);
+      setShowReels(true);
+      return;
+    }
+    // Identidad de marca definida en el onboarding (primer kit) → se aplica sola para mantener coherencia
+    const kit = profile?.brandKits?.[0];
+    setState(prev => {
+      const newCopies = piece.copy ? [...prev.copies, piece.copy] : prev.copies;
+      const layers = { ...prev.textLayers };
+      layers.headline = { ...layers.headline, content: piece.title || layers.headline.content };
+      if (kit) {
+        layers.headline = { ...layers.headline, font: kit.headlineFont || layers.headline.font, color: kit.headlineColor || layers.headline.color };
+        layers.description = { ...layers.description, font: kit.descriptionFont || layers.description.font, color: kit.descriptionColor || layers.description.color };
+        layers.additional = { ...layers.additional, font: kit.additionalFont || layers.additional.font, color: kit.additionalColor || layers.additional.color };
+        layers.cta = { ...layers.cta, font: kit.ctaFont || layers.cta.font, color: kit.ctaColor || layers.cta.color };
+      }
+      return {
+        ...prev,
+        copies: newCopies,
+        selectedCopyIndex: piece.copy ? newCopies.length - 1 : prev.selectedCopyIndex,
+        logo: kit?.logoUrls?.[0] ? { ...prev.logo, url: kit.logoUrls[0] } : prev.logo,
+        resource: kit?.resourceUrls?.[0] ? { ...prev.resource, url: kit.resourceUrls[0] } : prev.resource,
+        backgroundOverlayColor: kit?.overlayColor ?? prev.backgroundOverlayColor,
+        ctaBgColor: kit?.ctaBgColor ?? prev.ctaBgColor,
+        textLayers: layers,
+      };
+    });
+    // Dispara la generación automática de la imagen con el prompt sugerido por la campaña
+    setPendingPrompt(piece.imagePrompt || '');
+    setShowCampaigns(false);
+    setActiveTab('editor');
+    setOpenSection('IMAGEN');
+  };
 
   const handleLayerAction = (layerName: string, action: 'front' | 'up' | 'down') => {
     if (isBlocked) return;
@@ -960,45 +1007,35 @@ const App: React.FC = () => {
     );
   }
 
-  if (user && !profile && !profileLoading) {
-    const isComercio = tempProfile.type === 'comercio';
+  if (user && !profileLoading && (!profile || !profile.onboardingCompleted)) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#F8F9FA] p-6">
-        <div className="max-w-md w-full bg-white rounded-[40px] p-10 shadow-xl border border-slate-50 space-y-8 animate-in slide-in-from-bottom-10 duration-500 overflow-y-auto max-h-[90vh]">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 bg-orange-50 text-[#EA5B25] rounded-2xl flex items-center justify-center mx-auto mb-4"><i className="fa-solid fa-user-plus text-xl"></i></div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">¡Bienvenido a Gomall Studio!</h2>
-            <p className="text-slate-400 text-sm">Configura tu perfil para empezar a crear.</p>
-          </div>
-          <div className="flex p-1 bg-slate-100 rounded-2xl">
-            <button onClick={() => setTempProfile({...tempProfile, type: 'comercio'})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isComercio ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Comercio</button>
-            <button onClick={() => setTempProfile({...tempProfile, type: 'mall'})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!isComercio ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Centro Comercial</button>
-          </div>
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Tu Nombre</label>
-              <input type="text" placeholder="Ej: Juan Pérez" className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-100 transition-all" value={tempProfile.name} onChange={(e) => setTempProfile({...tempProfile, name: e.target.value})} />
-            </div>
-            {isComercio && (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nombre del Comercio</label>
-                <input type="text" placeholder="Ej: Boutique Elegance" className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-100 transition-all" value={tempProfile.business} onChange={(e) => setTempProfile({...tempProfile, business: e.target.value})} />
-              </div>
-            )}
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">{isComercio ? 'Nombre del Centro Comercial al que pertenece' : 'Nombre del Centro Comercial'}</label>
-              <input type="text" placeholder="Ej: Mall del Sol" className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-100 transition-all" value={tempProfile.mall} onChange={(e) => setTempProfile({...tempProfile, mall: e.target.value})} />
-            </div>
-          </div>
-          <button onClick={saveProfile} disabled={isSaving} className="w-full h-16 bg-[#EA5B25] text-white rounded-2xl text-[11px] font-[900] uppercase tracking-[0.2em] shadow-xl active:scale-95 disabled:opacity-50 transition-all">{isSaving ? "Guardando..." : "Empezar"}</button>
-        </div>
-      </div>
+      <BrandOnboarding
+        user={user}
+        compressBase64Image={compressBase64Image}
+        onLogout={handleLogout}
+      />
     );
   }
 
   return (
     <div className="flex flex-col h-screen bg-[#F8F9FA] overflow-hidden relative">
       {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
+      {showCampaigns && user && (
+        <CampaignStudio
+          profile={profile}
+          userId={user.uid}
+          onClose={() => setShowCampaigns(false)}
+          updateUsage={updateUsage}
+          onUsePiece={handleUsePiece}
+        />
+      )}
+      {showReels && (
+        <ReelStudio
+          profile={profile}
+          onClose={() => setShowReels(false)}
+          initialCopy={reelCopy}
+        />
+      )}
       
       {isBlocked && (
         <div className="absolute inset-0 z-[100] bg-white/60 backdrop-blur-xl flex items-center justify-center p-6 text-center animate-in fade-in duration-500">
@@ -1048,6 +1085,22 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="w-1/4 flex justify-end items-center gap-2">
+          <button
+            onClick={() => setShowCampaigns(true)}
+            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-[#EA5B25] text-white rounded-xl transition-all shadow-sm active:scale-95 hover:bg-[#d44e1e]"
+            title="Campañas IA"
+          >
+            <i className="fa-solid fa-bullhorn text-sm sm:text-base"></i>
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Campañas</span>
+          </button>
+          <button
+            onClick={() => { setReelCopy(null); setShowReels(true); }}
+            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-purple-600 text-white rounded-xl transition-all shadow-sm active:scale-95 hover:bg-purple-700"
+            title="Editor de Reels"
+          >
+            <i className="fa-solid fa-film text-sm sm:text-base"></i>
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Reels</span>
+          </button>
           {user?.email && ADMIN_EMAILS.includes(user.email) && (
             <button 
               onClick={() => setShowAdmin(!showAdmin)} 
@@ -1076,6 +1129,8 @@ const App: React.FC = () => {
             onGithubConnect={handleGithubConnect}
             onGithubDisconnect={handleGithubDisconnect}
             compressBase64Image={compressBase64Image}
+            pendingPrompt={pendingPrompt}
+            onPendingPromptConsumed={() => setPendingPrompt(null)}
             savedProjects={savedProjects}
             onLoadProject={(projectState) => {
               console.log("Loading project state:", projectState);

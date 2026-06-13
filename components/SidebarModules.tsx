@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ProjectState, CustomFont, TextLayer, UserProfile, BrandKit, BackgroundConfig, SavedProject } from '../types';
+import { ProjectState, TextLayer, UserProfile, BackgroundConfig, SavedProject } from '../types';
 import { MONTHLY_TOKEN_LIMIT } from '../App';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
@@ -23,6 +23,8 @@ interface SidebarProps {
   onGithubConnect?: () => void;
   onGithubDisconnect?: () => void;
   compressBase64Image?: (base64Str: string, maxWidth: number, quality: number, preserveAlpha: boolean) => Promise<string>;
+  pendingPrompt?: string | null;
+  onPendingPromptConsumed?: () => void;
 }
 
 const SYSTEM_FONTS = [
@@ -67,21 +69,17 @@ const SidebarModules: React.FC<SidebarProps> = ({
   selectedField, activeLayout = 'feed', onApplyTemplate,
   savedProjects = [], onLoadProject, onDeleteProject,
   githubToken, onGithubConnect, onGithubDisconnect,
-  compressBase64Image
+  compressBase64Image, pendingPrompt, onPendingPromptConsumed
 }) => {
   const [promptIA, setPromptIA] = useState('');
   const [genStatus, setGenStatus] = useState<'idle' | 'generating' | 'ready'>('idle');
   const [tempImproveImage, setTempImproveImage] = useState<string | null>(null);
-  const [uploadingFont, setUploadingFont] = useState(false);
-  const [editingKit, setEditingKit] = useState<BrandKit | null>(null);
-  const [fontUploadCallback, setFontUploadCallback] = useState<((family: string) => void) | null>(null);
 
   // Referencias para inputs de archivos
   const logoInputRef = useRef<HTMLInputElement>(null);
   const resourceInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const improveInputRef = useRef<HTMLInputElement>(null);
-  const fontInputRef = useRef<HTMLInputElement>(null);
 
   // REFERENCIAS PARA SINCRONIZACIÓN (DEEP LINKING) - APUNTANDO A CONTENEDORES
   const logoContainerRef = useRef<HTMLDivElement>(null);
@@ -91,6 +89,17 @@ const SidebarModules: React.FC<SidebarProps> = ({
   const ctaRef = useRef<HTMLDivElement>(null);
 
   const currentBgConfig = activeLayout === 'feed' ? state.feedBackgroundConfig : state.storyBackgroundConfig;
+
+  // Recibe un prompt sugerido desde una campaña: lo precarga, abre la sección y genera la imagen automáticamente
+  useEffect(() => {
+    if (pendingPrompt && pendingPrompt.trim()) {
+      const p = pendingPrompt;
+      setPromptIA(p);
+      setOpenSection('IMAGEN');
+      onPendingPromptConsumed?.();
+      generateAI('image', p);
+    }
+  }, [pendingPrompt]);
 
   // EFECTO "PASTOR" ACTUALIZADO: Sincroniza la selección del canvas con la barra lateral
   useEffect(() => {
@@ -134,71 +143,8 @@ const SidebarModules: React.FC<SidebarProps> = ({
     return () => clearTimeout(timer);
   }, [selectedField]);
 
-  useEffect(() => {
-    if (state.logo.url) {
-      extractColorsFromSource(state.logo.url, 'logo');
-    }
-  }, [state.logo.url]);
-
-  useEffect(() => {
-    const currentImage = state.imageVariants[state.selectedVariantIndex]?.url;
-    if (currentImage) {
-      extractColorsFromSource(currentImage, 'background');
-    }
-  }, [state.selectedVariantIndex, state.imageVariants]);
-
-  const extractColorsFromSource = async (url: string, type: 'logo' | 'background') => {
-    try {
-      const img = new Image();
-      img.crossOrigin = "Anonymous";
-      img.src = url;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const colorCounts: Record<string, number> = {};
-        let totalSignificantPixels = 0;
-        
-        for (let i = 0; i < imageData.length; i += type === 'logo' ? 16 : 64) {
-          const r = imageData[i];
-          const g = imageData[i+1];
-          const b = imageData[i+2];
-          const a = imageData[i+3];
-          
-          if (a < 128) continue; 
-          
-          const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
-          const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-          
-          if (type === 'logo' && (brightness > 250 || brightness < 5)) continue;
-
-          colorCounts[String(hex)] = (colorCounts[String(hex)] || 0) + 1;
-          totalSignificantPixels++;
-        }
-        
-        const threshold = totalSignificantPixels * (type === 'logo' ? 0.03 : 0.05);
-        const sortedColors = Object.entries(colorCounts)
-          .filter(([_, count]) => count > threshold)
-          .sort((a, b) => b[1] - a[1])
-          .map(entry => String(entry[0]))
-          .slice(0, 6);
-        
-        if (type === 'logo') {
-          updateState({ extractedColors: sortedColors });
-        } else {
-          updateState({ extractedBackgroundColors: sortedColors });
-        }
-      };
-    } catch (e) {
-      console.error("Error al extraer colores:", e);
-    }
-  };
+  // Paleta de marca: colores definidos en el onboarding (no se extraen del logo)
+  const brandPalette = Array.from(new Set((state.brandKits || []).flatMap(k => k.brandColors || [])));
 
   // Register @font-face for all custom fonts whenever the list changes
   useEffect(() => {
@@ -214,45 +160,6 @@ const SidebarModules: React.FC<SidebarProps> = ({
     });
   }, [state.customFonts]);
 
-  const availableFonts = [
-    ...SYSTEM_FONTS,
-    ...(state.customFonts || []).map(f => f.family)
-  ];
-
-  const handleFontUpload = async (file: File): Promise<string | null> => {
-    const user = firebase.auth().currentUser;
-    if (!user) return null;
-    setUploadingFont(true);
-    try {
-      const baseName = file.name.replace(/\.[^.]+$/, '');
-      const family = `custom_${baseName.replace(/\s+/g, '_')}_${Date.now()}`;
-      const storageRef = firebase.storage().ref(`fonts/${user.uid}/${Date.now()}_${file.name}`);
-      const snapshot = await storageRef.put(file);
-      const url = await snapshot.ref.getDownloadURL();
-
-      const newFont: CustomFont = { name: baseName, family, url };
-
-      const style = document.createElement('style');
-      style.id = `custom-font-${family}`;
-      style.textContent = `@font-face { font-family: '${family}'; src: url('${url}'); }`;
-      document.head.appendChild(style);
-
-      const updatedFonts = [...(state.customFonts || []), newFont];
-      updateState({ customFonts: updatedFonts });
-
-      await firebase.firestore().collection('profiles').doc(user.uid).update({
-        customFonts: updatedFonts
-      });
-      return family;
-    } catch (e: any) {
-      console.error('Error al subir tipografía:', e);
-      alert(`Error al subir la tipografía: ${e?.message || 'Error desconocido'}`);
-      return null;
-    } finally {
-      setUploadingFont(false);
-    }
-  };
-
   const removeCustomFont = async (family: string) => {
     const user = firebase.auth().currentUser;
     if (!user) return;
@@ -262,48 +169,6 @@ const SidebarModules: React.FC<SidebarProps> = ({
     const styleEl = document.getElementById(`custom-font-${family}`);
     if (styleEl) styleEl.remove();
   };
-
-  const saveBrandKits = async (kits: BrandKit[]) => {
-    const user = firebase.auth().currentUser;
-    if (!user) return;
-    updateState({ brandKits: kits });
-    await firebase.firestore().collection('profiles').doc(user.uid).update({ brandKits: kits });
-  };
-
-  const applyBrandKit = (kit: BrandKit) => {
-    const logoUrl = kit.logoUrls[0] ?? state.logo.url;
-    const resourceUrl = kit.resourceUrls[0] ?? state.resource.url;
-    updateState({
-      logo: { ...state.logo, url: logoUrl || null },
-      resource: { ...state.resource, url: resourceUrl || null },
-      backgroundOverlayColor: kit.overlayColor ?? state.backgroundOverlayColor,
-      ctaBgColor: kit.ctaBgColor,
-      textLayers: {
-        headline:    { ...state.textLayers.headline,    font: kit.headlineFont,    color: kit.headlineColor },
-        description: { ...state.textLayers.description, font: kit.descriptionFont, color: kit.descriptionColor },
-        additional:  { ...state.textLayers.additional,  font: kit.additionalFont,  color: kit.additionalColor },
-        cta:         { ...state.textLayers.cta,         font: kit.ctaFont,         color: kit.ctaColor },
-      }
-    });
-  };
-
-  const createEmptyKit = (): BrandKit => ({
-    id: `kit_${Date.now()}`,
-    name: '',
-    logoUrls: state.logo.url ? [state.logo.url] : [],
-    resourceUrls: state.resource.url ? [state.resource.url] : [],
-    headlineFont: state.textLayers.headline.font,
-    descriptionFont: state.textLayers.description.font,
-    additionalFont: state.textLayers.additional.font,
-    ctaFont: state.textLayers.cta.font,
-    headlineColor: state.textLayers.headline.color,
-    descriptionColor: state.textLayers.description.color,
-    additionalColor: state.textLayers.additional.color,
-    ctaColor: state.textLayers.cta.color,
-    ctaBgColor: state.ctaBgColor,
-    brandColors: [...state.extractedColors, ...state.extractedBackgroundColors].slice(0, 6),
-    overlayColor: state.backgroundOverlayColor,
-  });
 
   const updateTextLayer = (key: keyof typeof state.textLayers, updates: Partial<TextLayer>) => {
     const newLayers = { ...state.textLayers };
@@ -322,12 +187,13 @@ const SidebarModules: React.FC<SidebarProps> = ({
     updateState({ selectedCopyIndex: newIndex });
   };
 
-  const generateAI = async (genType: 'image' | 'improve' | 'copy') => {
-    if (genType === 'image' && !promptIA.trim()) {
+  const generateAI = async (genType: 'image' | 'improve' | 'copy', overridePrompt?: string) => {
+    const effectivePrompt = overridePrompt ?? promptIA;
+    if (genType === 'image' && !effectivePrompt.trim()) {
       alert('Por favor, ingresa una idea para la imagen.');
       return;
     }
-    if (genType === 'improve' && !promptIA.trim() && !tempImproveImage) {
+    if (genType === 'improve' && !effectivePrompt.trim() && !tempImproveImage) {
       alert('Por favor, selecciona una imagen a mejorar o describe los cambios.');
       return;
     }
@@ -339,7 +205,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: promptIA,
+            prompt: effectivePrompt,
             genType,
             tempImproveImage: tempImproveImage || null,
             activeLayout
@@ -361,7 +227,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
           await updateUsage(15000); 
 
           updateState({ 
-            imageVariants: [{ id: String(Date.now()), url: String(data.imageUrl), prompt: String(promptIA || 'AI Improved Post') }, ...state.imageVariants],
+            imageVariants: [{ id: String(Date.now()), url: String(data.imageUrl), prompt: String(effectivePrompt || 'AI Improved Post') }, ...state.imageVariants],
             selectedVariantIndex: 0
           });
           setTempImproveImage(null);
@@ -455,13 +321,11 @@ const SidebarModules: React.FC<SidebarProps> = ({
   };
 
   const BrandColorPalette: React.FC<{ onSelect: (color: string) => void }> = ({ onSelect }) => {
-    const palette = [...state.extractedColors, ...state.extractedBackgroundColors];
-    const uniquePalette = Array.from(new Set(palette));
-
+    if (brandPalette.length === 0) return null;
     return (
       <div className="space-y-3 mb-2 animate-in fade-in slide-in-from-top-1">
         <div className="flex flex-wrap gap-2 px-1">
-          {uniquePalette.map(color => (
+          {brandPalette.map(color => (
             <button key={String(color)} onClick={() => onSelect(String(color))} className="w-5 h-5 rounded-md border border-white shadow-sm" style={{ backgroundColor: String(color) }} />
           ))}
         </div>
@@ -532,19 +396,8 @@ const SidebarModules: React.FC<SidebarProps> = ({
                 ))}
               </div>
             )}
-
-            <button
-              onClick={() => { setFontUploadCallback((family) => updateTextLayer(key, { font: family })); fontInputRef.current?.click(); }}
-              disabled={uploadingFont}
-              className="flex items-center gap-1.5 text-[9px] font-black text-[#EA5B25] uppercase tracking-widest hover:text-orange-600 transition-colors disabled:opacity-40"
-            >
-              {uploadingFont
-                ? <><i className="fa-solid fa-circle-notch animate-spin text-[8px]"></i> Subiendo...</>
-                : <><i className="fa-solid fa-arrow-up-from-bracket text-[8px]"></i> Subir tipografía propia</>
-              }
-            </button>
           </div>
-          
+
           <div className="space-y-2">
             <div className="flex justify-between items-center px-1">
               <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Tamaño Texto</span>
@@ -654,7 +507,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
             <div className="space-y-2 pt-2">
               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1">Color de Fondo del Botón</span>
               <div className="flex flex-wrap gap-1.5 mb-2 px-1">
-                {[...state.extractedColors, ...state.extractedBackgroundColors].slice(0, 10).map(c => (
+                {brandPalette.slice(0, 10).map(c => (
                   <button key={`cta-bg-${String(c)}`} onClick={() => updateState({ ctaBgColor: String(c) })} className="w-5 h-5 rounded-md border border-white shadow-sm" style={{ backgroundColor: String(c) }} />
                 ))}
               </div>
@@ -1360,293 +1213,10 @@ const SidebarModules: React.FC<SidebarProps> = ({
         </div>
       </Accordion>
 
-      <input
-        type="file"
-        ref={fontInputRef}
-        className="hidden"
-        accept=".ttf,.otf,.woff,.woff2"
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            const newFamily = await handleFontUpload(file);
-            if (newFamily && fontUploadCallback) {
-              fontUploadCallback(newFamily);
-            }
-            setFontUploadCallback(null);
-          }
-          e.target.value = '';
-        }}
-      />
-
       <Accordion title="TEXTOS" icon="fa-font" isOpen={openSection === 'TEXTOS'} onToggle={() => setOpenSection(openSection === 'TEXTOS' ? null : 'TEXTOS')}>
         <div className="space-y-2">{renderTextEditor('headline', 'Título')}{renderTextEditor('description', 'Descripción')}{renderTextEditor('additional', 'Texto Adicional')}{renderTextEditor('cta', 'Botón')}</div>
       </Accordion>
 
-      <Accordion title="KIT DE MARCA" icon="fa-palette" isOpen={openSection === 'BRANDKIT'} onToggle={() => setOpenSection(openSection === 'BRANDKIT' ? null : 'BRANDKIT')}>
-        <div className="space-y-6">
-          {editingKit ? (
-            /* ── KIT EDITOR ── */
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] font-black text-[#EA5B25] uppercase tracking-widest">{editingKit.id.startsWith('kit_') && !state.brandKits.find(k => k.id === editingKit.id) ? 'Nuevo Kit' : 'Editar Kit'}</span>
-                <button onClick={() => setEditingKit(null)} className="text-slate-400 hover:text-slate-600 text-[10px] font-black uppercase tracking-widest">← VOLVER</button>
-              </div>
-
-              <div className="space-y-2">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Nombre del Kit</span>
-                <input
-                  type="text"
-                  value={editingKit.name}
-                  onChange={(e) => setEditingKit({ ...editingKit, name: e.target.value })}
-                  placeholder="Ej: Kit Principal, Temporada Verano..."
-                  className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-100"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Logos del Kit</span>
-                {state.logoLibrary.length > 0 ? (
-                  <div className="grid grid-cols-4 gap-2">
-                    {state.logoLibrary.map((url, idx) => {
-                      const selected = editingKit.logoUrls.includes(url);
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            const urls = selected
-                              ? editingKit.logoUrls.filter(u => u !== url)
-                              : [...editingKit.logoUrls, url];
-                            setEditingKit({ ...editingKit, logoUrls: urls });
-                          }}
-                          className={`aspect-square bg-slate-50 rounded-xl p-1.5 border-2 transition-all flex items-center justify-center overflow-hidden ${selected ? 'border-[#EA5B25] shadow-lg shadow-orange-100' : 'border-slate-100 hover:border-slate-200'}`}
-                        >
-                          <img src={url} className="max-w-full max-h-full object-contain" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-[9px] text-slate-300 font-medium">Primero sube logos en la sección LOGO.</p>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Recursos del Kit</span>
-                {state.resourceLibrary.length > 0 ? (
-                  <div className="grid grid-cols-4 gap-2">
-                    {state.resourceLibrary.map((url, idx) => {
-                      const selected = editingKit.resourceUrls.includes(url);
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            const urls = selected
-                              ? editingKit.resourceUrls.filter(u => u !== url)
-                              : [...editingKit.resourceUrls, url];
-                            setEditingKit({ ...editingKit, resourceUrls: urls });
-                          }}
-                          className={`aspect-square bg-slate-50 rounded-xl p-1.5 border-2 transition-all flex items-center justify-center overflow-hidden ${selected ? 'border-[#EA5B25] shadow-lg shadow-orange-100' : 'border-slate-100 hover:border-slate-200'}`}
-                        >
-                          <img src={url} className="max-w-full max-h-full object-contain" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-[9px] text-slate-300 font-medium">Primero sube recursos en la sección RECURSOS.</p>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tipografías</span>
-                {(['headlineFont', 'descriptionFont', 'additionalFont', 'ctaFont'] as const).map((field) => {
-                  const labels: Record<string, string> = { headlineFont: 'Título', descriptionFont: 'Descripción', additionalFont: 'Adicional', ctaFont: 'Botón' };
-                  return (
-                    <div key={field} className="space-y-1">
-                      <span className="text-[8px] font-black text-slate-300 uppercase">{labels[field]}</span>
-                      <select
-                        value={editingKit[field]}
-                        onChange={(e) => setEditingKit({ ...editingKit, [field]: e.target.value })}
-                        className="w-full bg-slate-50 border border-slate-100 rounded-lg p-2 text-[11px] font-bold outline-none"
-                      >
-                        <optgroup label="Sistema">{SYSTEM_FONTS.map(f => <option key={f} value={f}>{f}</option>)}</optgroup>
-                        {(state.customFonts || []).length > 0 && <optgroup label="Mis Tipografías">{(state.customFonts || []).map(f => <option key={f.family} value={f.family}>{f.name}</option>)}</optgroup>}
-                      </select>
-                      <button
-                        onClick={() => { setFontUploadCallback((family) => setEditingKit(prev => prev ? { ...prev, [field]: family } : prev)); fontInputRef.current?.click(); }}
-                        disabled={uploadingFont}
-                        className="flex items-center gap-1.5 text-[9px] font-black text-[#EA5B25] uppercase tracking-widest hover:text-orange-600 transition-colors disabled:opacity-40 mt-1"
-                      >
-                        {uploadingFont
-                          ? <><i className="fa-solid fa-circle-notch animate-spin text-[8px]"></i> Subiendo...</>
-                          : <><i className="fa-solid fa-arrow-up-from-bracket text-[8px]"></i> Subir tipografía propia</>
-                        }
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="space-y-4">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Colores de Texto</span>
-                {([
-                  ['headlineColor', 'Título'],
-                  ['descriptionColor', 'Descripción'],
-                  ['additionalColor', 'Adicional'],
-                  ['ctaColor', 'Texto Botón'],
-                  ['ctaBgColor', 'Fondo Botón'],
-                ] as const).map(([field, label]) => (
-                  <div key={field} className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={editingKit[field] || '#000000'}
-                      onChange={(e) => setEditingKit({ ...editingKit, [field]: e.target.value })}
-                      className="w-10 h-10 p-0.5 bg-white border border-slate-100 rounded-lg cursor-pointer shrink-0"
-                    />
-                    <span className="text-[10px] font-bold text-slate-500">{label}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={editingKit.overlayColor || '#000000'}
-                    onChange={(e) => setEditingKit({ ...editingKit, overlayColor: e.target.value })}
-                    className="w-10 h-10 p-0.5 bg-white border border-slate-100 rounded-lg cursor-pointer shrink-0"
-                  />
-                  <span className="text-[10px] font-bold text-slate-500">Color de Overlay</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Colores de Marca</span>
-                <div className="flex flex-wrap gap-2">
-                  {editingKit.brandColors.map((color, idx) => (
-                    <div key={idx} className="relative group">
-                      <input
-                        type="color"
-                        value={color}
-                        onChange={(e) => {
-                          const colors = [...editingKit.brandColors];
-                          colors[idx] = e.target.value;
-                          setEditingKit({ ...editingKit, brandColors: colors });
-                        }}
-                        className="w-8 h-8 p-0.5 bg-white border border-slate-100 rounded-lg cursor-pointer"
-                      />
-                      <button
-                        onClick={() => setEditingKit({ ...editingKit, brandColors: editingKit.brandColors.filter((_, i) => i !== idx) })}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-900 text-white text-[7px] rounded-full hidden group-hover:flex items-center justify-center"
-                      >✕</button>
-                    </div>
-                  ))}
-                  {editingKit.brandColors.length < 8 && (
-                    <button
-                      onClick={() => setEditingKit({ ...editingKit, brandColors: [...editingKit.brandColors, '#000000'] })}
-                      className="w-8 h-8 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-300 hover:border-slate-400 transition-colors"
-                    >+</button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setEditingKit(null)}
-                  className="flex-1 py-3 bg-white border border-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  CANCELAR
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!editingKit.name.trim()) { alert('Por favor, asigna un nombre al kit.'); return; }
-                    const existing = state.brandKits.findIndex(k => k.id === editingKit.id);
-                    const updated = existing >= 0
-                      ? state.brandKits.map(k => k.id === editingKit.id ? editingKit : k)
-                      : [...state.brandKits, editingKit];
-                    await saveBrandKits(updated);
-                    setEditingKit(null);
-                  }}
-                  className="flex-1 py-3 bg-[#EA5B25] text-white rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-orange-100"
-                >
-                  GUARDAR KIT
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* ── KIT LIST ── */
-            <div className="space-y-4">
-              {state.brandKits.length === 0 ? (
-                <div className="py-8 text-center space-y-3">
-                  <i className="fa-solid fa-palette text-slate-100 text-4xl"></i>
-                  <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest leading-relaxed">Sin kits de marca.<br/>Crea tu primer kit.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {state.brandKits.map(kit => (
-                    <div key={kit.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black text-slate-800">{kit.name}</span>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setEditingKit(kit)}
-                            className="w-7 h-7 bg-white border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
-                            title="Editar"
-                          >
-                            <i className="fa-solid fa-pen text-[9px]"></i>
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (window.confirm(`¿Eliminar el kit "${kit.name}"?`)) {
-                                await saveBrandKits(state.brandKits.filter(k => k.id !== kit.id));
-                              }
-                            }}
-                            className="w-7 h-7 bg-white border border-red-100 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 transition-colors"
-                            title="Eliminar"
-                          >
-                            <i className="fa-solid fa-trash text-[9px]"></i>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        {kit.logoUrls[0] && (
-                          <div className="w-10 h-10 bg-white border border-slate-100 rounded-lg flex items-center justify-center overflow-hidden shrink-0 p-1">
-                            <img src={kit.logoUrls[0]} className="max-w-full max-h-full object-contain" />
-                          </div>
-                        )}
-                        <div className="flex gap-1 flex-wrap flex-1">
-                          {kit.brandColors.map((color, i) => (
-                            <div key={i} className="w-5 h-5 rounded-md border border-white shadow-sm shrink-0" style={{ backgroundColor: color }} />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-1.5 text-[9px] text-slate-400 font-medium">
-                        <span>Título: <span className="font-black text-slate-600">{kit.headlineFont.split(' ')[0]}</span></span>
-                        <span>Desc: <span className="font-black text-slate-600">{kit.descriptionFont.split(' ')[0]}</span></span>
-                      </div>
-
-                      <button
-                        onClick={() => applyBrandKit(kit)}
-                        className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
-                      >
-                        APLICAR KIT
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={() => setEditingKit(createEmptyKit())}
-                className="w-full py-4 border-2 border-dashed border-slate-200 text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-[#EA5B25] hover:text-[#EA5B25] transition-all"
-              >
-                + CREAR NUEVO KIT
-              </button>
-            </div>
-          )}
-        </div>
-      </Accordion>
 
       <Accordion title="REDACTOR IA" icon="fa-quote-right" isOpen={openSection === 'COPY'} onToggle={() => setOpenSection(openSection === 'COPY' ? null : 'COPY')}>
         <div className="space-y-6">

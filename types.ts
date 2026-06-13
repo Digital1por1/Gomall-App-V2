@@ -24,6 +24,11 @@ export interface UserProfile {
   isBlocked?: boolean;
   email?: string;
   usage?: UsageData;
+  // Identidad de marca (onboarding)
+  companyStory?: string;
+  industry?: string;
+  brandTone?: string;
+  onboardingCompleted?: boolean;
   logoLibrary?: string[];
   resourceLibrary?: string[];
   backgroundLibrary?: string[];
@@ -31,6 +36,7 @@ export interface UserProfile {
   currentResourceUrl?: string;
   brandKits?: BrandKit[];
   customFonts?: CustomFont[];
+  campaigns?: Campaign[];
   lastUsedFonts?: {
     headline: string;
     description: string;
@@ -110,6 +116,29 @@ export interface BrandKit {
   ctaBgColor: string;
   brandColors: string[];
   overlayColor?: string;
+}
+
+export interface CampaignPiece {
+  id: string;
+  type: 'imagen' | 'reel' | 'copy';
+  title: string;
+  format: string;        // ej: "Feed 4:5", "Story 9:16", "Reel 9:16"
+  imagePrompt: string;   // prompt sugerido para generar la imagen/reel
+  copy: string;          // caption/copy sugerido
+  rationale: string;     // por qué se recomienda esta pieza
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  objective: string;
+  audience: string;
+  product: string;
+  dates: string;
+  platforms: string[];
+  keyMessage: string;
+  pieces: CampaignPiece[];
+  createdAt: number;
 }
 
 export interface ProjectState {

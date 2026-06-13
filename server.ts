@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 async function startServer() {
   const app = express();
@@ -12,7 +12,7 @@ async function startServer() {
 
   app.post("/api/generate", async (req, res) => {
     try {
-      const { prompt, genType, tempImproveImage, activeLayout, textParts } = req.body;
+      const { prompt, genType, tempImproveImage, activeLayout, textParts, campaignBrief, brandContext } = req.body;
       
       const isStory = activeLayout === 'story';
       const ratioBlock = isStory
@@ -150,6 +150,78 @@ USER REQUEST: ${String(prompt)}`
           }
         }
         res.json({ imageUrl: foundImageUrl });
+      } else if (genType === 'campaign') {
+        const brief = campaignBrief || {};
+        const brand = brandContext || {};
+
+        const campaignPrompt = `Sos un estratega de marketing y director creativo senior. Tu trabajo es diseñar una campaña de contenido para redes sociales (Instagram) completa y accionable.
+
+CONTEXTO DE LA MARCA:
+- Negocio: ${String(brand.business || 'Sin especificar')}
+- Rubro: ${String(brand.industry || 'Sin especificar')}
+- Tono de marca: ${String(brand.brandTone || 'Sin especificar')}
+- Historia / descripción: ${String(brand.companyStory || 'Sin especificar')}
+
+BRIEF DE LA CAMPAÑA:
+- Objetivo: ${String(brief.objective || 'Sin especificar')}
+- Producto o servicio destacado: ${String(brief.product || 'Sin especificar')}
+- Público objetivo: ${String(brief.audience || 'Sin especificar')}
+- Fechas / temporada: ${String(brief.dates || 'Sin especificar')}
+- Plataformas: ${Array.isArray(brief.platforms) ? brief.platforms.join(', ') : 'Instagram'}
+- Mensaje clave / oferta: ${String(brief.keyMessage || 'Sin especificar')}
+- Cantidad de piezas deseadas: ${String(brief.pieceCount || 4)}
+
+INSTRUCCIONES:
+1. Proponé exactamente ${String(brief.pieceCount || 4)} piezas de contenido coherentes entre sí y alineadas al objetivo y al rubro "${String(brand.industry || '')}".
+2. Mezclá tipos de pieza segun convenga: "imagen" (post de feed), "reel" (video corto) y "copy" (solo texto/caption).
+3. Para cada pieza:
+   - "type": uno de exactamente "imagen", "reel" o "copy".
+   - "title": nombre corto y descriptivo de la pieza.
+   - "format": formato sugerido, ej "Feed 4:5", "Story 9:16" o "Reel 9:16".
+   - "imagePrompt": un prompt DETALLADO en inglés para generar la imagen o el visual del reel (describí escena, estilo fotográfico, iluminación, composición). Si la pieza es "copy" puro, dejá un prompt visual igualmente útil como portada.
+   - "copy": el texto/caption en español, persuasivo y acorde al tono de marca, sin incitar a "hacer click".
+   - "rationale": una frase breve en español explicando por qué esta pieza ayuda a cumplir el objetivo.
+4. El campo "name" es un nombre creativo y corto para la campaña completa.
+5. No incluyas nombres de tiendas dentro de los copies si no aportan valor; enfocate en beneficios.`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ role: 'user', parts: [{ text: campaignPrompt }] }],
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                pieces: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      title: { type: Type.STRING },
+                      format: { type: Type.STRING },
+                      imagePrompt: { type: Type.STRING },
+                      copy: { type: Type.STRING },
+                      rationale: { type: Type.STRING }
+                    },
+                    required: ['type', 'title', 'format', 'imagePrompt', 'copy', 'rationale']
+                  }
+                }
+              },
+              required: ['name', 'pieces']
+            }
+          }
+        });
+
+        let text = '';
+        if (typeof response?.text === 'string') {
+          text = response.text;
+        } else {
+          const parts = response?.candidates?.[0]?.content?.parts || [];
+          text = parts.map((p: any) => p?.text || '').join('').trim();
+        }
+        res.json({ text });
       } else {
         res.status(400).json({ error: 'Invalid genType' });
       }
