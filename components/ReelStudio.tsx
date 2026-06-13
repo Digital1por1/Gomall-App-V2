@@ -332,7 +332,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Video · Música · Subtítulos</span>
           </div>
         </div>
-        <button onClick={onClose} className="h-10 w-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl hover:text-slate-600 transition-all active:scale-95"><i className="fa-solid fa-xmark text-lg"></i></button>
+        <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-arrow-left"></i> Volver</button>
       </header>
 
       <div className="flex-1 overflow-y-auto">

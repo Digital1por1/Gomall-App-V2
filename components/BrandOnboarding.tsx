@@ -146,8 +146,9 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
   const labelClass = "text-[10px] font-black text-slate-400 uppercase tracking-widest px-1";
 
   return (
-    <div className="h-screen w-full flex flex-col items-center justify-center bg-[#F8F9FA] p-4 sm:p-6">
-      <div className="max-w-lg w-full bg-white rounded-[40px] p-8 sm:p-10 shadow-xl border border-slate-50 space-y-7 animate-in slide-in-from-bottom-10 duration-500 overflow-y-auto max-h-[92vh]">
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-[#FBFBFD] to-[#F1F2F6] p-4 sm:p-6">
+      <div className="max-w-lg w-full bg-white rounded-[40px] shadow-2xl shadow-slate-300/40 border border-slate-100 animate-in slide-in-from-bottom-10 duration-500 flex flex-col max-h-[94vh] overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-8 sm:p-10 space-y-7">
         {/* Encabezado + progreso */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -203,9 +204,9 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
               )}
             </div>
             <div className="space-y-2">
-              <label className={labelClass}>Historia de la empresa <span className="text-slate-300 normal-case font-bold">(opcional)</span></label>
-              <textarea placeholder="Contanos qué hace tu marca, qué la hace especial, a quién le habla..." rows={5} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none" value={companyStory} onChange={(e) => setCompanyStory(e.target.value)} />
-              <p className="text-[9px] text-slate-300 font-bold px-1">Cuanto más detalle, mejores recomendaciones hace la IA.</p>
+              <label className={labelClass}>Historia de la empresa <span className="text-[#EA5B25] normal-case font-bold">(cuanto más detallada, mejor)</span></label>
+              <textarea placeholder="Contanos qué hace tu marca, qué vende, qué la hace especial, a quién le habla, su estilo y valores..." rows={6} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none" value={companyStory} onChange={(e) => setCompanyStory(e.target.value)} />
+              <p className="text-[9px] text-slate-400 font-bold px-1"><i className="fa-solid fa-wand-magic-sparkles text-[#EA5B25] mr-1"></i>La IA usa esto para crear tus campañas: mientras más contexto le des, mejores serán las recomendaciones.</p>
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Tono de marca</label>
@@ -284,32 +285,31 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
           </div>
         )}
 
-        {/* Navegación */}
-        <div className="flex gap-3 pt-2">
-          {step > 1 && (
-            <button onClick={() => setStep(step - 1)} className="px-6 h-14 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">Atrás</button>
-          )}
-          {step < 3 && (
-            <button
-              onClick={() => setStep(step + 1)}
-              disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid)}
-              className="flex-1 h-14 bg-[#EA5B25] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 disabled:opacity-40 transition-all"
-            >Continuar</button>
-          )}
-          {step === 3 && (
-            <button
-              onClick={handleFinish}
-              disabled={!step3Valid || saving}
-              className="flex-1 h-14 bg-[#EA5B25] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 disabled:opacity-40 transition-all"
-            >{saving ? 'Guardando...' : 'Empezar a crear'}</button>
+        </div>{/* fin del contenido scrolleable */}
+
+        {/* Footer fijo: la navegación queda siempre visible */}
+        <div className="shrink-0 border-t border-slate-100 bg-white/95 backdrop-blur px-8 sm:px-10 py-5 space-y-2">
+          <div className="flex gap-3">
+            {step > 1 && (
+              <button onClick={() => setStep(step - 1)} className="px-6 h-14 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">Atrás</button>
+            )}
+            {step < 3 && (
+              <button
+                onClick={() => setStep(step + 1)}
+                disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid)}
+                className="flex-1 h-14 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-orange-200/50 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none transition-all">Continuar</button>
+            )}
+            {step === 3 && (
+              <button
+                onClick={handleFinish}
+                disabled={!step3Valid || saving}
+                className="flex-1 h-14 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-orange-200/50 active:scale-[0.98] disabled:opacity-40 transition-all">{saving ? 'Guardando...' : 'Empezar a crear'}</button>
+            )}
+          </div>
+          {step === 2 && !step2Valid && step2Missing.length > 0 && (
+            <p className="text-[9px] text-[#EA5B25] font-bold text-center">Para continuar: {step2Missing.join(' y ')}.</p>
           )}
         </div>
-        {step === 2 && !step2Valid && step2Missing.length > 0 && (
-          <p className="text-[9px] text-[#EA5B25] font-bold text-center">Para continuar: {step2Missing.join(' y ')}.</p>
-        )}
-        {step === 3 && !step3Valid && (
-          <p className="text-[9px] text-slate-300 font-bold text-center">Subí al menos un logo para continuar.</p>
-        )}
       </div>
     </div>
   );

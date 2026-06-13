@@ -8,6 +8,7 @@ import AdminDashboard from './components/AdminDashboard';
 import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
+import BrandSettings from './components/BrandSettings';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -131,6 +132,7 @@ const App: React.FC = () => {
   const [githubToken, setGithubToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [showAdmin, setShowAdmin] = useState(false);
   const [showCampaigns, setShowCampaigns] = useState(false);
+  const [showBrand, setShowBrand] = useState(false);
   const [showReels, setShowReels] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -1051,6 +1053,14 @@ const App: React.FC = () => {
           initialCopy={reelCopy}
         />
       )}
+      {showBrand && user && (
+        <BrandSettings
+          profile={profile}
+          userId={user.uid}
+          onClose={() => setShowBrand(false)}
+          compressBase64Image={compressBase64Image}
+        />
+      )}
       
       {isBlocked && (
         <div className="absolute inset-0 z-[100] bg-white/60 backdrop-blur-xl flex items-center justify-center p-6 text-center animate-in fade-in duration-500">
@@ -1101,8 +1111,16 @@ const App: React.FC = () => {
         </div>
         <div className="w-1/4 flex justify-end items-center gap-2">
           <button
+            onClick={() => setShowBrand(true)}
+            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-orange-200 hover:text-[#EA5B25]"
+            title="Mi Marca"
+          >
+            <i className="fa-solid fa-gem text-sm sm:text-base"></i>
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Marca</span>
+          </button>
+          <button
             onClick={() => setShowCampaigns(true)}
-            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-[#EA5B25] text-white rounded-xl transition-all shadow-sm active:scale-95 hover:bg-[#d44e1e]"
+            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-xl transition-all shadow-md shadow-orange-200/50 active:scale-95 hover:shadow-lg hover:shadow-orange-200/60"
             title="Campañas IA"
           >
             <i className="fa-solid fa-bullhorn text-sm sm:text-base"></i>
@@ -1110,7 +1128,7 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => { setReelCopy(null); setShowReels(true); }}
-            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-purple-600 text-white rounded-xl transition-all shadow-sm active:scale-95 hover:bg-purple-700"
+            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl transition-all shadow-md shadow-purple-200/50 active:scale-95 hover:shadow-lg hover:shadow-purple-200/60"
             title="Editor de Reels"
           >
             <i className="fa-solid fa-film text-sm sm:text-base"></i>
