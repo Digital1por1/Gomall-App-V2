@@ -328,7 +328,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center"><i className="fa-solid fa-film text-lg"></i></div>
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">Editor de Reels</h2>
+            <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Editor de Reels</h2>
             <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Video · Música · Subtítulos</span>
           </div>
         </div>
@@ -340,7 +340,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           <div className="h-full flex flex-col items-center justify-center p-8 text-center gap-5">
             <div className="w-20 h-20 bg-purple-50 text-purple-300 rounded-[32px] flex items-center justify-center"><i className="fa-solid fa-film text-3xl"></i></div>
             <div className="space-y-1">
-              <h3 className="text-xl font-black text-slate-900">Subí un video para empezar</h3>
+              <h3 className="font-display text-2xl text-slate-900">Subí un video para empezar</h3>
               <p className="text-slate-400 text-sm">Lo recortamos a formato Reel (9:16) y le sumás música y subtítulos.</p>
             </div>
             <label className="px-6 h-14 bg-purple-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center gap-3 cursor-pointer">

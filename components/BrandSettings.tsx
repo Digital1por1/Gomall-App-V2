@@ -141,7 +141,7 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-200/50"><i className="fa-solid fa-gem text-lg"></i></div>
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">Mi Marca</h2>
+            <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Mi Marca</h2>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Identidad · logos · tipografías</span>
           </div>
         </div>

@@ -73,7 +73,7 @@ const ProductAdStudio: React.FC<ProductAdStudioProps> = ({ profile, onClose, upd
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 bg-gradient-to-br from-emerald-500 to-teal-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/50"><i className="fa-solid fa-box-open text-lg"></i></div>
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">Producto → Publicidad</h2>
+            <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Producto → Publicidad</h2>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Subí tu producto, la IA lo convierte en un aviso</span>
           </div>
         </div>

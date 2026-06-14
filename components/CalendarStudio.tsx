@@ -110,7 +110,7 @@ const CalendarStudio: React.FC<CalendarStudioProps> = ({ profile, userId, onClos
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 bg-gradient-to-br from-sky-500 to-blue-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-sky-200/50"><i className="fa-solid fa-calendar-days text-lg"></i></div>
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">Calendario</h2>
+            <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Calendario</h2>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Qué publicar y cuándo</span>
           </div>
         </div>

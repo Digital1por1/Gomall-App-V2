@@ -147,7 +147,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-orange-50 text-[#EA5B25] rounded-2xl flex items-center justify-center"><i className="fa-solid fa-bullhorn text-lg"></i></div>
           <div>
-            <h2 className="text-lg font-black text-slate-900 tracking-tight leading-none">Campañas IA</h2>
+            <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Campañas IA</h2>
             <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Estrategia de contenido</span>
           </div>
         </div>
@@ -190,7 +190,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
           {view === 'brief' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
               <div className="space-y-1">
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Brief de campaña</h3>
+                <h3 className="font-display text-[22px] text-slate-900 tracking-tight">Brief de campaña</h3>
                 <p className="text-slate-400 text-sm">La IA usará tu marca y rubro ({profile?.industry || 'sin rubro'}) para recomendar contenido.</p>
               </div>
 
@@ -256,7 +256,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
             <div className="space-y-6 animate-in fade-in duration-300">
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1">
-                  <h3 className="text-2xl font-black text-slate-900 tracking-tight">{activeCampaign.name}</h3>
+                  <h3 className="font-display text-[22px] text-slate-900 tracking-tight">{activeCampaign.name}</h3>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{activeCampaign.objective} · {activeCampaign.pieces.length} piezas</p>
                 </div>
                 <button onClick={() => setView('list')} className="text-[9px] font-black text-slate-300 uppercase tracking-widest hover:text-[#EA5B25] transition-colors shrink-0 pt-2">← Volver</button>

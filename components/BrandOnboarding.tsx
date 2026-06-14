@@ -174,7 +174,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
             <button onClick={onLogout} className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] hover:text-[#EA5B25] transition-colors">Salir</button>
           </div>
           <div className="space-y-1">
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            <h2 className="font-display text-[26px] text-slate-900 tracking-tight">
               {step === 1 && 'Tu perfil'}
               {step === 2 && 'Tu historia de marca'}
               {step === 3 && 'Tu identidad visual'}
