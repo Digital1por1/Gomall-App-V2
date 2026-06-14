@@ -1213,6 +1213,28 @@ const SidebarModules: React.FC<SidebarProps> = ({
         </div>
       </Accordion>
 
+      {onApplyTemplate && (
+        <Accordion title="PLANTILLAS" icon="fa-wand-magic-sparkles" isOpen={openSection === 'TEMPLATES'} onToggle={() => setOpenSection(openSection === 'TEMPLATES' ? null : 'TEMPLATES')}>
+          <div className="space-y-3">
+            <p className="text-[10px] text-slate-400 font-bold leading-relaxed">Acomoda tus textos en un diseño profesional con un clic. Usa las tipografías y colores de tu marca.</p>
+            <div className="grid grid-cols-2 gap-2.5">
+              {([
+                { id: 'classic', label: 'Clásico', desc: 'Centrado y equilibrado', icon: 'fa-align-center' },
+                { id: 'editorial', label: 'Editorial', desc: 'Alineado a la izquierda', icon: 'fa-align-left' },
+                { id: 'bold', label: 'Bold', desc: 'Título grande, alto impacto', icon: 'fa-bolt' },
+                { id: 'minimal', label: 'Minimal', desc: 'Texto abajo, mucho aire', icon: 'fa-feather' },
+              ] as const).map(t => (
+                <button key={t.id} onClick={() => onApplyTemplate(t.id)} className="text-left p-3.5 rounded-2xl border border-slate-100 bg-slate-50 hover:border-[#EA5B25] hover:bg-orange-50/50 transition-all active:scale-[0.98] group">
+                  <div className="w-8 h-8 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 group-hover:text-[#EA5B25] mb-2 transition-colors"><i className={`fa-solid ${t.icon} text-xs`}></i></div>
+                  <p className="text-[11px] font-black text-slate-800 uppercase tracking-wide">{t.label}</p>
+                  <p className="text-[9px] text-slate-400 font-bold leading-tight mt-0.5">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Accordion>
+      )}
+
       <Accordion title="TEXTOS" icon="fa-font" isOpen={openSection === 'TEXTOS'} onToggle={() => setOpenSection(openSection === 'TEXTOS' ? null : 'TEXTOS')}>
         <div className="space-y-2">{renderTextEditor('headline', 'Título')}{renderTextEditor('description', 'Descripción')}{renderTextEditor('additional', 'Texto Adicional')}{renderTextEditor('cta', 'Botón')}</div>
       </Accordion>

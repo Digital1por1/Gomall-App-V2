@@ -10,6 +10,7 @@ import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
 import BrandSettings from './components/BrandSettings';
 import CalendarStudio from './components/CalendarStudio';
+import ProductAdStudio from './components/ProductAdStudio';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -137,6 +138,7 @@ const App: React.FC = () => {
   const [showCalendar, setShowCalendar] = useState(false);
   const [showBrand, setShowBrand] = useState(false);
   const [showReels, setShowReels] = useState(false);
+  const [showProductAd, setShowProductAd] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
@@ -525,6 +527,73 @@ const App: React.FC = () => {
     if (isBlocked) return;
     setState(prev => ({ ...prev, ...updates }));
   }, [isBlocked]);
+
+  // Plantillas de auto-diseño: reordena las capas de texto en layouts profesionales
+  // y aplica las fuentes/colores de la marca, sin que el usuario tenga que ajustar nada.
+  const applyTemplate = (type: 'classic' | 'editorial' | 'bold' | 'minimal') => {
+    if (isBlocked) return;
+    const kit = profile?.brandKits?.[0];
+    const layouts: Record<string, any> = {
+      classic: {
+        overlay: 25,
+        headline:    { align: 'center', size: 34, feed: { x: 50, y: 40 }, story: { x: 50, y: 44 } },
+        description: { align: 'center', size: 17, feed: { x: 50, y: 55 }, story: { x: 50, y: 56 } },
+        additional:  { align: 'center', size: 14, feed: { x: 50, y: 64 }, story: { x: 50, y: 64 } },
+        cta:         { align: 'center', size: 14, feed: { x: 50, y: 80 }, story: { x: 50, y: 78 } },
+      },
+      editorial: {
+        overlay: 32,
+        headline:    { align: 'left', size: 30, feed: { x: 32, y: 58 }, story: { x: 34, y: 56 } },
+        description: { align: 'left', size: 15, feed: { x: 32, y: 70 }, story: { x: 34, y: 66 } },
+        additional:  { align: 'left', size: 13, feed: { x: 32, y: 78 }, story: { x: 34, y: 73 } },
+        cta:         { align: 'left', size: 13, feed: { x: 28, y: 87 }, story: { x: 30, y: 80 } },
+      },
+      bold: {
+        overlay: 45,
+        headline:    { align: 'center', size: 46, feed: { x: 50, y: 44 }, story: { x: 50, y: 46 } },
+        description: { align: 'center', size: 18, feed: { x: 50, y: 62 }, story: { x: 50, y: 62 } },
+        additional:  { align: 'center', size: 14, feed: { x: 50, y: 70 }, story: { x: 50, y: 70 } },
+        cta:         { align: 'center', size: 15, feed: { x: 50, y: 82 }, story: { x: 50, y: 79 } },
+      },
+      minimal: {
+        overlay: 12,
+        headline:    { align: 'center', size: 24, feed: { x: 50, y: 76 }, story: { x: 50, y: 73 } },
+        description: { align: 'center', size: 14, feed: { x: 50, y: 84 }, story: { x: 50, y: 79 } },
+        additional:  { align: 'center', size: 12, feed: { x: 50, y: 89 }, story: { x: 50, y: 84 } },
+        cta:         { align: 'center', size: 13, feed: { x: 50, y: 92 }, story: { x: 50, y: 88 } },
+      },
+    };
+    const cfg = layouts[type];
+    const fontFor: Record<string, string | undefined> = { headline: kit?.headlineFont, description: kit?.descriptionFont, additional: kit?.additionalFont, cta: kit?.ctaFont };
+    const colorFor: Record<string, string | undefined> = { headline: kit?.headlineColor, description: kit?.descriptionColor, additional: kit?.additionalColor, cta: kit?.ctaColor };
+    setState(prev => {
+      const build = (key: 'headline' | 'description' | 'additional' | 'cta') => {
+        const l = prev.textLayers[key];
+        const c = cfg[key];
+        return { ...l, align: c.align, size: c.size, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: colorFor[key] || l.color };
+      };
+      return {
+        ...prev,
+        feedOverlayOpacity: cfg.overlay,
+        storyOverlayOpacity: cfg.overlay,
+        backgroundOverlayColor: kit?.overlayColor ?? prev.backgroundOverlayColor,
+        textLayers: { headline: build('headline'), description: build('description'), additional: build('additional'), cta: build('cta') },
+      };
+    });
+  };
+
+  const handleProductAd = (imageUrl: string, prompt: string) => {
+    const kit = profile?.brandKits?.[0];
+    setState(prev => ({
+      ...prev,
+      imageVariants: [{ id: String(Date.now()), url: imageUrl, prompt }, ...prev.imageVariants],
+      selectedVariantIndex: 0,
+      logo: kit?.logoUrls?.[0] ? { ...prev.logo, url: kit.logoUrls[0] } : prev.logo,
+    }));
+    setShowProductAd(false);
+    setActiveTab('editor');
+    setOpenSection('IMAGEN');
+  };
 
   const handleUsePiece = (piece: CampaignPiece) => {
     // Las piezas de reel van al editor de video
@@ -1058,6 +1127,15 @@ const App: React.FC = () => {
           onCreateCampaign={(prefill) => { setCampaignInitial(prefill); setShowCalendar(false); setShowCampaigns(true); }}
         />
       )}
+      {showProductAd && (
+        <ProductAdStudio
+          profile={profile}
+          onClose={() => setShowProductAd(false)}
+          updateUsage={updateUsage}
+          onUseImage={handleProductAd}
+          compressBase64Image={compressBase64Image}
+        />
+      )}
       {showReels && (
         <ReelStudio
           profile={profile}
@@ -1154,6 +1232,14 @@ const App: React.FC = () => {
             <i className="fa-solid fa-film text-sm sm:text-base"></i>
             <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Reels</span>
           </button>
+          <button
+            onClick={() => setShowProductAd(true)}
+            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-emerald-200 hover:text-emerald-600"
+            title="Producto → Publicidad"
+          >
+            <i className="fa-solid fa-box-open text-sm sm:text-base"></i>
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Producto</span>
+          </button>
           {user?.email && ADMIN_EMAILS.includes(user.email) && (
             <button 
               onClick={() => setShowAdmin(!showAdmin)} 
@@ -1176,8 +1262,9 @@ const App: React.FC = () => {
             updateUsage={updateUsage} 
             openSection={openSection} 
             setOpenSection={setOpenSection} 
-            activeLayout={activeLayout} 
+            activeLayout={activeLayout}
             selectedField={selectedField}
+            onApplyTemplate={applyTemplate}
             githubToken={githubToken}
             onGithubConnect={handleGithubConnect}
             onGithubDisconnect={handleGithubDisconnect}
