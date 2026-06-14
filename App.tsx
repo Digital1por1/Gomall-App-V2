@@ -11,6 +11,7 @@ import ReelStudio from './components/ReelStudio';
 import BrandSettings from './components/BrandSettings';
 import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
+import Home from './components/Home';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -133,7 +134,10 @@ const App: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [showAdmin, setShowAdmin] = useState(false);
+  const [appView, setAppView] = useState<'home' | 'editor'>('home');
+  const [returnCampaignId, setReturnCampaignId] = useState<string | null>(null);
   const [showCampaigns, setShowCampaigns] = useState(false);
+  const [openCampaignId, setOpenCampaignId] = useState<string | null>(null);
   const [campaignInitial, setCampaignInitial] = useState<{ keyMessage?: string; dates?: string } | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showBrand, setShowBrand] = useState(false);
@@ -582,6 +586,15 @@ const App: React.FC = () => {
     });
   };
 
+  // Inicia un diseño individual en blanco y abre el editor
+  const startNewDesign = () => {
+    setState(DEFAULT_STATE);
+    setReturnCampaignId(null);
+    setActiveTab('editor');
+    setOpenSection('IMAGEN');
+    setAppView('editor');
+  };
+
   const handleProductAd = (imageUrl: string, prompt: string) => {
     const kit = profile?.brandKits?.[0];
     setState(prev => ({
@@ -593,9 +606,10 @@ const App: React.FC = () => {
     setShowProductAd(false);
     setActiveTab('editor');
     setOpenSection('IMAGEN');
+    setAppView('editor');
   };
 
-  const handleUsePiece = (piece: CampaignPiece) => {
+  const handleUsePiece = (piece: CampaignPiece, campaignId?: string) => {
     // Las piezas de reel van al editor de video
     if (piece.type === 'reel') {
       setReelCopy(piece.copy || null);
@@ -628,9 +642,11 @@ const App: React.FC = () => {
     });
     // Dispara la generación automática de la imagen con el prompt sugerido por la campaña
     setPendingPrompt(piece.imagePrompt || '');
+    setReturnCampaignId(campaignId || null);
     setShowCampaigns(false);
     setActiveTab('editor');
     setOpenSection('IMAGEN');
+    setAppView('editor');
   };
 
   const handleLayerAction = (layerName: string, action: 'front' | 'up' | 'down') => {
@@ -1113,10 +1129,11 @@ const App: React.FC = () => {
         <CampaignStudio
           profile={profile}
           userId={user.uid}
-          onClose={() => { setShowCampaigns(false); setCampaignInitial(null); }}
+          onClose={() => { setShowCampaigns(false); setCampaignInitial(null); setOpenCampaignId(null); }}
           updateUsage={updateUsage}
           onUsePiece={handleUsePiece}
           initialBrief={campaignInitial}
+          openCampaignId={openCampaignId}
         />
       )}
       {showCalendar && user && (
@@ -1183,10 +1200,37 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {appView === 'home' && user && (
+        <Home
+          profile={profile}
+          isAdmin={!!(user?.email && ADMIN_EMAILS.includes(user.email))}
+          designsCount={savedProjects.length}
+          onNewDesign={startNewDesign}
+          onNewCampaign={() => { setCampaignInitial(null); setOpenCampaignId(null); setShowCampaigns(true); }}
+          onOpenReels={() => { setReelCopy(null); setShowReels(true); }}
+          onOpenProductAd={() => setShowProductAd(true)}
+          onEditBrand={() => setShowBrand(true)}
+          onOpenDesigns={() => { setActiveTab('editor'); setOpenSection('PROJECTS'); setReturnCampaignId(null); setAppView('editor'); }}
+          onOpenCampaigns={() => { setOpenCampaignId(null); setCampaignInitial(null); setShowCampaigns(true); }}
+          onOpenCalendar={() => setShowCalendar(true)}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {appView === 'editor' && (
+      <>
       <header className="h-20 sm:h-24 bg-white/90 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between gap-3 px-4 sm:px-6 shrink-0 z-30">
-        {/* Marca */}
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white flex items-center justify-center shadow-lg shadow-orange-200/40 shrink-0">
+        {/* Volver / Marca */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button onClick={() => setAppView('home')} title="Inicio" className="h-10 w-10 flex items-center justify-center bg-slate-50 text-slate-500 rounded-xl border border-slate-100 hover:text-[#EA5B25] hover:border-orange-200 transition-all active:scale-95 shrink-0">
+            <i className="fa-solid fa-house text-base"></i>
+          </button>
+          {returnCampaignId && (
+            <button onClick={() => { setOpenCampaignId(returnCampaignId); setCampaignInitial(null); setShowCampaigns(true); }} title="Volver a la campaña" className="h-10 px-3 flex items-center gap-2 bg-orange-50 text-[#EA5B25] rounded-xl border border-orange-100 hover:bg-orange-100 transition-all active:scale-95 shrink-0 text-[10px] font-black uppercase tracking-widest">
+              <i className="fa-solid fa-arrow-left"></i><span className="hidden sm:inline">Campaña</span>
+            </button>
+          )}
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white flex items-center justify-center shadow-lg shadow-orange-200/40 shrink-0 hidden sm:flex">
             <i className="fa-solid fa-wand-magic-sparkles text-sm sm:text-base"></i>
           </div>
           <div className="min-w-0">
@@ -1204,22 +1248,6 @@ const App: React.FC = () => {
           <button onClick={() => setShowBrand(true)} title="Mi Marca" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-orange-200 hover:text-[#EA5B25]">
             <i className="fa-solid fa-gem text-base"></i>
             <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Marca</span>
-          </button>
-          <button onClick={() => setShowCalendar(true)} title="Calendario" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-sky-200 hover:text-sky-600">
-            <i className="fa-solid fa-calendar-days text-base"></i>
-            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Calendario</span>
-          </button>
-          <button onClick={() => { setCampaignInitial(null); setShowCampaigns(true); }} title="Campañas IA" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-xl transition-all shadow-md shadow-orange-200/50 active:scale-95 hover:shadow-lg hover:shadow-orange-200/60">
-            <i className="fa-solid fa-bullhorn text-base"></i>
-            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Campañas</span>
-          </button>
-          <button onClick={() => { setReelCopy(null); setShowReels(true); }} title="Editor de Reels" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl transition-all shadow-md shadow-purple-200/50 active:scale-95 hover:shadow-lg hover:shadow-purple-200/60">
-            <i className="fa-solid fa-film text-base"></i>
-            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Reels</span>
-          </button>
-          <button onClick={() => setShowProductAd(true)} title="Producto → Publicidad" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-emerald-200 hover:text-emerald-600">
-            <i className="fa-solid fa-box-open text-base"></i>
-            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Producto</span>
           </button>
           <div className="w-px h-7 bg-slate-100 mx-0.5 hidden sm:block"></div>
           {user?.email && ADMIN_EMAILS.includes(user.email) && (
@@ -1367,6 +1395,8 @@ const App: React.FC = () => {
       <div className="md:hidden">
          <QuickEditDrawer isOpen={showDrawer} onClose={() => setShowDrawer(false)} selectedField={selectedField} state={state} activeLayout={activeLayout} updateState={updateState} extractedColors={state.extractedColors} extractedBackgroundColors={state.extractedBackgroundColors} onUpdateBackground={(upd) => { if (selectedField === 'background' || selectedField === 'image') { const configKey = activeLayout === 'feed' ? 'feedBackgroundConfig' : 'storyBackgroundConfig'; updateState({ [configKey]: { ...state[configKey as keyof ProjectState] as any, ...upd } }); } }} />
       </div>
+      </>
+      )}
     </div>
   );
 };

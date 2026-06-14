@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { UserProfile, Campaign, CampaignPiece } from '../types';
@@ -8,8 +8,9 @@ interface CampaignStudioProps {
   userId: string;
   onClose: () => void;
   updateUsage: (tokens: number) => Promise<void>;
-  onUsePiece: (piece: CampaignPiece) => void;
+  onUsePiece: (piece: CampaignPiece, campaignId?: string) => void;
   initialBrief?: { keyMessage?: string; dates?: string } | null;
+  openCampaignId?: string | null;
 }
 
 const OBJECTIVES = ['Vender', 'Lanzar producto', 'Dar a conocer la marca', 'Promoción u oferta', 'Evento', 'Fidelizar clientes'];
@@ -17,7 +18,7 @@ const PLATFORMS = ['Feed', 'Stories', 'Reels'];
 
 type View = 'list' | 'brief' | 'result';
 
-const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece, initialBrief }) => {
+const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece, initialBrief, openCampaignId }) => {
   const [view, setView] = useState<View>(initialBrief ? 'brief' : 'list');
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -34,6 +35,15 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   const [pieceCount, setPieceCount] = useState(4);
 
   const savedCampaigns = profile?.campaigns || [];
+
+  // Si llega un id de campaña (volver desde el editor), saltar directo a su resultado
+  useEffect(() => {
+    if (openCampaignId) {
+      const c = savedCampaigns.find(x => x.id === openCampaignId);
+      if (c) { setActiveCampaign(c); setIsSaved(true); setView('result'); }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCampaignId]);
 
   const resetBrief = () => {
     setObjective(''); setProduct(''); setAudience(''); setDates('');
@@ -293,7 +303,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => { navigator.clipboard?.writeText(piece.copy); }} className="flex-1 py-2.5 bg-slate-50 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100"><i className="fa-solid fa-copy mr-1.5"></i>Copiar texto</button>
                         {(piece.type === 'imagen' || piece.type === 'reel') && (
-                          <button onClick={() => onUsePiece(piece)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
+                          <button onClick={() => onUsePiece(piece, activeCampaign.id)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
                         )}
                       </div>
                     </div>
