@@ -1183,73 +1183,51 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="h-28 bg-white border-b border-slate-100 flex items-center justify-between px-4 sm:px-6 shrink-0 z-30 shadow-sm">
-        <div className="w-1/4"></div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center">
-          <h2 className="text-lg sm:text-2xl font-[900] uppercase tracking-tight text-[#0F172A] leading-tight truncate max-w-full">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'ADMINISTRADOR' : (profile?.business || 'NEGOCIO')}</h2>
-          <span className="text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] sm:tracking-[0.5em] text-[#94A3B8] mt-1 sm:mt-1.5 truncate max-w-full">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'GOMALL STUDIO' : (profile?.industry || 'GOMALL STUDIO')}</span>
-          
-          <div className="flex items-center justify-center gap-2 sm:gap-3 mt-2 sm:mt-2.5">
-            <span className="text-[9px] sm:text-xs font-black text-[#EA5B25] uppercase tracking-tight whitespace-nowrap">
-              {Math.round(tokensPercent)}% CONSUMIDO
-            </span>
-            <span className="text-slate-200 text-[10px]">•</span>
-            <span className="text-[9px] sm:text-xs font-black text-slate-400 uppercase tracking-tight whitespace-nowrap flex items-center gap-1">
-              RENUEVA: <span className="text-slate-700">{formatResetTime()}</span>
-            </span>
+      <header className="h-20 sm:h-24 bg-white/90 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between gap-3 px-4 sm:px-6 shrink-0 z-30">
+        {/* Marca */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white flex items-center justify-center shadow-lg shadow-orange-200/40 shrink-0">
+            <i className="fa-solid fa-wand-magic-sparkles text-sm sm:text-base"></i>
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-display text-base sm:text-xl text-[#0F172A] leading-tight truncate">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'Administrador' : (profile?.business || 'Negocio')}</h2>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 truncate max-w-[120px] sm:max-w-[180px]">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'GOMALL STUDIO' : (profile?.industry || 'GOMALL STUDIO')}</span>
+              <span className="text-slate-200 text-[8px] hidden sm:inline">•</span>
+              <span className="text-[8px] sm:text-[9px] font-black text-[#EA5B25] uppercase tracking-tight whitespace-nowrap">{Math.round(tokensPercent)}% USADO</span>
+              <span className="text-[8px] sm:text-[9px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap hidden md:flex items-center gap-1">· Renueva <span className="text-slate-600">{formatResetTime()}</span></span>
+            </div>
           </div>
         </div>
-        <div className="w-1/4 flex justify-end items-center gap-2">
-          <button
-            onClick={() => setShowBrand(true)}
-            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-orange-200 hover:text-[#EA5B25]"
-            title="Mi Marca"
-          >
-            <i className="fa-solid fa-gem text-sm sm:text-base"></i>
-            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Marca</span>
+        {/* Acciones */}
+        <div className="flex justify-end items-center gap-1.5 sm:gap-2 shrink-0">
+          <button onClick={() => setShowBrand(true)} title="Mi Marca" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-orange-200 hover:text-[#EA5B25]">
+            <i className="fa-solid fa-gem text-base"></i>
+            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Marca</span>
           </button>
-          <button
-            onClick={() => setShowCalendar(true)}
-            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-sky-200 hover:text-sky-600"
-            title="Calendario"
-          >
-            <i className="fa-solid fa-calendar-days text-sm sm:text-base"></i>
-            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Calendario</span>
+          <button onClick={() => setShowCalendar(true)} title="Calendario" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-sky-200 hover:text-sky-600">
+            <i className="fa-solid fa-calendar-days text-base"></i>
+            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Calendario</span>
           </button>
-          <button
-            onClick={() => { setCampaignInitial(null); setShowCampaigns(true); }}
-            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-xl transition-all shadow-md shadow-orange-200/50 active:scale-95 hover:shadow-lg hover:shadow-orange-200/60"
-            title="Campañas IA"
-          >
-            <i className="fa-solid fa-bullhorn text-sm sm:text-base"></i>
-            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Campañas</span>
+          <button onClick={() => { setCampaignInitial(null); setShowCampaigns(true); }} title="Campañas IA" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-xl transition-all shadow-md shadow-orange-200/50 active:scale-95 hover:shadow-lg hover:shadow-orange-200/60">
+            <i className="fa-solid fa-bullhorn text-base"></i>
+            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Campañas</span>
           </button>
-          <button
-            onClick={() => { setReelCopy(null); setShowReels(true); }}
-            className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl transition-all shadow-md shadow-purple-200/50 active:scale-95 hover:shadow-lg hover:shadow-purple-200/60"
-            title="Editor de Reels"
-          >
-            <i className="fa-solid fa-film text-sm sm:text-base"></i>
-            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Reels</span>
+          <button onClick={() => { setReelCopy(null); setShowReels(true); }} title="Editor de Reels" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl transition-all shadow-md shadow-purple-200/50 active:scale-95 hover:shadow-lg hover:shadow-purple-200/60">
+            <i className="fa-solid fa-film text-base"></i>
+            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Reels</span>
           </button>
-          <button
-            onClick={() => setShowProductAd(true)}
-            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-emerald-200 hover:text-emerald-600"
-            title="Producto → Publicidad"
-          >
-            <i className="fa-solid fa-box-open text-sm sm:text-base"></i>
-            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Producto</span>
+          <button onClick={() => setShowProductAd(true)} title="Producto → Publicidad" className="h-10 w-10 lg:w-auto lg:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-emerald-200 hover:text-emerald-600">
+            <i className="fa-solid fa-box-open text-base"></i>
+            <span className="hidden lg:inline text-[10px] font-black uppercase tracking-widest">Producto</span>
           </button>
+          <div className="w-px h-7 bg-slate-100 mx-0.5 hidden sm:block"></div>
           {user?.email && ADMIN_EMAILS.includes(user.email) && (
-            <button 
-              onClick={() => setShowAdmin(!showAdmin)} 
-              className={`h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center rounded-xl transition-all shadow-sm active:scale-95 ${showAdmin ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 border border-transparent hover:text-slate-600'}`}
-              title="Panel de Control"
-            >
-              <i className="fa-solid fa-shield-halved text-base sm:text-lg"></i>
+            <button onClick={() => setShowAdmin(!showAdmin)} title="Panel de Control" className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-sm active:scale-95 ${showAdmin ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 border border-transparent hover:text-slate-600'}`}>
+              <i className="fa-solid fa-shield-halved text-lg"></i>
             </button>
           )}
-          <button onClick={handleLogout} className="h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl transition-all border border-transparent hover:text-slate-600 shadow-sm active:scale-95"><i className="fa-solid fa-right-from-bracket text-base sm:text-lg"></i></button>
+          <button onClick={handleLogout} title="Cerrar sesión" className="h-10 w-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl transition-all border border-transparent hover:text-slate-600 shadow-sm active:scale-95"><i className="fa-solid fa-right-from-bracket text-lg"></i></button>
         </div>
       </header>
 
