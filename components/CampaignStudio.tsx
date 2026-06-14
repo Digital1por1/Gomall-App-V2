@@ -9,6 +9,7 @@ interface CampaignStudioProps {
   onClose: () => void;
   updateUsage: (tokens: number) => Promise<void>;
   onUsePiece: (piece: CampaignPiece) => void;
+  initialBrief?: { keyMessage?: string; dates?: string } | null;
 }
 
 const OBJECTIVES = ['Vender', 'Lanzar producto', 'Dar a conocer la marca', 'Promoción u oferta', 'Evento', 'Fidelizar clientes'];
@@ -16,8 +17,8 @@ const PLATFORMS = ['Feed', 'Stories', 'Reels'];
 
 type View = 'list' | 'brief' | 'result';
 
-const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece }) => {
-  const [view, setView] = useState<View>('list');
+const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece, initialBrief }) => {
+  const [view, setView] = useState<View>(initialBrief ? 'brief' : 'list');
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
@@ -27,9 +28,9 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   const [objective, setObjective] = useState('');
   const [product, setProduct] = useState('');
   const [audience, setAudience] = useState('');
-  const [dates, setDates] = useState('');
+  const [dates, setDates] = useState(initialBrief?.dates || '');
   const [platforms, setPlatforms] = useState<string[]>(['Feed']);
-  const [keyMessage, setKeyMessage] = useState('');
+  const [keyMessage, setKeyMessage] = useState(initialBrief?.keyMessage || '');
   const [pieceCount, setPieceCount] = useState(4);
 
   const savedCampaigns = profile?.campaigns || [];

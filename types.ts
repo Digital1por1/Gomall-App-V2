@@ -37,6 +37,7 @@ export interface UserProfile {
   brandKits?: BrandKit[];
   customFonts?: CustomFont[];
   campaigns?: Campaign[];
+  plannedPosts?: PlannedPost[];
   lastUsedFonts?: {
     headline: string;
     description: string;
@@ -116,6 +117,14 @@ export interface BrandKit {
   ctaBgColor: string;
   brandColors: string[];
   overlayColor?: string;
+}
+
+export interface PlannedPost {
+  id: string;
+  date: string;      // YYYY-MM-DD
+  title: string;
+  note?: string;
+  done?: boolean;
 }
 
 export interface CampaignPiece {

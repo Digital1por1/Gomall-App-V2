@@ -9,6 +9,7 @@ import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
 import BrandSettings from './components/BrandSettings';
+import CalendarStudio from './components/CalendarStudio';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -132,6 +133,8 @@ const App: React.FC = () => {
   const [githubToken, setGithubToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [showAdmin, setShowAdmin] = useState(false);
   const [showCampaigns, setShowCampaigns] = useState(false);
+  const [campaignInitial, setCampaignInitial] = useState<{ keyMessage?: string; dates?: string } | null>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [showBrand, setShowBrand] = useState(false);
   const [showReels, setShowReels] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
@@ -1041,9 +1044,18 @@ const App: React.FC = () => {
         <CampaignStudio
           profile={profile}
           userId={user.uid}
-          onClose={() => setShowCampaigns(false)}
+          onClose={() => { setShowCampaigns(false); setCampaignInitial(null); }}
           updateUsage={updateUsage}
           onUsePiece={handleUsePiece}
+          initialBrief={campaignInitial}
+        />
+      )}
+      {showCalendar && user && (
+        <CalendarStudio
+          profile={profile}
+          userId={user.uid}
+          onClose={() => setShowCalendar(false)}
+          onCreateCampaign={(prefill) => { setCampaignInitial(prefill); setShowCalendar(false); setShowCampaigns(true); }}
         />
       )}
       {showReels && (
@@ -1119,7 +1131,15 @@ const App: React.FC = () => {
             <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Marca</span>
           </button>
           <button
-            onClick={() => setShowCampaigns(true)}
+            onClick={() => setShowCalendar(true)}
+            className="h-9 w-9 px-0 sm:h-10 sm:w-auto sm:px-4 flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 rounded-xl transition-all shadow-sm shadow-slate-200/50 active:scale-95 hover:border-sky-200 hover:text-sky-600"
+            title="Calendario"
+          >
+            <i className="fa-solid fa-calendar-days text-sm sm:text-base"></i>
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Calendario</span>
+          </button>
+          <button
+            onClick={() => { setCampaignInitial(null); setShowCampaigns(true); }}
             className="h-9 px-3 sm:h-10 sm:px-4 flex items-center gap-2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white rounded-xl transition-all shadow-md shadow-orange-200/50 active:scale-95 hover:shadow-lg hover:shadow-orange-200/60"
             title="Campañas IA"
           >
