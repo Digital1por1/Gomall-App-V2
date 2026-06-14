@@ -30,6 +30,22 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
   const [uploadingFont, setUploadingFont] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const analyzeSite = async () => {
+    if (!website.trim()) { alert('Ingresá tu sitio web arriba.'); return; }
+    setAnalyzing(true);
+    try {
+      const res = await fetch('/api/analyze-site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: website }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'No se pudo analizar la web');
+      if (data.summary) { setCompanyStory(data.summary); setSaved(false); }
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo analizar la web.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const resourceInputRef = useRef<HTMLInputElement>(null);
@@ -159,7 +175,12 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
               )}
             </div>
             <div className="space-y-2">
-              <label className={labelClass}>Historia de la empresa</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className={labelClass}>Historia de la empresa</label>
+                <button onClick={analyzeSite} disabled={analyzing} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-[#EA5B25] rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all disabled:opacity-50 border border-orange-100">
+                  {analyzing ? <><i className="fa-solid fa-circle-notch fa-spin"></i> Analizando…</> : <><i className="fa-solid fa-wand-magic-sparkles"></i> Completar con mi web</>}
+                </button>
+              </div>
               <textarea rows={4} className={`${inputClass} resize-none font-medium`} value={companyStory} onChange={(e) => { setCompanyStory(e.target.value); setSaved(false); }} placeholder="Contanos qué hace tu marca y a quién le habla..." />
             </div>
             <div className="space-y-2">

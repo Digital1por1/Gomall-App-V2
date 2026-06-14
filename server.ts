@@ -232,6 +232,63 @@ INSTRUCCIONES:
     }
   });
 
+  // Lee el sitio web del negocio y lo resume con IA para usarlo como contexto de marca
+  app.post("/api/analyze-site", async (req, res) => {
+    try {
+      let { url } = req.body;
+      if (!url || typeof url !== "string") return res.status(400).json({ error: "Falta la URL." });
+      url = url.trim().replace(/^@/, "");
+      if (!url.includes(".")) {
+        return res.status(400).json({ error: "Ingresá la dirección de tu sitio web (ej: www.tunegocio.com). Un usuario de Instagram no se puede leer automáticamente." });
+      }
+      if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+      let html = "";
+      try {
+        const r = await fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; GomallBot/1.0; +https://gomallstudio.com)" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(12000),
+        });
+        html = await r.text();
+      } catch (e) {
+        return res.status(502).json({ error: "No pudimos acceder a la web. Verificá que la dirección sea correcta y esté online." });
+      }
+
+      const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+      const descMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i);
+      const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<!--[\s\S]*?-->/g, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&[a-z]+;/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const head = `${titleMatch ? "TÍTULO: " + titleMatch[1] + "\n" : ""}${descMatch ? "DESCRIPCIÓN: " + descMatch[1] + "\n" : ""}`;
+      const content = (head + text).slice(0, 7000);
+
+      if (content.replace(/\s/g, "").length < 40) {
+        return res.status(422).json({ error: "La web no devolvió contenido legible (puede requerir login o estar vacía). Podés escribir la historia a mano." });
+      }
+
+      const prompt = `A partir del contenido de este sitio web de un negocio, escribí un resumen claro en español (4 a 6 oraciones) que sirva como contexto de marca para un asistente de marketing. Incluí: qué hace o vende el negocio, sus productos o servicios principales, a quién le habla y su estilo/tono si se percibe. No inventes datos que no estén. No incluyas URLs ni el menú de navegación.\n\nCONTENIDO DEL SITIO:\n${content}`;
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+      });
+      let summary = "";
+      if (typeof response?.text === "string") summary = response.text;
+      else summary = (response?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      res.json({ summary: summary.trim() });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error analizando la web" });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { 

@@ -35,6 +35,22 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
   const [industry, setIndustry] = useState('');
   const [customIndustry, setCustomIndustry] = useState('');
   const [tones, setTones] = useState<string[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const analyzeSite = async () => {
+    if (!website.trim()) { alert('Primero ingresá tu sitio web en el paso anterior.'); return; }
+    setAnalyzing(true);
+    try {
+      const res = await fetch('/api/analyze-site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: website }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'No se pudo analizar la web');
+      if (data.summary) setCompanyStory(data.summary);
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo analizar la web.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const resolvedIndustry = industry === 'Otro' ? customIndustry.trim() : industry;
 
@@ -210,7 +226,12 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
               )}
             </div>
             <div className="space-y-2">
-              <label className={labelClass}>Historia de la empresa <span className="text-[#EA5B25] normal-case font-bold">(cuanto más detallada, mejor)</span></label>
+              <div className="flex items-center justify-between gap-2">
+                <label className={labelClass}>Historia de la empresa <span className="text-[#EA5B25] normal-case font-bold">(cuanto más detallada, mejor)</span></label>
+                <button onClick={analyzeSite} disabled={analyzing} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-[#EA5B25] rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all disabled:opacity-50 border border-orange-100">
+                  {analyzing ? <><i className="fa-solid fa-circle-notch fa-spin"></i> Analizando…</> : <><i className="fa-solid fa-wand-magic-sparkles"></i> Completar con mi web</>}
+                </button>
+              </div>
               <textarea placeholder="Contanos qué hace tu marca, qué vende, qué la hace especial, a quién le habla, su estilo y valores..." rows={6} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none" value={companyStory} onChange={(e) => setCompanyStory(e.target.value)} />
               <p className="text-[9px] text-slate-400 font-bold px-1"><i className="fa-solid fa-wand-magic-sparkles text-[#EA5B25] mr-1"></i>La IA usa esto para crear tus campañas: mientras más contexto le des, mejores serán las recomendaciones.</p>
             </div>
