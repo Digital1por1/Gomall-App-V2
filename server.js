@@ -161,6 +161,7 @@ CONTEXTO DE LA MARCA:
 - Negocio: ${String(brand.business || "Sin especificar")}
 - Rubro: ${String(brand.industry || "Sin especificar")}
 - Tono de marca: ${String(brand.brandTone || "Sin especificar")}
+- Sitio web / Instagram: ${String(brand.website || "Sin especificar")}
 - Historia / descripción: ${String(brand.companyStory || "Sin especificar")}
 
 BRIEF DE LA CAMPAÑA:

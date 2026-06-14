@@ -17,6 +17,7 @@ const TONE_OPTIONS = ['Moderno', 'Elegante', 'Divertido', 'Minimalista', 'Cercan
 
 const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose, compressBase64Image }) => {
   const [business, setBusiness] = useState(profile?.business || '');
+  const [website, setWebsite] = useState(profile?.website || '');
   const [companyStory, setCompanyStory] = useState(profile?.companyStory || '');
   const [industry, setIndustry] = useState(profile?.industry && RUBROS.includes(profile.industry) ? profile.industry : (profile?.industry ? 'Otro' : ''));
   const [customIndustry, setCustomIndustry] = useState(profile?.industry && !RUBROS.includes(profile.industry) ? profile.industry : '');
@@ -98,6 +99,7 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
 
       await firebase.firestore().collection('profiles').doc(userId).update({
         business: business.trim() || profile?.business || '',
+        website: website.trim(),
         companyStory: companyStory.trim(),
         industry: resolvedIndustry,
         brandTone: tones.join(', '),
@@ -141,6 +143,10 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
             <div className="space-y-2">
               <label className={labelClass}>Nombre del negocio o marca</label>
               <input type="text" className={inputClass} value={business} onChange={(e) => { setBusiness(e.target.value); setSaved(false); }} />
+            </div>
+            <div className="space-y-2">
+              <label className={labelClass}>Sitio web o Instagram</label>
+              <input type="text" placeholder="www.tunegocio.com o @tunegocio" className={inputClass} value={website} onChange={(e) => { setWebsite(e.target.value); setSaved(false); }} />
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Rubro</label>

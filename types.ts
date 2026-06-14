@@ -28,6 +28,7 @@ export interface UserProfile {
   companyStory?: string;
   industry?: string;
   brandTone?: string;
+  website?: string;
   onboardingCompleted?: boolean;
   logoLibrary?: string[];
   resourceLibrary?: string[];

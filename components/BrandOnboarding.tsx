@@ -28,6 +28,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
   // Paso 1 — Perfil
   const [name, setName] = useState('');
   const [business, setBusiness] = useState('');
+  const [website, setWebsite] = useState('');
 
   // Paso 2 — Historia de marca
   const [companyStory, setCompanyStory] = useState('');
@@ -84,7 +85,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
     setTones(prev => prev.includes(tone) ? prev.filter(t => t !== tone) : [...prev, tone]);
   };
 
-  const step1Valid = Boolean(name.trim() && business.trim());
+  const step1Valid = Boolean(name.trim() && business.trim() && website.trim());
   const step2Valid = resolvedIndustry.length > 0; // solo el rubro es obligatorio
   const step3Valid = true; // el logo es opcional, no bloquea
 
@@ -127,6 +128,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
         companyStory: companyStory.trim(),
         industry: resolvedIndustry,
         brandTone: tones.join(', '),
+        website: website.trim(),
         onboardingCompleted: true,
         logoLibrary: logos,
         resourceLibrary: resources,
@@ -184,6 +186,11 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
             <div className="space-y-2">
               <label className={labelClass}>Nombre de tu negocio o marca</label>
               <input type="text" placeholder="Ej: Boutique Elegance" className={inputClass} value={business} onChange={(e) => setBusiness(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className={labelClass}>Sitio web o Instagram</label>
+              <input type="text" placeholder="Ej: www.boutique.com o @boutique" className={inputClass} value={website} onChange={(e) => setWebsite(e.target.value)} />
+              <p className="text-[9px] text-slate-400 font-bold px-1"><i className="fa-solid fa-wand-magic-sparkles text-[#EA5B25] mr-1"></i>La IA lo usa como contexto para entender mejor tu negocio.</p>
             </div>
           </div>
         )}

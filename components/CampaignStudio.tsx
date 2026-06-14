@@ -61,6 +61,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
             industry: profile?.industry || '',
             brandTone: profile?.brandTone || '',
             companyStory: profile?.companyStory || '',
+            website: profile?.website || '',
           },
         }),
       });
