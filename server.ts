@@ -178,7 +178,7 @@ INSTRUCCIONES:
    - "type": uno de exactamente "imagen", "reel" o "copy".
    - "title": nombre corto y descriptivo de la pieza.
    - "format": formato sugerido, ej "Feed 4:5", "Story 9:16" o "Reel 9:16".
-   - "imagePrompt": un prompt DETALLADO en inglés para generar SOLO el visual (describí escena, estilo fotográfico, iluminación, composición). PROHIBIDO incluir texto, palabras, letras, números, precios, porcentajes, titulares, logos o tipografía dentro del imagePrompt: el texto se agrega después como capas editables en el editor. La imagen debe quedar limpia y con espacio negativo libre para colocar el texto encima. Si la pieza es "copy" puro, dejá igualmente un prompt visual de portada sin texto.
+   - "imagePrompt": un prompt DETALLADO en ESPAÑOL para generar SOLO el visual (describí escena, estilo fotográfico, iluminación, composición). PROHIBIDO incluir texto, palabras, letras, números, precios, porcentajes, titulares, logos o tipografía dentro del imagePrompt: el texto se agrega después como capas editables en el editor. La imagen debe quedar limpia y con espacio negativo libre para colocar el texto encima. Si la pieza es "copy" puro, dejá igualmente un prompt visual de portada sin texto.
    - "copy": el texto/caption en español, persuasivo y acorde al tono de marca, sin incitar a "hacer click".
    - "rationale": una frase breve en español explicando por qué esta pieza ayuda a cumplir el objetivo.
 4. El campo "name" es un nombre creativo y corto para la campaña completa.

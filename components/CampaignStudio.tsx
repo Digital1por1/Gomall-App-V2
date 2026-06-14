@@ -123,6 +123,12 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
     }
   };
 
+  // Permite a la marca editar cualquier pieza generada (título, copy, prompt)
+  const updatePiece = (id: string, patch: Partial<CampaignPiece>) => {
+    setActiveCampaign(prev => prev ? { ...prev, pieces: prev.pieces.map(p => p.id === id ? { ...p, ...patch } : p) } : prev);
+    setIsSaved(false);
+  };
+
   const typeBadge = (type: string) => {
     if (type === 'reel') return { label: 'Reel', icon: 'fa-film', cls: 'bg-purple-50 text-purple-600' };
     if (type === 'copy') return { label: 'Copy', icon: 'fa-pen-nib', cls: 'bg-blue-50 text-blue-600' };
@@ -260,9 +266,10 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                   return (
                     <div key={piece.id} className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm space-y-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <span className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 ${badge.cls}`}><i className={`fa-solid ${badge.icon}`}></i>{badge.label}</span>
-                          <h4 className="font-black text-slate-900 text-sm tracking-tight">{idx + 1}. {piece.title}</h4>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 ${badge.cls}`}><i className={`fa-solid ${badge.icon}`}></i>{badge.label}</span>
+                          <span className="text-[10px] font-black text-slate-300 shrink-0">{idx + 1}.</span>
+                          <input value={piece.title} onChange={(e) => updatePiece(piece.id, { title: e.target.value })} className="flex-1 min-w-0 bg-transparent font-black text-slate-900 text-sm tracking-tight outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 transition-all" />
                         </div>
                         {piece.format && <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wider shrink-0">{piece.format}</span>}
                       </div>
@@ -272,16 +279,14 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                       )}
 
                       <div className="space-y-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Copy sugerido</label>
-                        <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{piece.copy}</p>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Copy <span className="text-slate-300 normal-case">(editable)</span></label>
+                        <textarea value={piece.copy} onChange={(e) => updatePiece(piece.id, { copy: e.target.value })} rows={4} className="w-full text-sm text-slate-700 font-medium leading-relaxed bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-100 focus:bg-white transition-all resize-none" />
                       </div>
 
-                      {piece.imagePrompt && (
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prompt visual</label>
-                          <p className="text-[11px] text-slate-400 font-mono bg-slate-50 rounded-xl px-3 py-2 border border-slate-100 leading-relaxed">{piece.imagePrompt}</p>
-                        </div>
-                      )}
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prompt visual <span className="text-slate-300 normal-case">(editable)</span></label>
+                        <textarea value={piece.imagePrompt} onChange={(e) => updatePiece(piece.id, { imagePrompt: e.target.value })} rows={3} placeholder="Describí el visual a generar (sin texto)…" className="w-full text-[11px] text-slate-500 font-mono bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 leading-relaxed outline-none focus:ring-2 focus:ring-orange-100 focus:bg-white transition-all resize-none" />
+                      </div>
 
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => { navigator.clipboard?.writeText(piece.copy); }} className="flex-1 py-2.5 bg-slate-50 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100"><i className="fa-solid fa-copy mr-1.5"></i>Copiar texto</button>

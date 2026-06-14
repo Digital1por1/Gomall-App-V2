@@ -194,11 +194,10 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
             <div className="space-y-2">
               <label className={labelClass}>Rubro <span className="text-[#EA5B25]">*</span></label>
               <p className="text-[9px] text-slate-300 font-bold px-1">La IA usará tu rubro para recomendar campañas a medida.</p>
-              <div className="flex flex-wrap gap-2">
-                {RUBROS.map(r => (
-                  <button key={r} onClick={() => setIndustry(r)} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${industry === r ? 'bg-[#EA5B25] text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>{r}</button>
-                ))}
-              </div>
+              <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={inputClass}>
+                <option value="" disabled>Elegí tu rubro…</option>
+                {RUBROS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
               {industry === 'Otro' && (
                 <input type="text" placeholder="Especificá tu rubro" className={inputClass} value={customIndustry} onChange={(e) => setCustomIndustry(e.target.value)} />
               )}

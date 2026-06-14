@@ -144,11 +144,10 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Rubro</label>
-              <div className="flex flex-wrap gap-2">
-                {RUBROS.map(r => (
-                  <button key={r} onClick={() => { setIndustry(r); setSaved(false); }} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${industry === r ? 'bg-[#EA5B25] text-white shadow-md shadow-orange-200/60' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{r}</button>
-                ))}
-              </div>
+              <select value={industry} onChange={(e) => { setIndustry(e.target.value); setSaved(false); }} className={inputClass}>
+                <option value="" disabled>Elegí tu rubro…</option>
+                {RUBROS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
               {industry === 'Otro' && (
                 <input type="text" placeholder="Especificá tu rubro" className={inputClass} value={customIndustry} onChange={(e) => { setCustomIndustry(e.target.value); setSaved(false); }} />
               )}
