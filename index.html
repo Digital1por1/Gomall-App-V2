@@ -27,6 +27,48 @@
             letter-spacing: -0.01em;
         }
 
+        /* === Controles premium (color pickers + sliders) === */
+        /* Color picker: el color llena toda la caja redondeada, sin el marco gris nativo */
+        input[type="color"] {
+            -webkit-appearance: none;
+            appearance: none;
+            padding: 0;
+            cursor: pointer;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; border-radius: inherit; }
+        input[type="color"]::-moz-color-swatch { border: none; border-radius: inherit; }
+
+        /* Sliders: thumb blanco con anillo naranja de marca + micro-interacción */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            background: #ffffff;
+            border: 3px solid #EA5B25;
+            box-shadow: 0 2px 5px rgba(15, 23, 42, 0.2);
+            margin-top: -5px;
+            cursor: pointer;
+            transition: transform 0.15s ease;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.18); }
+        input[type="range"]::-webkit-slider-thumb:active { transform: scale(1.05); }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            background: #ffffff;
+            border: 3px solid #EA5B25;
+            box-shadow: 0 2px 5px rgba(15, 23, 42, 0.2);
+            cursor: pointer;
+        }
+        select { cursor: pointer; }
+        @media (prefers-reduced-motion: reduce) {
+            input[type="range"]::-webkit-slider-thumb { transition: none; }
+        }
+
         #root {
             height: 100%;
             overflow: hidden;
