@@ -41,19 +41,19 @@ const Accordion: React.FC<{
 }> = ({ title, icon, children, isOpen, onToggle }) => {
   return (
     <div className="border-b border-slate-100 last:border-none">
-      <button 
-        onClick={onToggle} 
-        className="w-full flex items-center justify-between p-6 hover:bg-slate-50 transition-all group"
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between p-6 hover:bg-slate-50/70 transition-all group"
       >
-        <div className="flex items-center gap-5">
-          <div className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${isOpen ? 'bg-[#EA5B25] text-white shadow-lg shadow-orange-100' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100'}`}>
+        <div className="flex items-center gap-4">
+          <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all ${isOpen ? 'bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white shadow-lg shadow-orange-200/50' : 'bg-slate-50 text-slate-400 group-hover:bg-slate-100 group-hover:text-slate-500'}`}>
             <i className={`fa-solid ${icon} text-[14px]`}></i>
           </div>
-          <span className={`font-[900] text-[11px] uppercase tracking-[0.2em] ${isOpen ? 'text-slate-900' : 'text-slate-400'}`}>
+          <span className={`font-black text-[11px] uppercase tracking-[0.2em] transition-colors ${isOpen ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-600'}`}>
             {title}
           </span>
         </div>
-        <i className={`fa-solid ${isOpen ? 'fa-chevron-up text-[#EA5B25]' : 'fa-chevron-down text-slate-200'} text-[10px]`}></i>
+        <i className={`fa-solid ${isOpen ? 'fa-chevron-up text-[#EA5B25]' : 'fa-chevron-down text-slate-300'} text-[10px] transition-transform`}></i>
       </button>
       {isOpen && (
         <div className="px-8 pb-10 space-y-8 animate-in fade-in slide-in-from-top-2 duration-300">

@@ -1054,7 +1054,7 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#F8F9FA] p-6 relative overflow-hidden">
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-[#FBFBFD] to-[#F1F2F6] p-6 relative overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] aspect-square bg-orange-100/30 rounded-full blur-[120px]"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] aspect-square bg-blue-100/30 rounded-full blur-[120px]"></div>
         <div className="max-w-md w-full text-center space-y-10 z-10 animate-in fade-in zoom-in-95 duration-700">
@@ -1068,8 +1068,8 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-slate-800">Crea contenido publicitario con IA</h2>
-            <p className="text-slate-400 text-sm leading-relaxed">Accede a la herramienta exclusiva para socios de Gomall y potencia la imagen de tu negocio.</p>
+            <h2 className="font-display text-2xl text-slate-800 leading-tight">Creá contenido publicitario con IA</h2>
+            <p className="text-slate-400 text-sm leading-relaxed">Accedé a la herramienta exclusiva para socios de Gomall y potenciá la imagen de tu negocio.</p>
           </div>
           <button onClick={handleLogin} className="w-full h-16 bg-white border border-slate-200 rounded-2xl flex items-center justify-center gap-4 shadow-xl hover:shadow-2xl hover:border-orange-100 transition-all active:scale-95 group">
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
@@ -1295,7 +1295,7 @@ const App: React.FC = () => {
             }}
           />
         </aside>
-        <section ref={previewSectionRef} className={`flex-1 overflow-y-auto h-full p-6 md:p-12 bg-[#F8F9FA] transition-all duration-300 ease-in-out ${activeTab === 'preview' ? 'block' : 'hidden md:block'} ${showDrawer ? 'pb-[220px]' : ''}`}>
+        <section ref={previewSectionRef} className={`flex-1 overflow-y-auto h-full p-6 md:p-12 bg-gradient-to-b from-[#FBFBFD] to-[#F1F2F6] transition-all duration-300 ease-in-out ${activeTab === 'preview' ? 'block' : 'hidden md:block'} ${showDrawer ? 'pb-[220px]' : ''}`}>
           <div className={`md:hidden fixed bottom-24 right-6 z-[60] flex flex-col items-end gap-3 pointer-events-none transition-opacity duration-300 ${showDrawer || showAdmin ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`}>
             {showLensMenu && (
               <div className="bg-white/80 backdrop-blur-xl border border-white/40 shadow-2xl rounded-[32px] p-5 w-64 space-y-6 pointer-events-auto animate-in fade-in slide-in-from-bottom-5 duration-300">
@@ -1359,9 +1359,9 @@ const App: React.FC = () => {
         </section>
       </main>
 
-      <nav className="h-20 bg-white border-t border-slate-100 flex items-center justify-around fixed bottom-0 left-0 right-0 z-40 md:hidden shadow-lg">
-        <button onClick={() => setActiveTab('editor')} className={`flex flex-col items-center gap-1 ${activeTab === 'editor' ? 'text-[#EA5B25]' : 'text-slate-300'}`}><i className="fa-solid fa-pen-to-square"></i><span className="text-[9px] font-black uppercase">Editor</span></button>
-        <button onClick={() => setActiveTab('preview')} className={`flex flex-col items-center gap-1 ${activeTab === 'preview' ? 'text-[#EA5B25]' : 'text-slate-300'}`}><i className="fa-solid fa-eye"></i><span className="text-[9px] font-black uppercase">Preview</span></button>
+      <nav className="h-20 bg-white/95 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around fixed bottom-0 left-0 right-0 z-40 md:hidden shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.1)]">
+        <button onClick={() => setActiveTab('editor')} className={`flex flex-col items-center gap-1.5 px-8 py-2 rounded-2xl transition-all ${activeTab === 'editor' ? 'text-[#EA5B25] bg-orange-50' : 'text-slate-300'}`}><i className="fa-solid fa-pen-to-square text-base"></i><span className="text-[9px] font-black uppercase tracking-widest">Editor</span></button>
+        <button onClick={() => setActiveTab('preview')} className={`flex flex-col items-center gap-1.5 px-8 py-2 rounded-2xl transition-all ${activeTab === 'preview' ? 'text-[#EA5B25] bg-orange-50' : 'text-slate-300'}`}><i className="fa-solid fa-eye text-base"></i><span className="text-[9px] font-black uppercase tracking-widest">Preview</span></button>
       </nav>
 
       <div className="md:hidden">
