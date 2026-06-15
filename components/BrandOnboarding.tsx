@@ -5,6 +5,7 @@ import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import { CustomFont, BrandKit } from '../types';
 import { recordUsage } from './usageTracker';
+import { persistImages } from './storage';
 
 interface BrandOnboardingProps {
   user: firebase.User;
@@ -117,11 +118,15 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
       const tokenLimit = 1000000;
       const kitFont = fonts.length > 0 ? fonts[0].family : 'Inter';
 
+      // Subimos logos/recursos a Storage y guardamos solo las URLs (no base64 en Firestore)
+      const logoUrls = await persistImages(logos, 'logos');
+      const resourceUrls = await persistImages(resources, 'recursos');
+
       const defaultKit: BrandKit = {
         id: `kit_${Date.now()}`,
         name: 'Kit Principal',
-        logoUrls: logos,
-        resourceUrls: resources,
+        logoUrls: logoUrls,
+        resourceUrls: resourceUrls,
         headlineFont: kitFont,
         descriptionFont: kitFont,
         additionalFont: kitFont,
@@ -148,8 +153,8 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
         brandTone: tones.join(', '),
         website: website.trim(),
         onboardingCompleted: true,
-        logoLibrary: logos,
-        resourceLibrary: resources,
+        logoLibrary: logoUrls,
+        resourceLibrary: resourceUrls,
         backgroundLibrary: [],
         customFonts: fonts,
         brandKits: [defaultKit],

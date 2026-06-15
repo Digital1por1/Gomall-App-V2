@@ -13,6 +13,7 @@ import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
 import Home from './components/Home';
 import Landing from './components/Landing';
+import { persistImage } from './components/storage';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -999,23 +1000,26 @@ const App: React.FC = () => {
       if (state.imageVariants && state.imageVariants.length > 0 && state.selectedVariantIndex !== undefined) {
         const selectedVariant = { ...state.imageVariants[state.selectedVariantIndex] };
         if (selectedVariant && selectedVariant.url) {
-          // Comprimimos fuertemente la imagen de fondo generada
-          selectedVariant.url = await compressBase64Image(selectedVariant.url, 1080, 0.7);
+          // Comprimimos y subimos la imagen de fondo a Storage (guardamos la URL, no base64)
+          const compressed = await compressBase64Image(selectedVariant.url, 1080, 0.7);
+          selectedVariant.url = (await persistImage(compressed, 'disenos')) || compressed;
           stateToSave.imageVariants = [selectedVariant];
           stateToSave.selectedVariantIndex = 0;
         } else {
           stateToSave.imageVariants = [];
         }
       } else {
-        stateToSave.imageVariants = []; 
+        stateToSave.imageVariants = [];
       }
-      
-      // Comprimimos logo y recurso si existen en el estado guardado
+
+      // Comprimimos y subimos logo y recurso a Storage si existen
       if (stateToSave.logo?.url) {
-        stateToSave.logo = { ...stateToSave.logo, url: await compressBase64Image(stateToSave.logo.url, 400, 0.6, true) };
+        const c = await compressBase64Image(stateToSave.logo.url, 400, 0.6, true);
+        stateToSave.logo = { ...stateToSave.logo, url: (await persistImage(c, 'logos')) || c };
       }
       if (stateToSave.resource?.url) {
-        stateToSave.resource = { ...stateToSave.resource, url: await compressBase64Image(stateToSave.resource.url, 800, 0.6, true) };
+        const c = await compressBase64Image(stateToSave.resource.url, 800, 0.6, true);
+        stateToSave.resource = { ...stateToSave.resource, url: (await persistImage(c, 'recursos')) || c };
       }
       
       // 2. Eliminamos las librerías del usuario (ya están en su perfil)
@@ -1024,12 +1028,14 @@ const App: React.FC = () => {
       stateToSave.resourceLibrary = [];
       
       const stateString = JSON.stringify(stateToSave);
+      // Subimos la miniatura a Storage (guardamos URL, no base64)
+      const thumbnailUrl = (await persistImage(thumbnailDataUrl, 'thumbs')) || thumbnailDataUrl;
 
       // 3. Guardado en base de datos
       await nuevoDisenoRef.set({
         userId: user.uid,
         state: stateString,
-        thumbnail: thumbnailDataUrl,
+        thumbnail: thumbnailUrl,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       

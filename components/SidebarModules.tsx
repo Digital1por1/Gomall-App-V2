@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectState, TextLayer, UserProfile, BackgroundConfig, SavedProject } from '../types';
 import { recordUsage } from './usageTracker';
+import { persistImage } from './storage';
 import { MONTHLY_TOKEN_LIMIT } from '../App';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
@@ -548,9 +549,10 @@ const SidebarModules: React.FC<SidebarProps> = ({
     }
   };
 
-  const saveLogoToLibrary = async (logoUrl: string) => {
+  const saveLogoToLibrary = async (logoUrlRaw: string) => {
     const user = firebase.auth().currentUser;
-    if (user && logoUrl) {
+    if (user && logoUrlRaw) {
+      const logoUrl = (await persistImage(logoUrlRaw, 'logos')) || logoUrlRaw;
       const currentLibrary = profile?.logoLibrary || [];
       if (!currentLibrary.includes(logoUrl)) {
         const updatedLibrary = [logoUrl, ...currentLibrary].slice(0, 12);
@@ -580,9 +582,10 @@ const SidebarModules: React.FC<SidebarProps> = ({
     }
   };
 
-  const saveResourceToLibrary = async (resourceUrl: string) => {
+  const saveResourceToLibrary = async (resourceUrlRaw: string) => {
     const user = firebase.auth().currentUser;
-    if (user && resourceUrl) {
+    if (user && resourceUrlRaw) {
+      const resourceUrl = (await persistImage(resourceUrlRaw, 'recursos')) || resourceUrlRaw;
       const currentLibrary = profile?.resourceLibrary || [];
       if (!currentLibrary.includes(resourceUrl)) {
         const updatedLibrary = [resourceUrl, ...currentLibrary].slice(0, 12);
@@ -612,9 +615,11 @@ const SidebarModules: React.FC<SidebarProps> = ({
     }
   };
 
-  const saveBackgroundToLibrary = async (bgUrl: string) => {
+  const saveBackgroundToLibrary = async (bgUrlRaw: string) => {
     const user = firebase.auth().currentUser;
-    if (user && bgUrl) {
+    if (user && bgUrlRaw) {
+      // Sube a Storage si viene en base64 (los fondos generados son pesados)
+      const bgUrl = (await persistImage(bgUrlRaw, 'fondos')) || bgUrlRaw;
       const currentLibrary = profile?.backgroundLibrary || [];
       if (!currentLibrary.includes(bgUrl)) {
         const updatedLibrary = [bgUrl, ...currentLibrary].slice(0, 20); // Keep up to 20 backgrounds
@@ -1098,9 +1103,11 @@ const SidebarModules: React.FC<SidebarProps> = ({
                 r.onload = async (ev) => {
                   const rawUrl = ev.target?.result as string;
                   updateState({ logo: { ...state.logo, url: rawUrl } });
-                  const urlToSave = compressBase64Image
+                  const compressed = compressBase64Image
                     ? await compressBase64Image(rawUrl, 400, 0.6, true)
                     : rawUrl;
+                  const urlToSave = (await persistImage(compressed, 'logos')) || compressed;
+                  updateState({ logo: { ...state.logo, url: urlToSave } });
                   updateActiveLogoInDB(urlToSave);
                   await saveLogoToLibrary(urlToSave);
                 };
@@ -1202,9 +1209,11 @@ const SidebarModules: React.FC<SidebarProps> = ({
                 r.onload = async (ev) => {
                   const rawUrl = ev.target?.result as string;
                   updateState({ resource: { ...state.resource, url: rawUrl } });
-                  const urlToSave = compressBase64Image
+                  const compressed = compressBase64Image
                     ? await compressBase64Image(rawUrl, 800, 0.6, true)
                     : rawUrl;
+                  const urlToSave = (await persistImage(compressed, 'recursos')) || compressed;
+                  updateState({ resource: { ...state.resource, url: urlToSave } });
                   updateActiveResourceInDB(urlToSave);
                   await saveResourceToLibrary(urlToSave);
                 };

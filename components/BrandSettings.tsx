@@ -5,6 +5,7 @@ import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import { UserProfile, CustomFont, BrandKit } from '../types';
 import { recordUsage } from './usageTracker';
+import { persistImages } from './storage';
 import { RUBROS } from './BrandOnboarding';
 
 interface BrandSettingsProps {
@@ -93,13 +94,16 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Subimos logos/recursos nuevos a Storage; guardamos solo URLs
+      const logoUrls = await persistImages(logos, 'logos');
+      const resourceUrls = await persistImages(resources, 'recursos');
       const existingKit = profile?.brandKits?.[0];
       const kitFont = fonts[0]?.family || existingKit?.headlineFont || 'Inter';
       const updatedKit: BrandKit = {
         id: existingKit?.id || `kit_${Date.now()}`,
         name: existingKit?.name || 'Kit Principal',
-        logoUrls: logos,
-        resourceUrls: resources,
+        logoUrls: logoUrls,
+        resourceUrls: resourceUrls,
         headlineFont: existingKit?.headlineFont || kitFont,
         descriptionFont: existingKit?.descriptionFont || kitFont,
         additionalFont: existingKit?.additionalFont || kitFont,
@@ -120,8 +124,8 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
         companyStory: companyStory.trim(),
         industry: resolvedIndustry,
         brandTone: tones.join(', '),
-        logoLibrary: logos,
-        resourceLibrary: resources,
+        logoLibrary: logoUrls,
+        resourceLibrary: resourceUrls,
         customFonts: fonts,
         brandKits: [updatedKit, ...otherKits],
       });
