@@ -4,6 +4,7 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import { UserProfile, CustomFont, BrandKit } from '../types';
+import { recordUsage } from './usageTracker';
 import { RUBROS } from './BrandOnboarding';
 
 interface BrandSettingsProps {
@@ -39,7 +40,7 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
       const res = await fetch('/api/analyze-site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: website }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'No se pudo analizar la web');
-      if (data.summary) { setCompanyStory(data.summary); setSaved(false); }
+      if (data.summary) { setCompanyStory(data.summary); setSaved(false); recordUsage('analisis_web', data.usage); }
     } catch (e: any) {
       alert(e?.message || 'No se pudo analizar la web.');
     } finally {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { UserProfile, Campaign, CampaignPiece } from '../types';
+import { recordUsage } from './usageTracker';
 
 interface CampaignStudioProps {
   profile: UserProfile | null;
@@ -101,6 +102,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
       };
 
       await updateUsage(4000);
+      recordUsage('campana', data.usage);
       setActiveCampaign(campaign);
       setIsSaved(false);
       setView('result');

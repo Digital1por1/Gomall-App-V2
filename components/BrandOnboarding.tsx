@@ -4,6 +4,7 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import { CustomFont, BrandKit } from '../types';
+import { recordUsage } from './usageTracker';
 
 interface BrandOnboardingProps {
   user: firebase.User;
@@ -44,7 +45,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
       const res = await fetch('/api/analyze-site', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: website }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'No se pudo analizar la web');
-      if (data.summary) setCompanyStory(data.summary);
+      if (data.summary) { setCompanyStory(data.summary); recordUsage('analisis_web', data.usage); }
     } catch (e: any) {
       alert(e?.message || 'No se pudo analizar la web.');
     } finally {

@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectState, TextLayer, UserProfile, BackgroundConfig, SavedProject } from '../types';
+import { recordUsage } from './usageTracker';
 import { MONTHLY_TOKEN_LIMIT } from '../App';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
@@ -224,7 +225,8 @@ const SidebarModules: React.FC<SidebarProps> = ({
         }
 
         if (data.imageUrl) {
-          await updateUsage(15000); 
+          await updateUsage(15000);
+          recordUsage(genType === 'improve' ? 'mejorar' : 'imagen', data.usage);
 
           updateState({ 
             imageVariants: [{ id: String(Date.now()), url: String(data.imageUrl), prompt: String(effectivePrompt || 'AI Improved Post') }, ...state.imageVariants],
@@ -296,7 +298,8 @@ const SidebarModules: React.FC<SidebarProps> = ({
           const cleanText = String(responseText).replace(/```json|```/g, '').trim();
           const copiesResult = JSON.parse(cleanText);
           if (Array.isArray(copiesResult) && copiesResult.length > 0) {
-            await updateUsage(2000); 
+            await updateUsage(2000);
+            recordUsage('copy', data.usage);
             const newCopies = [...state.copies, String(copiesResult[0])];
             updateState({ 
               copies: newCopies, 

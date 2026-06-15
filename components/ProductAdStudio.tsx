@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { UserProfile } from '../types';
+import { recordUsage } from './usageTracker';
 
 interface ProductAdStudioProps {
   profile: UserProfile | null;
@@ -56,6 +57,7 @@ const ProductAdStudio: React.FC<ProductAdStudioProps> = ({ profile, onClose, upd
       if (!res.ok) throw new Error(data?.error || 'Error generando la imagen');
       if (data.imageUrl) {
         await updateUsage(15000);
+        recordUsage('producto', data.usage);
         setResult(String(data.imageUrl));
       } else {
         alert('No se pudo generar la imagen. Probá con otra foto o estilo.');

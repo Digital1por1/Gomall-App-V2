@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { GeneratedImage } from '../types';
+import { recordUsage } from './usageTracker';
 
 const ImageGen: React.FC = () => {
   const [prompt, setPrompt] = useState('');
@@ -26,6 +27,7 @@ const ImageGen: React.FC = () => {
       const foundImageUrl = data.imageUrl || '';
 
       if (foundImageUrl) {
+        recordUsage('imagen_simple', data.usage);
         const newImg: GeneratedImage = {
           id: Date.now().toString(),
           url: foundImageUrl,

@@ -131,6 +131,60 @@ const Home: React.FC<HomeProps> = ({
           </div>
         </section>
 
+        {/* Consumo de IA (solo admin) */}
+        {isAdmin && (() => {
+          const stats = profile?.usageStats || {};
+          const ACTIONS: { key: string; label: string; isImage: boolean }[] = [
+            { key: 'imagen', label: 'Imágenes', isImage: true },
+            { key: 'mejorar', label: 'Mejorar imagen', isImage: true },
+            { key: 'producto', label: 'Producto → Aviso', isImage: true },
+            { key: 'campana', label: 'Campañas', isImage: false },
+            { key: 'copy', label: 'Copys', isImage: false },
+            { key: 'analisis_web', label: 'Análisis de web', isImage: false },
+          ];
+          const rows = ACTIONS.map(a => {
+            const s = (stats as any)[a.key] || {};
+            return { ...a, calls: s.calls || 0, tokens: s.tokens || 0 };
+          }).filter(r => r.calls > 0);
+          const totalTokens = (stats as any).totalTokens || 0;
+          // Estimación de costo: las imágenes son el costo real dominante (~US$0.04 c/u). Texto ≈ despreciable.
+          const imageCalls = rows.filter(r => r.isImage).reduce((a, r) => a + r.calls, 0);
+          const estCost = imageCalls * 0.04;
+          return (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center text-[10px] font-black"><i className="fa-solid fa-gauge-high"></i></span>
+                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Consumo de IA (tokens reales) · admin</h3>
+              </div>
+              <div className="bg-white rounded-[28px] border border-slate-100 p-6 shadow-sm shadow-slate-200/40 space-y-4">
+                {rows.length === 0 ? (
+                  <p className="text-sm text-slate-400 font-medium">Todavía no hay consumo registrado. Generá algo para ver los números reales.</p>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      {rows.map(r => (
+                        <div key={r.key} className="flex items-center justify-between text-sm">
+                          <span className="font-bold text-slate-600"><i className={`fa-solid ${r.isImage ? 'fa-image text-[#EA5B25]' : 'fa-font text-slate-300'} mr-2 text-xs`}></i>{r.label}</span>
+                          <span className="font-black text-slate-800 tabular-nums">{r.calls} <span className="text-slate-300 font-bold">·</span> {r.tokens.toLocaleString()} tk</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
+                      <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Total</span>
+                      <span className="font-display text-lg text-slate-900">{totalTokens.toLocaleString()} tokens</span>
+                    </div>
+                    <div className="bg-orange-50 rounded-2xl px-4 py-3 text-center">
+                      <p className="text-[10px] font-black text-[#EA5B25] uppercase tracking-widest">Costo estimado (imágenes)</p>
+                      <p className="font-display text-2xl text-slate-900">≈ US$ {estCost.toFixed(2)}</p>
+                      <p className="text-[9px] text-slate-400 font-bold mt-1">{imageCalls} imágenes · estimado a ~US$0,04 c/u. Confirmá precios en ai.google.dev/pricing</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+          );
+        })()}
+
       </div>
     </div>
   );

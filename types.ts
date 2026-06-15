@@ -39,6 +39,12 @@ export interface UserProfile {
   customFonts?: CustomFont[];
   campaigns?: Campaign[];
   plannedPosts?: PlannedPost[];
+  usageStats?: {
+    totalTokens?: number;
+    totalCalls?: number;
+    lastUpdated?: number;
+    [action: string]: { calls?: number; tokens?: number } | number | undefined;
+  };
   lastUsedFonts?: {
     headline: string;
     description: string;

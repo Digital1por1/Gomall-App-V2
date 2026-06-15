@@ -2,6 +2,16 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 
+// Extrae el consumo real de tokens que devuelve Gemini en cada respuesta
+function extractUsage(response) {
+  const u = (response && response.usageMetadata) || {};
+  return {
+    prompt: u.promptTokenCount || 0,
+    output: u.candidatesTokenCount || 0,
+    total: u.totalTokenCount || ((u.promptTokenCount || 0) + (u.candidatesTokenCount || 0)),
+  };
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3005;
@@ -116,7 +126,7 @@ USER REQUEST: ${String(prompt)}`
         if (!foundImageUrl) {
           console.error("No image in response:", JSON.stringify(response).slice(0, 500));
         }
-        res.json({ imageUrl: foundImageUrl });
+        res.json({ imageUrl: foundImageUrl, usage: extractUsage(response) });
       } else if (genType === "copy") {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
@@ -129,7 +139,7 @@ USER REQUEST: ${String(prompt)}`
           const parts = response?.candidates?.[0]?.content?.parts || [];
           text = parts.map(p => p?.text || "").join("").trim();
         }
-        res.json({ text });
+        res.json({ text, usage: extractUsage(response) });
       } else if (genType === "simple_image") {
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash-image",
@@ -150,7 +160,7 @@ USER REQUEST: ${String(prompt)}`
             break;
           }
         }
-        res.json({ imageUrl: foundImageUrl });
+        res.json({ imageUrl: foundImageUrl, usage: extractUsage(response) });
       } else if (genType === "campaign") {
         const brief = campaignBrief || {};
         const brand = brandContext || {};
@@ -223,7 +233,7 @@ INSTRUCCIONES:
           const parts = response?.candidates?.[0]?.content?.parts || [];
           text = parts.map(p => p?.text || "").join("").trim();
         }
-        res.json({ text });
+        res.json({ text, usage: extractUsage(response) });
       } else {
         res.status(400).json({ error: "Invalid genType" });
       }
@@ -283,7 +293,7 @@ INSTRUCCIONES:
       let summary = "";
       if (typeof response?.text === "string") summary = response.text;
       else summary = (response?.candidates?.[0]?.content?.parts || []).map(p => p?.text || "").join("").trim();
-      res.json({ summary: summary.trim() });
+      res.json({ summary: summary.trim(), usage: extractUsage(response) });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: error.message || "Error analizando la web" });
