@@ -12,6 +12,7 @@ import BrandSettings from './components/BrandSettings';
 import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
 import Home from './components/Home';
+import Landing from './components/Landing';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece } from './types';
 
@@ -1066,31 +1067,7 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-    return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-[#FBFBFD] to-[#F1F2F6] p-6 relative overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] aspect-square bg-orange-100/30 rounded-full blur-[120px]"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] aspect-square bg-blue-100/30 rounded-full blur-[120px]"></div>
-        <div className="max-w-md w-full text-center space-y-10 z-10 animate-in fade-in zoom-in-95 duration-700">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-20 h-20 bg-[#EA5B25] rounded-[32px] flex items-center justify-center text-white shadow-2xl shadow-orange-200">
-              <i className="fa-solid fa-wand-magic-sparkles text-3xl"></i>
-            </div>
-            <div className="flex flex-col">
-              <h1 className="text-3xl font-[900] uppercase tracking-[0.2em] text-slate-900 leading-none">GOMALL</h1>
-              <span className="text-[12px] font-black uppercase tracking-[0.4em] text-[#EA5B25] mt-2">STUDIO</span>
-            </div>
-          </div>
-          <div className="space-y-4">
-            <h2 className="font-display text-2xl text-slate-800 leading-tight">Creá contenido publicitario con IA</h2>
-            <p className="text-slate-400 text-sm leading-relaxed">Accedé a la herramienta exclusiva para socios de Gomall y potenciá la imagen de tu negocio.</p>
-          </div>
-          <button onClick={handleLogin} className="w-full h-16 bg-white border border-slate-200 rounded-2xl flex items-center justify-center gap-4 shadow-xl hover:shadow-2xl hover:border-orange-100 transition-all active:scale-95 group">
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
-            <span className="text-sm font-bold text-slate-700">Continuar con Google</span>
-          </button>
-        </div>
-      </div>
-    );
+    return <Landing onLogin={handleLogin} />;
   }
 
   if (user && profileError) {
