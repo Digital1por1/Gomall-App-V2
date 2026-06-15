@@ -314,12 +314,10 @@ const App: React.FC = () => {
           const isFirstLoad = !hasInitialProfileLoad.current;
           if (isFirstLoad) hasInitialProfileLoad.current = true;
 
-          const finalLogoUrl = isFirstLoad
-            ? (data.currentLogoUrl !== undefined ? data.currentLogoUrl : prev.logo.url)
-            : prev.logo.url;
-          const finalResourceUrl = isFirstLoad
-            ? (data.currentResourceUrl !== undefined ? data.currentResourceUrl : prev.resource.url)
-            : prev.resource.url;
+          // Logo y recurso NO se cargan por defecto en los diseños: quedan disponibles
+          // en sus secciones del editor para que el usuario los seleccione cuando quiera.
+          const finalLogoUrl = prev.logo.url;
+          const finalResourceUrl = prev.resource.url;
 
           // Register @font-face for custom fonts from profile
           (data.customFonts || []).forEach((font: CustomFont) => {
@@ -579,9 +577,7 @@ const App: React.FC = () => {
       };
       return {
         ...prev,
-        feedOverlayOpacity: cfg.overlay,
-        storyOverlayOpacity: cfg.overlay,
-        backgroundOverlayColor: kit?.overlayColor ?? prev.backgroundOverlayColor,
+        // Las plantillas solo acomodan los textos; no oscurecen ni modifican el fondo.
         textLayers: { headline: build('headline'), description: build('description'), additional: build('additional'), cta: build('cta') },
       };
     });
@@ -632,8 +628,6 @@ const App: React.FC = () => {
         ...prev,
         copies: newCopies,
         selectedCopyIndex: piece.copy ? newCopies.length - 1 : prev.selectedCopyIndex,
-        resource: kit?.resourceUrls?.[0] ? { ...prev.resource, url: kit.resourceUrls[0] } : prev.resource,
-        backgroundOverlayColor: kit?.overlayColor ?? prev.backgroundOverlayColor,
         ctaBgColor: kit?.ctaBgColor ?? prev.ctaBgColor,
         textLayers: layers,
       };

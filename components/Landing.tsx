@@ -13,7 +13,6 @@ const GoogleBtn: React.FC<{ onLogin: () => void; label: string; variant?: 'prima
         : 'bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-orange-200'
     }`}
   >
-    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
     {label}
   </button>
 );
@@ -85,7 +84,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <GoogleBtn onLogin={onLogin} label="Empezar gratis" />
               <GoogleBtn onLogin={onLogin} label="Ya tengo cuenta" variant="light" />
             </div>
-            <p className="text-[11px] text-slate-400 font-bold">Sin tarjeta · Entrás con tu cuenta de Google</p>
+            <p className="text-[11px] text-slate-400 font-bold">Sin tarjeta · Empezás en segundos</p>
           </div>
           <div className="relative flex justify-center">
             <PostMockup />
@@ -155,8 +154,8 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <p className="text-white/85 text-sm sm:text-base font-medium max-w-md mx-auto">Configurás tu marca una vez y la IA hace el resto. Gratis para empezar.</p>
             <div className="flex justify-center pt-2">
               <button onClick={onLogin} className="h-14 px-8 rounded-2xl bg-white text-[#EA5B25] flex items-center gap-3 font-black text-[12px] uppercase tracking-[0.15em] shadow-xl active:scale-95 hover:shadow-2xl transition-all">
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-                Empezar gratis con Google
+                <i className="fa-solid fa-arrow-right-to-bracket"></i>
+                Empezar gratis
               </button>
             </div>
           </div>
