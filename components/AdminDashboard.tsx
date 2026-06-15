@@ -3,6 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { UserProfile } from '../types';
 import { MONTHLY_TOKEN_LIMIT } from '../App';
+import { PLANS, planForProfile } from './plans';
 
 interface AdminDashboardProps {
   onClose: () => void;
@@ -37,6 +38,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     cycleCount: number;
   }
   const [monthlyCosts, setMonthlyCosts] = useState<MonthlyCost[]>([]);
+  const [realUsage, setRealUsage] = useState<{ totalTokens: number; imageCalls: number; byAction: Record<string, { calls: number; tokens: number }> }>({ totalTokens: 0, imageCalls: 0, byAction: {} });
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -46,13 +48,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         let totalTokens = 0;
         let activeUsers = 0;
 
+        // Consumo REAL (usageStats) agregado de todos los clientes
+        const IMG_ACTIONS = ['imagen', 'mejorar', 'producto', 'imagen_simple'];
+        const META_KEYS = ['totalTokens', 'totalCalls', 'lastUpdated'];
+        const realByAction: Record<string, { calls: number; tokens: number }> = {};
+        let realTotal = 0;
+        let imageCalls = 0;
+
         snapshot.forEach((doc) => {
           const data = doc.data() as UserProfile;
           usersData.push({ id: doc.id, ...data });
           const tokensUsed = data.usage?.tokensUsed || 0;
           totalTokens += tokensUsed;
           if (tokensUsed > 0) activeUsers++;
+
+          const us = (data.usageStats || {}) as any;
+          Object.keys(us).forEach((k) => {
+            if (META_KEYS.includes(k)) return;
+            const calls = us[k]?.calls || 0;
+            const tokens = us[k]?.tokens || 0;
+            if (!realByAction[k]) realByAction[k] = { calls: 0, tokens: 0 };
+            realByAction[k].calls += calls;
+            realByAction[k].tokens += tokens;
+            realTotal += tokens;
+            if (IMG_ACTIONS.includes(k)) imageCalls += calls;
+          });
         });
+        setRealUsage({ totalTokens: realTotal, imageCalls, byAction: realByAction });
 
         // Fetch design counts in parallel
         const designCounts = await Promise.all(
@@ -121,6 +143,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       editInputRef.current.select();
     }
   }, [editingLimit]);
+
+  const handleSetPlan = async (userId: string, planId: string) => {
+    const plan = PLANS.find(p => p.id === planId);
+    if (!plan) return;
+    try {
+      await firebase.firestore().collection('profiles').doc(userId).update({ plan: plan.id, tokenLimit: plan.credits });
+      setUsers(users.map(u => u.id === userId ? { ...u, plan: plan.id, tokenLimit: plan.credits } : u));
+    } catch (error) {
+      console.error("Error updating plan:", error);
+      alert("Error al cambiar el plan");
+    }
+  };
 
   const handleUpdateLimit = async (userId: string, newLimit: number) => {
     if (isNaN(newLimit) || newLimit <= 0) return;
@@ -330,6 +364,54 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           </div>
         </div>
 
+        {/* Consumo REAL de IA (usageMetadata, todos los clientes) */}
+        <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-700"><i className="fa-solid fa-gauge-high text-[#EA5B25] mr-2"></i>Consumo real de IA</h2>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tokens reales · todos los clientes</span>
+          </div>
+          {(() => {
+            const LABELS: Record<string, { label: string; img: boolean }> = {
+              imagen: { label: 'Imágenes', img: true },
+              mejorar: { label: 'Mejorar imagen', img: true },
+              producto: { label: 'Producto → Aviso', img: true },
+              imagen_simple: { label: 'Imagen simple', img: true },
+              campana: { label: 'Campañas', img: false },
+              copy: { label: 'Copys', img: false },
+              analisis_web: { label: 'Análisis de web', img: false },
+            };
+            const rows = Object.entries(realUsage.byAction)
+              .map(([k, v]) => ({ key: k, label: LABELS[k]?.label || k, img: LABELS[k]?.img || false, calls: v.calls, tokens: v.tokens }))
+              .filter(r => r.calls > 0)
+              .sort((a, b) => b.tokens - a.tokens);
+            const estCost = realUsage.imageCalls * 0.04;
+            if (rows.length === 0) return <p className="text-sm text-slate-400 font-medium">Todavía no hay consumo real registrado. Aparecerá cuando los usuarios generen contenido.</p>;
+            return (
+              <div className="grid md:grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  {rows.map(r => (
+                    <div key={r.key} className="flex items-center justify-between text-sm">
+                      <span className="font-bold text-slate-600"><i className={`fa-solid ${r.img ? 'fa-image text-[#EA5B25]' : 'fa-font text-slate-300'} mr-2 text-xs`}></i>{r.label}</span>
+                      <span className="font-black text-slate-800 tabular-nums">{r.calls} <span className="text-slate-300">·</span> {r.tokens.toLocaleString()} tk</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-3">
+                  <div className="bg-slate-50 rounded-2xl p-4 flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tokens reales totales</span>
+                    <span className="text-xl font-black text-slate-900 tabular-nums">{realUsage.totalTokens.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-orange-50 rounded-2xl p-4 text-center">
+                    <p className="text-[10px] font-black text-[#EA5B25] uppercase tracking-widest">Costo real estimado</p>
+                    <p className="text-3xl font-black text-slate-900">≈ US$ {estCost.toFixed(2)}</p>
+                    <p className="text-[9px] text-slate-400 font-bold mt-1">{realUsage.imageCalls} imágenes · ~US$0,04 c/u (las imágenes son el costo dominante)</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
         {/* Filters & Table */}
         <div className="bg-white border border-slate-100 rounded-[32px] overflow-hidden shadow-sm">
 
@@ -466,6 +548,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                 </span>
                               ) : <span className="text-[11px] text-slate-300 font-bold">N/A</span>}
                             </div>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Plan</span>
+                            <select
+                              value={planForProfile(u.plan, u.tokenLimit)?.id || ''}
+                              onChange={(e) => handleSetPlan(u.id, e.target.value)}
+                              className="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-orange-100"
+                            >
+                              <option value="" disabled>Personalizado</option>
+                              {PLANS.map(p => <option key={p.id} value={p.id}>{p.name} · {p.images} img</option>)}
+                            </select>
                           </div>
                         </td>
 

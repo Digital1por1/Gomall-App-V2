@@ -21,6 +21,7 @@ export interface UserProfile {
   mall: string;
   type?: 'comercio' | 'mall';
   tokenLimit?: number;
+  plan?: string;
   isBlocked?: boolean;
   email?: string;
   usage?: UsageData;

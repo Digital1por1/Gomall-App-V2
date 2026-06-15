@@ -1,5 +1,6 @@
 import React from 'react';
 import { UserProfile } from '../types';
+import { planForProfile } from './plans';
 
 interface HomeProps {
   profile: UserProfile | null;
@@ -47,9 +48,25 @@ const Home: React.FC<HomeProps> = ({
       <div className="max-w-4xl mx-auto px-5 sm:px-8 py-8 sm:py-12 space-y-10">
 
         {/* Saludo */}
-        <div className="space-y-1">
+        <div className="space-y-2">
           <h2 className="font-display text-2xl sm:text-[32px] text-slate-900 leading-tight">Hola{profile?.name ? `, ${profile.name.split(' ')[0]}` : ''} 👋</h2>
           <p className="text-slate-400 text-sm font-medium">¿Qué querés crear hoy?</p>
+          {(() => {
+            const plan = planForProfile(profile?.plan, profile?.tokenLimit);
+            const limit = profile?.tokenLimit || 1000000;
+            const used = profile?.usage?.tokensUsed || 0;
+            const pct = Math.min(100, Math.round((used / limit) * 100));
+            const imagesLeft = Math.max(0, Math.floor((limit - used) / 15000));
+            return (
+              <div className="inline-flex items-center gap-3 bg-white border border-slate-100 rounded-2xl px-4 py-2 shadow-sm shadow-slate-200/40 mt-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-[#EA5B25]"><i className="fa-solid fa-bolt mr-1"></i>Plan {plan?.name || 'Personalizado'}</span>
+                <span className="text-slate-200">·</span>
+                <span className="text-[10px] font-bold text-slate-500">{pct}% usado</span>
+                <span className="text-slate-200">·</span>
+                <span className="text-[10px] font-bold text-slate-500">~{imagesLeft} imágenes restantes</span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* 1 · Tu marca */}

@@ -142,6 +142,7 @@ const BrandOnboarding: React.FC<BrandOnboardingProps> = ({ user, compressBase64I
         email: user.email,
         usage: initialUsage,
         tokenLimit,
+        plan: 'pro',
         companyStory: companyStory.trim(),
         industry: resolvedIndustry,
         brandTone: tones.join(', '),
