@@ -184,7 +184,7 @@ BRIEF DE LA CAMPAÑA:
 
 INSTRUCCIONES:
 1. Proponé exactamente ${String(brief.pieceCount || 4)} piezas de contenido coherentes entre sí y alineadas al objetivo y al rubro "${String(brand.industry || '')}".
-2. Mezclá tipos de pieza segun convenga: "imagen" (post de feed), "reel" (video corto) y "copy" (solo texto/caption).
+2. Tipos de pieza permitidos según las plataformas elegidas: si incluye "Feed / Stories" usá "imagen" (un post sirve para feed y story) y "copy"; si incluye "Reels" podés usar "reel". NUNCA propongas piezas tipo "reel" si "Reels" NO está entre las plataformas seleccionadas.
 3. Para cada pieza:
    - "type": uno de exactamente "imagen", "reel" o "copy".
    - "title": nombre corto y descriptivo de la pieza.

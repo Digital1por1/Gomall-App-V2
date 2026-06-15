@@ -15,7 +15,7 @@ interface CampaignStudioProps {
 }
 
 const OBJECTIVES = ['Vender', 'Lanzar producto', 'Dar a conocer la marca', 'Promoción u oferta', 'Evento', 'Fidelizar clientes'];
-const PLATFORMS = ['Feed', 'Stories', 'Reels'];
+const PLATFORMS = ['Feed / Stories', 'Reels'];
 
 type View = 'list' | 'brief' | 'result';
 
@@ -31,7 +31,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   const [product, setProduct] = useState('');
   const [audience, setAudience] = useState('');
   const [dates, setDates] = useState(initialBrief?.dates || '');
-  const [platforms, setPlatforms] = useState<string[]>(['Feed']);
+  const [platforms, setPlatforms] = useState<string[]>(['Feed / Stories']);
   const [keyMessage, setKeyMessage] = useState(initialBrief?.keyMessage || '');
   const [pieceCount, setPieceCount] = useState(4);
 
@@ -48,7 +48,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
 
   const resetBrief = () => {
     setObjective(''); setProduct(''); setAudience(''); setDates('');
-    setPlatforms(['Feed']); setKeyMessage(''); setPieceCount(4);
+    setPlatforms(['Feed / Stories']); setKeyMessage(''); setPieceCount(4);
   };
 
   const togglePlatform = (p: string) => {
@@ -246,9 +246,10 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
               </div>
 
               <div className="space-y-2">
-                <label className={labelClass}>Cantidad de piezas</label>
-                <div className="flex gap-2">
-                  {[3, 4, 5, 6].map(n => (
+                <label className={labelClass}>¿Cuántas publicaciones querés?</label>
+                <p className="text-[9px] text-slate-300 font-bold px-1">Cada publicación es un contenido distinto (un post o un reel) con su imagen y su texto.</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[1, 2, 3, 4, 5, 6].map(n => (
                     <button key={n} onClick={() => setPieceCount(n)} className={`w-12 h-12 rounded-xl text-sm font-black transition-all ${pieceCount === n ? 'bg-[#EA5B25] text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>{n}</button>
                   ))}
                 </div>
