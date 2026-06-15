@@ -87,13 +87,13 @@ const DEFAULT_STATE: ProjectState = {
   },
   textLayers: {
     headline: {
-      content: '', font: 'Inter', size: 32, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 4, shadowOffset: 2, feedPosition: { x: 50, y: 42 }, storyPosition: { x: 50, y: 48 }, width: 70, bold: false, italic: false, underline: false, lineHeight: 1.2
+      content: '', font: 'Inter', size: 32, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 4, shadowOffset: 2, feedPosition: { x: 50, y: 42 }, storyPosition: { x: 50, y: 48 }, width: 92, bold: false, italic: false, underline: false, lineHeight: 1.2
     },
     description: {
-      content: '', font: 'Inter', size: 16, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 3, shadowOffset: 1, feedPosition: { x: 50, y: 58 }, storyPosition: { x: 50, y: 62 }, width: 70, bold: false, italic: false, underline: false, lineHeight: 1.4
+      content: '', font: 'Inter', size: 16, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 3, shadowOffset: 1, feedPosition: { x: 50, y: 58 }, storyPosition: { x: 50, y: 62 }, width: 90, bold: false, italic: false, underline: false, lineHeight: 1.4
     },
     additional: {
-      content: '', font: 'Inter', size: 14, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 3, shadowOffset: 1, feedPosition: { x: 50, y: 68 }, storyPosition: { x: 50, y: 72 }, width: 70, bold: false, italic: false, underline: false, lineHeight: 1.4
+      content: '', font: 'Inter', size: 14, color: '#000000', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000040', shadowBlur: 3, shadowOffset: 1, feedPosition: { x: 50, y: 68 }, storyPosition: { x: 50, y: 72 }, width: 90, bold: false, italic: false, underline: false, lineHeight: 1.4
     },
     cta: {
       content: '', font: 'Inter', size: 14, color: '#FFFFFF', backgroundColor: 'transparent', align: 'center', shadow: false, shadowColor: '#00000020', shadowBlur: 4, shadowOffset: 2, feedPosition: { x: 50, y: 78 }, storyPosition: { x: 50, y: 82 }, width: 70, bold: false, italic: false, underline: false, lineHeight: 1.2
@@ -540,31 +540,31 @@ const App: React.FC = () => {
     const layouts: Record<string, any> = {
       classic: {
         overlay: 25,
-        headline:    { align: 'center', size: 34, feed: { x: 50, y: 40 }, story: { x: 50, y: 44 } },
-        description: { align: 'center', size: 17, feed: { x: 50, y: 55 }, story: { x: 50, y: 56 } },
-        additional:  { align: 'center', size: 14, feed: { x: 50, y: 64 }, story: { x: 50, y: 64 } },
-        cta:         { align: 'center', size: 14, feed: { x: 50, y: 80 }, story: { x: 50, y: 78 } },
+        headline:    { align: 'center', size: 34, w: 92, feed: { x: 50, y: 40 }, story: { x: 50, y: 44 } },
+        description: { align: 'center', size: 17, w: 90, feed: { x: 50, y: 55 }, story: { x: 50, y: 57 } },
+        additional:  { align: 'center', size: 14, w: 88, feed: { x: 50, y: 64 }, story: { x: 50, y: 66 } },
+        cta:         { align: 'center', size: 14, w: 60, feed: { x: 50, y: 80 }, story: { x: 50, y: 78 } },
       },
       editorial: {
         overlay: 32,
-        headline:    { align: 'left', size: 30, feed: { x: 32, y: 58 }, story: { x: 34, y: 56 } },
-        description: { align: 'left', size: 15, feed: { x: 32, y: 70 }, story: { x: 34, y: 66 } },
-        additional:  { align: 'left', size: 13, feed: { x: 32, y: 78 }, story: { x: 34, y: 73 } },
-        cta:         { align: 'left', size: 13, feed: { x: 28, y: 87 }, story: { x: 30, y: 80 } },
+        headline:    { align: 'left', size: 30, w: 84, feed: { x: 50, y: 56 }, story: { x: 50, y: 54 } },
+        description: { align: 'left', size: 15, w: 80, feed: { x: 50, y: 68 }, story: { x: 50, y: 64 } },
+        additional:  { align: 'left', size: 13, w: 76, feed: { x: 50, y: 77 }, story: { x: 50, y: 72 } },
+        cta:         { align: 'left', size: 13, w: 50, feed: { x: 50, y: 87 }, story: { x: 50, y: 80 } },
       },
       bold: {
         overlay: 45,
-        headline:    { align: 'center', size: 46, feed: { x: 50, y: 44 }, story: { x: 50, y: 46 } },
-        description: { align: 'center', size: 18, feed: { x: 50, y: 62 }, story: { x: 50, y: 62 } },
-        additional:  { align: 'center', size: 14, feed: { x: 50, y: 70 }, story: { x: 50, y: 70 } },
-        cta:         { align: 'center', size: 15, feed: { x: 50, y: 82 }, story: { x: 50, y: 79 } },
+        headline:    { align: 'center', size: 40, w: 94, feed: { x: 50, y: 42 }, story: { x: 50, y: 44 } },
+        description: { align: 'center', size: 18, w: 88, feed: { x: 50, y: 60 }, story: { x: 50, y: 60 } },
+        additional:  { align: 'center', size: 14, w: 82, feed: { x: 50, y: 69 }, story: { x: 50, y: 69 } },
+        cta:         { align: 'center', size: 15, w: 64, feed: { x: 50, y: 82 }, story: { x: 50, y: 79 } },
       },
       minimal: {
         overlay: 12,
-        headline:    { align: 'center', size: 24, feed: { x: 50, y: 76 }, story: { x: 50, y: 73 } },
-        description: { align: 'center', size: 14, feed: { x: 50, y: 84 }, story: { x: 50, y: 79 } },
-        additional:  { align: 'center', size: 12, feed: { x: 50, y: 89 }, story: { x: 50, y: 84 } },
-        cta:         { align: 'center', size: 13, feed: { x: 50, y: 92 }, story: { x: 50, y: 88 } },
+        headline:    { align: 'center', size: 24, w: 84, feed: { x: 50, y: 74 }, story: { x: 50, y: 72 } },
+        description: { align: 'center', size: 14, w: 82, feed: { x: 50, y: 82 }, story: { x: 50, y: 78 } },
+        additional:  { align: 'center', size: 12, w: 80, feed: { x: 50, y: 88 }, story: { x: 50, y: 83 } },
+        cta:         { align: 'center', size: 13, w: 60, feed: { x: 50, y: 93 }, story: { x: 50, y: 88 } },
       },
     };
     const cfg = layouts[type];
@@ -574,7 +574,7 @@ const App: React.FC = () => {
       const build = (key: 'headline' | 'description' | 'additional' | 'cta') => {
         const l = prev.textLayers[key];
         const c = cfg[key];
-        return { ...l, align: c.align, size: c.size, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: colorFor[key] || l.color };
+        return { ...l, align: c.align, size: c.size, width: c.w ?? l.width, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: colorFor[key] || l.color };
       };
       return {
         ...prev,
@@ -596,12 +596,10 @@ const App: React.FC = () => {
   };
 
   const handleProductAd = (imageUrl: string, prompt: string) => {
-    const kit = profile?.brandKits?.[0];
     setState(prev => ({
       ...prev,
       imageVariants: [{ id: String(Date.now()), url: imageUrl, prompt }, ...prev.imageVariants],
       selectedVariantIndex: 0,
-      logo: kit?.logoUrls?.[0] ? { ...prev.logo, url: kit.logoUrls[0] } : prev.logo,
     }));
     setShowProductAd(false);
     setActiveTab('editor');
@@ -633,7 +631,6 @@ const App: React.FC = () => {
         ...prev,
         copies: newCopies,
         selectedCopyIndex: piece.copy ? newCopies.length - 1 : prev.selectedCopyIndex,
-        logo: kit?.logoUrls?.[0] ? { ...prev.logo, url: kit.logoUrls[0] } : prev.logo,
         resource: kit?.resourceUrls?.[0] ? { ...prev.resource, url: kit.resourceUrls[0] } : prev.resource,
         backgroundOverlayColor: kit?.overlayColor ?? prev.backgroundOverlayColor,
         ctaBgColor: kit?.ctaBgColor ?? prev.ctaBgColor,

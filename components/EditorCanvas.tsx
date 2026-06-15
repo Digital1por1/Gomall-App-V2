@@ -424,9 +424,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
             const pos = layout === 'feed' ? t.feedPosition : t.storyPosition;
             
-            // Imposición de Ancho Máximo Dinámico basado en Safe Zones
-            const maxSafeWidth = layout === 'story' ? 70 : 90;
-            const effectiveWidth = Math.min(t.width, maxSafeWidth);
+            // El texto puede usar el ancho completo del feed/story (sin recorte a zonas de seguridad)
+            const effectiveWidth = Math.min(t.width, 100);
 
             const hasBackground = t.backgroundColor && t.backgroundColor !== 'transparent';
 
