@@ -879,7 +879,7 @@ const App: React.FC = () => {
       const options = {
         pixelRatio: isMobile ? 3 : 4,
         backgroundColor: '#ffffff',
-        cacheBust: true,
+        cacheBust: false,
         style: {
           border: 'none', boxShadow: 'none', margin: '0', padding: '0', borderRadius: '0', top: '0', left: '0', outline: 'none', webkitFontSmoothing: 'antialiased', mozOsxFontSmoothing: 'grayscale'
         },
@@ -970,7 +970,7 @@ const App: React.FC = () => {
         quality: 0.4,
         pixelRatio: 0.5,
         backgroundColor: '#ffffff',
-        cacheBust: true,
+        cacheBust: false,
         filter: (node: any) => {
           if (node.classList) {
             if (node.classList.contains('nav-variant-btn')) return false;
