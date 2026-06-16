@@ -111,6 +111,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const voiceSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micChunksRef = useRef<Blob[]>([]);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end' } | null>(null);
 
   // Carga del logo de marca para el overlay
   useEffect(() => {
@@ -139,6 +141,35 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     });
   };
   const handleVideoFile = (file: File) => addClip(file);
+
+  // --- Línea de tiempo (estilo CapCut): recorte por bordes + dividir ---
+  const TL_PX = 48; // píxeles por segundo en la línea de tiempo
+  const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + (c.duration || 0) * TL_PX, 0);
+  const onTrackPointerMove = (e: React.PointerEvent) => {
+    const d = draggingRef.current;
+    if (!d) return;
+    const idx = clips.findIndex(c => c.id === d.clipId);
+    if (idx < 0) return;
+    const clip = clips[idx];
+    const track = trackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const x = e.clientX - rect.left + track.scrollLeft - clipLeftPx(idx);
+    const t = Math.max(0, Math.min(clip.duration || 0, x / TL_PX));
+    setClips(prev => prev.map(c => c.id === d.clipId
+      ? (d.edge === 'start' ? { ...c, trimStart: Math.min(t, c.trimEnd - 0.3) } : { ...c, trimEnd: Math.max(t, c.trimStart + 0.3) })
+      : c));
+  };
+  const endDrag = () => { draggingRef.current = null; };
+  const splitActive = () => {
+    const clip = clips[activeIdx];
+    if (!clip) return;
+    const t = currentTime;
+    if (t <= clip.trimStart + 0.3 || t >= clip.trimEnd - 0.3) { alert('Mové el cabezal a un punto dentro del clip para dividirlo.'); return; }
+    const a = { ...clip, trimEnd: t };
+    const b: Clip = { ...clip, id: `clip_${Date.now()}`, trimStart: t };
+    setClips(prev => { const next = [...prev]; next.splice(activeIdx, 1, a, b); return next; });
+  };
 
   const handleMusicFile = (file: File) => {
     const url = URL.createObjectURL(file);
@@ -622,6 +653,34 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </label>
                 </div>
                 {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Seleccioná un clip para recortarlo. Se exportan unidos, en orden.</p>}
+              </div>
+
+              {/* Línea de tiempo */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className={labelClass}>Línea de tiempo</span>
+                  <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
+                </div>
+                <div ref={trackRef} onPointerMove={onTrackPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none">
+                  <div className="relative h-14" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
+                    {clips.map((c, idx) => {
+                      const left = clipLeftPx(idx);
+                      const width = (c.duration || 0) * TL_PX;
+                      return (
+                        <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 ${idx === activeIdx ? 'border-purple-400' : 'border-slate-700'}`} style={{ left, width }}>
+                          <div className="absolute inset-0 bg-purple-950/60" />
+                          <div className="absolute top-0 bottom-0 bg-purple-600/60 flex items-center" style={{ left: c.trimStart * TL_PX, width: Math.max(0, (c.trimEnd - c.trimStart) * TL_PX) }}>
+                            <span className="text-[8px] text-white font-black uppercase px-2 truncate">Clip {idx + 1}</span>
+                          </div>
+                          <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center" style={{ left: c.trimStart * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
+                          <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center" style={{ left: c.trimEnd * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
+                          {idx === activeIdx && <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none" style={{ left: currentTime * TL_PX }} />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-300 font-bold">Arrastrá los bordes blancos para recortar. Para dividir, ubicá el cabezal con el play/barra de arriba y tocá "Dividir acá".</p>
               </div>
 
               {/* Recorte */}
