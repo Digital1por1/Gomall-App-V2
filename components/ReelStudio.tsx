@@ -45,8 +45,10 @@ interface Clip {
 const CANVAS_W = 1080;
 const CANVAS_H = 1920;
 const FPS = 30;
-const CORE_VERSION = '0.12.10';
+const CORE_VERSION = '0.12.6';
 const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+const FFMPEG_VERSION = '0.12.15';
+const FFMPEG_WORKER_URL = `https://unpkg.com/@ffmpeg/ffmpeg@${FFMPEG_VERSION}/dist/umd/814.ffmpeg.js`;
 
 const fmt = (s: number) => {
   if (!isFinite(s) || s < 0) s = 0;
@@ -455,6 +457,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     ffmpeg.on('log', ({ message }) => { ffmpegLogRef.current += message + '\n'; });
     try {
       await ffmpeg.load({
+        classWorkerURL: await toBlobURL(FFMPEG_WORKER_URL, 'text/javascript'),
         coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
       });
