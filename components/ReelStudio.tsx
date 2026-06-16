@@ -32,6 +32,30 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+// Convierte un WAV PCM 16-bit mono (de ffmpeg) en una serie de picos normalizados (0-1) para dibujar la onda.
+function wavToPeaks(bytes: Uint8Array, buckets: number): number[] {
+  const HEADER = 44;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const total = Math.floor((bytes.byteLength - HEADER) / 2);
+  if (total <= 0) return [];
+  const per = Math.max(1, Math.floor(total / buckets));
+  const peaks: number[] = [];
+  let max = 1;
+  for (let b = 0; b < buckets; b++) {
+    let peak = 0;
+    const base = HEADER + b * per * 2;
+    for (let i = 0; i < per; i++) {
+      const idx = base + i * 2;
+      if (idx + 1 >= bytes.byteLength) break;
+      const s = Math.abs(dv.getInt16(idx, true));
+      if (s > peak) peak = s;
+    }
+    peaks.push(peak);
+    if (peak > max) max = peak;
+  }
+  return peaks.map(p => Math.pow(p / max, 0.7)); // realza picos chicos para que la onda se vea
+}
+
 interface ReelStudioProps {
   profile: UserProfile | null;
   onClose: () => void;
@@ -130,6 +154,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const micChunksRef = useRef<Blob[]>([]);
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end' } | null>(null);
+  const [clipPeaks, setClipPeaks] = useState<Record<string, number[]>>({}); // onda de audio por clip
+  const peaksBusyRef = useRef<Set<string>>(new Set());
 
   // Carga del logo de marca para el overlay
   useEffect(() => {
@@ -178,6 +204,26 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       : c));
   };
   const endDrag = () => { draggingRef.current = null; };
+
+  // Calcula la onda de audio de cada clip (lazy, con ffmpeg). No bloquea la edición; si no hay audio queda plano.
+  const clipIdsKey = clips.map(c => c.id).join('|');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const c of clips) {
+        if (clipPeaks[c.id] || peaksBusyRef.current.has(c.id)) continue;
+        peaksBusyRef.current.add(c.id);
+        try {
+          const { bytes } = await getAudioWav(c.url);
+          const peaks = wavToPeaks(bytes, 220);
+          if (!cancelled && peaks.length) setClipPeaks(prev => ({ ...prev, [c.id]: peaks }));
+        } catch { /* sin audio → onda plana */ }
+        finally { peaksBusyRef.current.delete(c.id); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clipIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const splitActive = () => {
     const clip = clips[activeIdx];
     if (!clip) return;
@@ -745,25 +791,55 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
                 </div>
                 <div ref={trackRef} onPointerMove={onTrackPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none">
-                  <div className="relative h-14" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
-                    {clips.map((c, idx) => {
-                      const left = clipLeftPx(idx);
-                      const width = (c.duration || 0) * TL_PX;
-                      return (
-                        <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 ${idx === activeIdx ? 'border-purple-400' : 'border-slate-700'}`} style={{ left, width }}>
-                          <div className="absolute inset-0 bg-purple-950/60" />
-                          <div className="absolute top-0 bottom-0 bg-purple-600/60 flex items-center" style={{ left: c.trimStart * TL_PX, width: Math.max(0, (c.trimEnd - c.trimStart) * TL_PX) }}>
-                            <span className="text-[8px] text-white font-black uppercase px-2 truncate">Clip {idx + 1}</span>
+                  <div className="relative" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
+                    {/* Pista de video */}
+                    <div className="relative h-14">
+                      {clips.map((c, idx) => {
+                        const left = clipLeftPx(idx);
+                        const width = (c.duration || 0) * TL_PX;
+                        return (
+                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 ${idx === activeIdx ? 'border-purple-400' : 'border-slate-700'}`} style={{ left, width }}>
+                            <div className="absolute inset-0 bg-purple-950/60" />
+                            <div className="absolute top-0 bottom-0 bg-purple-600/60 flex items-center" style={{ left: c.trimStart * TL_PX, width: Math.max(0, (c.trimEnd - c.trimStart) * TL_PX) }}>
+                              <span className="text-[8px] text-white font-black uppercase px-2 truncate">Clip {idx + 1}</span>
+                            </div>
+                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimStart * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
+                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimEnd * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
                           </div>
-                          <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center" style={{ left: c.trimStart * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
-                          <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center" style={{ left: c.trimEnd * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
-                          {idx === activeIdx && <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none" style={{ left: currentTime * TL_PX }} />}
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    {/* Pista de audio (onda) */}
+                    <div className="relative h-10 mt-1.5">
+                      {clips.map((c, idx) => {
+                        const left = clipLeftPx(idx);
+                        const width = (c.duration || 0) * TL_PX;
+                        const peaks = clipPeaks[c.id];
+                        return (
+                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-10 rounded-lg overflow-hidden border ${idx === activeIdx ? 'border-emerald-400/70' : 'border-slate-700'}`} style={{ left, width }}>
+                            <div className="absolute inset-0 bg-emerald-950/40" />
+                            {peaks ? (
+                              <div className="absolute inset-0 flex items-center gap-px px-px">
+                                {peaks.map((p, i) => {
+                                  const tt = (i / peaks.length) * (c.duration || 0);
+                                  const inTrim = tt >= c.trimStart && tt <= c.trimEnd;
+                                  return <div key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(6, p * 100)}%`, background: inTrim ? '#34d399' : '#475569' }} />;
+                                })}
+                              </div>
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-[8px] text-emerald-300/50 font-black uppercase tracking-widest"><i className="fa-solid fa-circle-notch fa-spin mr-1"></i>Audio</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Cabezal (cruza ambas pistas) */}
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + currentTime * TL_PX }} />
                   </div>
                 </div>
-                <p className="text-[9px] text-slate-300 font-bold">Arrastrá los bordes blancos para recortar. Para dividir, ubicá el cabezal con el play/barra de arriba y tocá "Dividir acá".</p>
+                <p className="text-[9px] text-slate-300 font-bold">Arriba el video, abajo la onda de audio. Arrastrá los bordes blancos para recortar desde las puntas. Para dividir, ubicá el cabezal y tocá "Dividir acá".</p>
               </div>
 
               {/* Recorte */}
