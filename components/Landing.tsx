@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface LandingProps {
   onLogin: () => void;
@@ -32,24 +32,32 @@ const STEPS = [
   { n: '3', icon: 'fa-share-nodes', title: 'Editá y publicá', desc: 'Ajustás lo que quieras en el editor, descargás y subís a tus redes.' },
 ];
 
-// Mockup CSS de un post generado (sin imágenes externas)
-const PostMockup: React.FC = () => (
-  <div className="w-full max-w-[300px] mx-auto bg-white rounded-[28px] shadow-2xl shadow-slate-300/50 border border-slate-100 p-3 rotate-[1.5deg]">
-    <div className="rounded-[20px] overflow-hidden aspect-[4/5] bg-gradient-to-br from-[#EA5B25] via-[#f0814f] to-amber-400 relative flex flex-col justify-end p-5">
-      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur rounded-xl px-3 py-1.5 text-[9px] font-black text-[#EA5B25] uppercase tracking-widest">Tu Marca</div>
-      <div className="absolute inset-0 bg-black/15" />
-      <div className="relative space-y-2">
-        <h3 className="font-display text-white text-2xl leading-tight drop-shadow">Nueva colección de invierno</h3>
-        <p className="text-white/90 text-[11px] font-semibold">Hasta 30% off · Solo esta semana</p>
-        <div className="inline-block bg-white text-[#EA5B25] text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full mt-1">Ver más</div>
+// Mockup de un post generado. Usa una imagen real (/hero.jpg) con respaldo de gradiente.
+const PostMockup: React.FC = () => {
+  const [imgOk, setImgOk] = useState(true);
+  return (
+    <div className="w-full max-w-[300px] mx-auto bg-white rounded-[28px] shadow-2xl shadow-slate-300/50 border border-slate-100 p-3 rotate-[1.5deg]">
+      <div className="rounded-[20px] overflow-hidden aspect-[4/5] relative flex flex-col justify-end p-5">
+        {imgOk ? (
+          <img src="/hero.jpg" alt="Ejemplo de post" className="absolute inset-0 w-full h-full object-cover" onError={() => setImgOk(false)} />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-[#EA5B25] via-[#f0814f] to-amber-400" />
+        )}
+        <div className="absolute top-4 left-4 bg-white/90 backdrop-blur rounded-xl px-3 py-1.5 text-[9px] font-black text-[#EA5B25] uppercase tracking-widest z-10">Tu Marca</div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+        <div className="relative z-10 space-y-2">
+          <h3 className="font-display text-white text-2xl leading-tight drop-shadow">Nueva colección</h3>
+          <p className="text-white/90 text-[11px] font-semibold drop-shadow">Hasta 30% off · Solo esta semana</p>
+          <div className="inline-block bg-white text-[#EA5B25] text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full mt-1">Ver más</div>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-1 pt-3 pb-1 text-slate-300">
+        <i className="fa-regular fa-heart"></i><i className="fa-regular fa-comment"></i><i className="fa-regular fa-paper-plane"></i>
+        <i className="fa-regular fa-bookmark ml-auto"></i>
       </div>
     </div>
-    <div className="flex items-center gap-3 px-1 pt-3 pb-1 text-slate-300">
-      <i className="fa-regular fa-heart"></i><i className="fa-regular fa-comment"></i><i className="fa-regular fa-paper-plane"></i>
-      <i className="fa-regular fa-bookmark ml-auto"></i>
-    </div>
-  </div>
-);
+  );
+};
 
 const Landing: React.FC<LandingProps> = ({ onLogin }) => {
   return (
