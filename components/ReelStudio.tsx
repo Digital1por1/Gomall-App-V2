@@ -679,15 +679,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       if (hasAudio) tracks.push(dest.stream.getAudioTracks()[0]);
 
       const combined = new MediaStream(tracks);
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : 'video/webm';
-      const recorder = new MediaRecorder(combined, { mimeType: mime });
+      // Si el navegador puede grabar MP4 nativo, lo usamos y nos salteamos la conversión con ffmpeg (mucho más rápido).
+      const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
+        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
+      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+      const isMp4 = !!mp4Mime;
+      const recMime = mp4Mime || webmMime;
+      const recorder = new MediaRecorder(combined, { mimeType: recMime });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
       const stopped = new Promise<Blob>((resolve) => {
-        recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
       });
 
       // Rangos a grabar: si hay 1 clip con pausas detectadas, sus segmentos; si no, el recorte de cada clip (concatenados)
@@ -718,12 +721,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         await new Promise<void>((res) => { v.onseeked = () => res(); });
         await v.play().catch(() => {});
         await new Promise<void>((resolve) => {
+          let lastUi = 0;
           const step = () => {
             drawFrame(v.currentTime);
-            const done = elapsedBefore + Math.max(0, v.currentTime - range.start);
-            const pct = Math.min(69, Math.round((done / totalDur) * 70));
-            setExportPct(pct);
-            setExportMsg(`Grabando el reel… ${pct}%`);
+            // El estado se actualiza como mucho cada 250ms para no recargar React en cada frame (evita el tirón).
+            const now = performance.now();
+            if (now - lastUi > 250) {
+              lastUi = now;
+              const done = elapsedBefore + Math.max(0, v.currentTime - range.start);
+              const pct = Math.min(69, Math.round((done / totalDur) * 70));
+              setExportPct(pct);
+              setExportMsg(`Grabando el reel… ${pct}%`);
+            }
             if (v.currentTime >= range.end || v.ended) { v.pause(); resolve(); return; }
             requestAnimationFrame(step);
           };
@@ -738,15 +747,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       if (voiceElRef.current) voiceElRef.current.pause();
 
       recorder.stop();
-      const webmBlob = await stopped;
+      const recBlob = await stopped;
 
-      setExportMsg('Cargando conversor de video…');
-      const ffmpeg = await loadFFmpeg();
-      await ffmpeg.writeFile('in.webm', await fetchFile(webmBlob));
-      setExportMsg('Convirtiendo a MP4…');
-      await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', 'out.mp4']);
-      const data = await ffmpeg.readFile('out.mp4');
-      const mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+      let mp4Blob: Blob;
+      if (isMp4) {
+        // El navegador ya grabó MP4: no hace falta convertir.
+        setExportPct(98);
+        setExportMsg('Finalizando…');
+        mp4Blob = recBlob;
+      } else {
+        setExportMsg('Cargando conversor de video…');
+        const ffmpeg = await loadFFmpeg();
+        await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
+        setExportMsg('Convirtiendo a MP4…');
+        // preset ultrafast: la conversión en WASM es mucho más rápida (el cuello de botella anterior).
+        await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', 'out.mp4']);
+        const data = await ffmpeg.readFile('out.mp4');
+        mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+      }
       const url = URL.createObjectURL(mp4Blob);
       setExportedUrl(url);
       setExportPct(100);
