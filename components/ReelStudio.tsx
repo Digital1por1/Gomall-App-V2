@@ -341,8 +341,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
       }));
     } catch (e: any) {
-      console.error('Subtítulos:', e);
-      alert('No se pudieron generar los subtítulos.\n\nMotivo: ' + (e?.message || 'error desconocido'));
+      console.error('Subtítulos:', e, ffmpegLogRef.current);
+      const motivo = e?.message || (typeof e === 'string' ? e : '') || (e?.name ? e.name : '') || (e ? JSON.stringify(e) : '') || 'error desconocido';
+      alert('No se pudieron generar los subtítulos.\n\nMotivo: ' + motivo);
     } finally {
       setTranscribing(false);
     }
@@ -444,16 +445,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const stopRecording = () => { micRecorderRef.current?.stop(); setRecording(false); };
   const removeVoice = () => { setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; voiceSourceRef.current = null; };
 
+  const ffmpegLogRef = useRef<string>('');
   const loadFFmpeg = async () => {
     if (ffmpegRef.current) return ffmpegRef.current;
     const ffmpeg = new FFmpeg();
     ffmpeg.on('progress', ({ progress }) => {
       setExportMsg(`Convirtiendo a MP4… ${Math.min(100, Math.round(progress * 100))}%`);
     });
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
+    ffmpeg.on('log', ({ message }) => { ffmpegLogRef.current += message + '\n'; });
+    try {
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+    } catch (e: any) {
+      throw new Error('No se pudo cargar el motor de video (ffmpeg). Revisá tu conexión y reintentá. ' + (e?.message || String(e)));
+    }
     ffmpegRef.current = ffmpeg;
     return ffmpeg;
   };
@@ -466,10 +473,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const ext = t.includes('quicktime') || t.includes('mov') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('matroska') ? 'mkv' : 'mp4';
     const inName = `aud_src.${ext}`;
     await ffmpeg.writeFile(inName, await fetchFile(blob));
-    await ffmpeg.exec(['-i', inName, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
-    const data = await ffmpeg.readFile('aud_out.wav');
+    ffmpegLogRef.current = '';
+    const code = await ffmpeg.exec(['-i', inName, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
+    if (typeof code === 'number' && code !== 0) {
+      const log = ffmpegLogRef.current.toLowerCase();
+      if (log.includes('does not contain any stream') || log.includes('output file does not contain') || log.includes('no audio')) {
+        throw new Error('Este video no tiene pista de audio, así que no hay voz para transcribir.');
+      }
+      throw new Error('ffmpeg no pudo procesar el audio (código ' + code + ').');
+    }
+    let data: any;
+    try {
+      data = await ffmpeg.readFile('aud_out.wav');
+    } catch {
+      throw new Error('Este video no tiene pista de audio, así que no hay voz para transcribir.');
+    }
     const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
-    if (!bytes || bytes.byteLength < 200) throw new Error('ffmpeg no devolvió audio (el video puede no tener pista de audio).');
+    if (!bytes || bytes.byteLength < 200) throw new Error('Este video no tiene pista de audio (o está en silencio), así que no hay voz para transcribir.');
     return { base64: bytesToBase64(bytes), bytes };
   };
 
