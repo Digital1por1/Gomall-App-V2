@@ -149,10 +149,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const musicElRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const musicSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const musicGainRef = useRef<GainNode | null>(null);
   const videoSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const videoGainRef = useRef<GainNode | null>(null);
   const voiceElRef = useRef<HTMLAudioElement | null>(null);
   const voiceSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const voiceGainRef = useRef<GainNode | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micChunksRef = useRef<Blob[]>([]);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -274,6 +276,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   const handleMusicFile = (file: File) => {
     const url = URL.createObjectURL(file);
+    // Reconstruye el nodo de audio con la pista nueva
+    musicElRef.current?.pause();
+    try { musicSourceRef.current?.disconnect(); musicGainRef.current?.disconnect(); } catch {}
+    musicElRef.current = null; musicSourceRef.current = null; musicGainRef.current = null;
     setMusicUrl(url);
     setMusicName(file.name);
   };
@@ -295,18 +301,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
-  // Volumen del audio original del video — en vivo (preview) y en el export
+  // Volúmenes en vivo (preview y export comparten el mismo gain)
   useEffect(() => {
     const v = videoRef.current;
-    if (videoSourceRef.current) {
-      // El audio del video pasa por WebAudio (tras un export): se controla con el gain
-      if (videoGainRef.current) { try { videoGainRef.current.gain.value = videoVolume; } catch {} }
-    } else if (v) {
-      // Antes de cualquier export, el video suena de forma nativa
-      v.muted = videoVolume === 0;
-      v.volume = videoVolume;
-    }
+    if (videoGainRef.current) { try { videoGainRef.current.gain.value = videoVolume; } catch {} }
+    else if (v) { v.muted = videoVolume === 0; v.volume = videoVolume; } // antes de construir el grafo
   }, [videoVolume]);
+  useEffect(() => { if (musicGainRef.current) { try { musicGainRef.current.gain.value = musicVolume; } catch {} } }, [musicVolume]);
+  useEffect(() => { if (voiceGainRef.current) { try { voiceGainRef.current.gain.value = voiceVolume; } catch {} } }, [voiceVolume]);
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas
   const drawFrame = useCallback((t: number) => {
@@ -400,6 +402,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     drawFrame(v.currentTime);
     if (v.currentTime >= trimEnd) {
       v.pause();
+      musicElRef.current?.pause();
+      voiceElRef.current?.pause();
       setPlaying(false);
       return;
     }
@@ -434,13 +438,63 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (first) seek((first.start + first.end) / 2);
   }, [subStyle, subFont]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Construye (una sola vez) el grafo de audio: video + música + voz → gains → salida.
+  // El mismo grafo sirve para escuchar en el preview y para exportar.
+  const ensureAudioGraph = () => {
+    const v = videoRef.current;
+    if (!v) return null;
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+    const actx = audioCtxRef.current;
+    try {
+      if (!videoSourceRef.current) { videoSourceRef.current = actx.createMediaElementSource(v); v.muted = false; v.volume = 1; }
+      if (!videoGainRef.current) { videoGainRef.current = actx.createGain(); videoSourceRef.current.connect(videoGainRef.current); videoGainRef.current.connect(actx.destination); }
+      videoGainRef.current.gain.value = videoVolume;
+    } catch {}
+    if (musicUrl) {
+      if (!musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; }
+      try {
+        if (!musicSourceRef.current) musicSourceRef.current = actx.createMediaElementSource(musicElRef.current);
+        if (!musicGainRef.current) { musicGainRef.current = actx.createGain(); musicSourceRef.current.connect(musicGainRef.current); musicGainRef.current.connect(actx.destination); }
+        musicGainRef.current.gain.value = musicVolume;
+      } catch {}
+    }
+    if (voiceUrl) {
+      if (!voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
+      try {
+        if (!voiceSourceRef.current) voiceSourceRef.current = actx.createMediaElementSource(voiceElRef.current);
+        if (!voiceGainRef.current) { voiceGainRef.current = actx.createGain(); voiceSourceRef.current.connect(voiceGainRef.current); voiceGainRef.current.connect(actx.destination); }
+        voiceGainRef.current.gain.value = voiceVolume;
+      } catch {}
+    }
+    return actx;
+  };
+
+  // Tiempo global (en el reel concatenado) en el que está parado el preview
+  const globalOffsetActive = () => {
+    let off = 0;
+    for (let i = 0; i < activeIdx; i++) off += Math.max(0, (clips[i].trimEnd - clips[i].trimStart));
+    return off;
+  };
+  // Reproduce música/voz sincronizadas con el video (preview)
+  const playBeds = () => {
+    const pos = globalOffsetActive() + Math.max(0, (videoRef.current?.currentTime || 0) - trimStart);
+    const m = musicElRef.current;
+    if (m && musicUrl) { const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
+    const vo = voiceElRef.current;
+    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { vo.currentTime = pos; vo.play().catch(() => {}); }
+  };
+  const pauseBeds = () => { musicElRef.current?.pause(); voiceElRef.current?.pause(); };
+
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) { v.pause(); setPlaying(false); }
+    if (playing) { v.pause(); pauseBeds(); setPlaying(false); }
     else {
+      ensureAudioGraph();
+      audioCtxRef.current?.resume?.();
       if (v.currentTime < trimStart || v.currentTime >= trimEnd) v.currentTime = trimStart;
       v.play();
+      playBeds();
       setPlaying(true);
     }
   };
@@ -557,10 +611,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // --- Voz en off ---
   const handleVoiceFile = (file: File) => {
+    try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {}
     setVoiceUrl(URL.createObjectURL(file));
     setVoiceName(file.name);
     voiceElRef.current = null;
     voiceSourceRef.current = null;
+    voiceGainRef.current = null;
   };
   const startRecording = async () => {
     try {
@@ -571,10 +627,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       rec.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
         const blob = new Blob(micChunksRef.current, { type: 'audio/webm' });
+        try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {}
         setVoiceUrl(URL.createObjectURL(blob));
         setVoiceName('Grabación de voz');
         voiceElRef.current = null;
         voiceSourceRef.current = null;
+        voiceGainRef.current = null;
       };
       micRecorderRef.current = rec;
       rec.start();
@@ -584,7 +642,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
   const stopRecording = () => { micRecorderRef.current?.stop(); setRecording(false); };
-  const removeVoice = () => { setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; voiceSourceRef.current = null; };
+  const removeVoice = () => { voiceElRef.current?.pause(); try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {} setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; voiceSourceRef.current = null; voiceGainRef.current = null; };
 
   const ffmpegLogRef = useRef<string>('');
   const loadFFmpeg = async () => {
@@ -654,52 +712,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
       const tracks: MediaStreamTrack[] = [canvasStream.getVideoTracks()[0]];
 
-      // Mezcla de audio en un solo destino: audio del video + música + voz en off
-      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-      const actx = audioCtxRef.current;
+      // Mezcla de audio: reutiliza el MISMO grafo que el preview (un solo camino → sin eco)
+      const actx = ensureAudioGraph();
+      if (!actx) throw new Error('No se pudo iniciar el audio.');
       if (actx.state === 'suspended') await actx.resume();
       const dest = actx.createMediaStreamDestination();
       let hasAudio = false;
 
-      // IMPORTANTE: desconectar las fuentes persistentes de exports anteriores.
-      // Si no, cada export agrega un nuevo camino fuente→gain→destino y el audio se duplica (eco).
-      try { videoSourceRef.current?.disconnect(); } catch {}
-      try { videoGainRef.current?.disconnect(); } catch {}
-      try { musicSourceRef.current?.disconnect(); } catch {}
-      try { voiceSourceRef.current?.disconnect(); } catch {}
-
-      // Audio propio del video (con su volumen, reutilizando un gain persistente)
-      try {
-        if (!videoSourceRef.current) videoSourceRef.current = actx.createMediaElementSource(v);
-        // Al rutear por WebAudio, el elemento pasa la señal completa y el gain hace el volumen
-        v.muted = false; v.volume = 1;
-        if (!videoGainRef.current) videoGainRef.current = actx.createGain();
-        videoGainRef.current.gain.value = videoVolume;
-        videoSourceRef.current.connect(videoGainRef.current);
-        videoGainRef.current.connect(dest);
-        videoGainRef.current.connect(actx.destination); // mantiene el sonido del video en la previsualización
-        hasAudio = true;
-      } catch { /* ya conectado */ }
-
-      // Música
-      if (musicUrl) {
-        if (!musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; }
-        musicElRef.current.currentTime = 0;
-        if (!musicSourceRef.current) musicSourceRef.current = actx.createMediaElementSource(musicElRef.current);
-        const g = actx.createGain(); g.gain.value = musicVolume;
-        musicSourceRef.current.connect(g); g.connect(dest);
-        hasAudio = true;
-      }
-
-      // Voz en off
-      if (voiceUrl) {
-        if (!voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
-        voiceElRef.current.currentTime = 0;
-        if (!voiceSourceRef.current) voiceSourceRef.current = actx.createMediaElementSource(voiceElRef.current);
-        const g = actx.createGain(); g.gain.value = voiceVolume;
-        voiceSourceRef.current.connect(g); g.connect(dest);
-        hasAudio = true;
-      }
+      // Conecta cada gain también al destino de grabación (además del monitor del preview)
+      if (videoGainRef.current) { videoGainRef.current.gain.value = videoVolume; videoGainRef.current.connect(dest); hasAudio = true; }
+      if (musicUrl && musicElRef.current && musicGainRef.current) { musicElRef.current.currentTime = 0; musicGainRef.current.gain.value = musicVolume; musicGainRef.current.connect(dest); hasAudio = true; }
+      if (voiceUrl && voiceElRef.current && voiceGainRef.current) { voiceElRef.current.currentTime = 0; voiceGainRef.current.gain.value = voiceVolume; voiceGainRef.current.connect(dest); hasAudio = true; }
 
       if (hasAudio) tracks.push(dest.stream.getAudioTracks()[0]);
 
@@ -773,6 +796,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       recorder.stop();
       const recBlob = await stopped;
+
+      // Desconecta los gains del destino de grabación (el monitor del preview queda intacto)
+      try { videoGainRef.current?.disconnect(dest); } catch {}
+      try { musicGainRef.current?.disconnect(dest); } catch {}
+      try { voiceGainRef.current?.disconnect(dest); } catch {}
 
       let mp4Blob: Blob;
       if (isMp4) {
@@ -979,7 +1007,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <div className="space-y-2">
                     <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
                       <span className="text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-music text-purple-500 mr-2"></i>{musicName}</span>
-                      <button onClick={() => { setMusicUrl(null); setMusicName(''); musicElRef.current = null; musicSourceRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
+                      <button onClick={() => { musicElRef.current?.pause(); try { musicSourceRef.current?.disconnect(); musicGainRef.current?.disconnect(); } catch {} setMusicUrl(null); setMusicName(''); musicElRef.current = null; musicSourceRef.current = null; musicGainRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="flex items-center gap-2">
                       <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
