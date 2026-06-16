@@ -110,6 +110,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
 
+  const [videoVolume, setVideoVolume] = useState(1); // volumen del audio original del video
+
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [musicName, setMusicName] = useState('');
   const [musicVolume, setMusicVolume] = useState(0.8);
@@ -148,6 +150,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const audioCtxRef = useRef<AudioContext | null>(null);
   const musicSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const videoSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const videoGainRef = useRef<GainNode | null>(null);
   const voiceElRef = useRef<HTMLAudioElement | null>(null);
   const voiceSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -291,6 +294,19 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       drawFrame(t);
     }
   };
+
+  // Volumen del audio original del video — en vivo (preview) y en el export
+  useEffect(() => {
+    const v = videoRef.current;
+    if (videoSourceRef.current) {
+      // El audio del video pasa por WebAudio (tras un export): se controla con el gain
+      if (videoGainRef.current) { try { videoGainRef.current.gain.value = videoVolume; } catch {} }
+    } else if (v) {
+      // Antes de cualquier export, el video suena de forma nativa
+      v.muted = videoVolume === 0;
+      v.volume = videoVolume;
+    }
+  }, [videoVolume]);
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas
   const drawFrame = useCallback((t: number) => {
@@ -645,14 +661,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const dest = actx.createMediaStreamDestination();
       let hasAudio = false;
 
-      // Audio propio del video
+      // IMPORTANTE: desconectar las fuentes persistentes de exports anteriores.
+      // Si no, cada export agrega un nuevo camino fuente→gain→destino y el audio se duplica (eco).
+      try { videoSourceRef.current?.disconnect(); } catch {}
+      try { videoGainRef.current?.disconnect(); } catch {}
+      try { musicSourceRef.current?.disconnect(); } catch {}
+      try { voiceSourceRef.current?.disconnect(); } catch {}
+
+      // Audio propio del video (con su volumen, reutilizando un gain persistente)
       try {
         if (!videoSourceRef.current) videoSourceRef.current = actx.createMediaElementSource(v);
-        const vGain = actx.createGain();
-        vGain.gain.value = 1;
-        videoSourceRef.current.connect(vGain);
-        vGain.connect(dest);
-        vGain.connect(actx.destination); // mantiene el sonido del video en la previsualización
+        // Al rutear por WebAudio, el elemento pasa la señal completa y el gain hace el volumen
+        v.muted = false; v.volume = 1;
+        if (!videoGainRef.current) videoGainRef.current = actx.createGain();
+        videoGainRef.current.gain.value = videoVolume;
+        videoSourceRef.current.connect(videoGainRef.current);
+        videoGainRef.current.connect(dest);
+        videoGainRef.current.connect(actx.destination); // mantiene el sonido del video en la previsualización
         hasAudio = true;
       } catch { /* ya conectado */ }
 
@@ -929,6 +954,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </button>
                 )}
                 {cutMsg && <p className="text-[10px] text-slate-400 font-bold">{cutMsg}</p>}
+              </div>
+
+              {/* Audio del video */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className={labelClass}>Audio del video</span>
+                  <button onClick={() => setVideoVolume(videoVolume === 0 ? 1 : 0)} className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${videoVolume === 0 ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
+                    <i className={`fa-solid ${videoVolume === 0 ? 'fa-volume-xmark' : 'fa-volume-high'} mr-1.5`}></i>{videoVolume === 0 ? 'Silenciado' : 'Activo'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
+                  <input type="range" min={0} max={1} step={0.05} value={videoVolume} onChange={(e) => setVideoVolume(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                  <span className="text-[9px] font-black text-slate-400 tabular-nums w-8 text-right">{Math.round(videoVolume * 100)}%</span>
+                </div>
+                <p className="text-[9px] text-slate-300 font-bold">Subí o bajá el sonido original del video. Silencialo si vas a usar música o voz en off.</p>
               </div>
 
               {/* Música */}
