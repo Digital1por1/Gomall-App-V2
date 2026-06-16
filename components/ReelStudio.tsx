@@ -14,42 +14,10 @@ const SUB_STYLES: Record<string, SubStyle> = {
   minimal: { label: 'Minimal', y: 0.88, size: 46, weight: 600, box: false, outline: 0,  outlineColor: '#000000', shadow: true,  upper: false, def: '#FFFFFF' },
 };
 
-// --- Audio → WAV mono 16kHz (para transcripción) ---
-function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
-  const samples = buffer.getChannelData(0);
-  const sampleRate = buffer.sampleRate;
-  const dataLen = samples.length * 2;
-  const ab = new ArrayBuffer(44 + dataLen);
-  const view = new DataView(ab);
-  const w = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-  w(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); w(8, 'WAVE');
-  w(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  w(36, 'data'); view.setUint32(40, dataLen, true);
-  let off = 44;
-  for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2; }
-  return ab;
-}
-function abToBase64(ab: ArrayBuffer): string {
-  const bytes = new Uint8Array(ab);
+function bytesToBase64(bytes: Uint8Array): string {
   let bin = ''; const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   return btoa(bin);
-}
-async function extractAudioWavBase64(videoUrl: string): Promise<{ data: string; mime: string }> {
-  const ab = await (await fetch(videoUrl)).arrayBuffer();
-  const ac = new AudioContext();
-  const decoded = await ac.decodeAudioData(ab.slice(0));
-  ac.close();
-  const targetRate = 16000;
-  const len = Math.max(1, Math.ceil(decoded.duration * targetRate));
-  const off = new OfflineAudioContext(1, len, targetRate);
-  const src = off.createBufferSource();
-  src.buffer = decoded;
-  src.connect(off.destination);
-  src.start();
-  const rendered = await off.startRendering();
-  return { data: abToBase64(audioBufferToWav(rendered)), mime: 'audio/wav' };
 }
 
 interface ReelStudioProps {
@@ -323,11 +291,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (!videoUrl) return;
     setTranscribing(true);
     try {
-      const { data, mime } = await extractAudioWavBase64(videoUrl);
+      const { base64 } = await getAudioWav(videoUrl);
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio: data, mime }),
+        body: JSON.stringify({ audio: base64, mime: 'audio/wav' }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'No se pudo transcribir el audio.');
@@ -353,11 +321,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setAnalyzing(true);
     setCutMsg('');
     try {
-      const buf = await (await fetch(videoUrl)).arrayBuffer();
-      const actx = new AudioContext();
-      const audio = await actx.decodeAudioData(buf.slice(0));
-      const data = audio.getChannelData(0);
-      const sr = audio.sampleRate;
+      // Extrae el audio con ffmpeg (WAV PCM s16 mono 16kHz) — robusto para mp4/mov/webm
+      const { bytes } = await getAudioWav(videoUrl);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const sr = 16000;
+      const header = 44;                 // WAV estándar
+      const n = Math.max(0, Math.floor((bytes.byteLength - header) / 2));
       const win = Math.floor(sr * 0.05); // ventanas de 50ms
       const SILENCE = 0.015;             // umbral RMS de silencio
       const MIN_GAP = 0.45;              // pausa mínima a eliminar (s)
@@ -365,10 +334,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       // RMS por ventana → marca sonido/silencio
       const loud: boolean[] = [];
-      for (let i = 0; i < data.length; i += win) {
-        let sum = 0;
-        for (let j = i; j < i + win && j < data.length; j++) sum += data[j] * data[j];
-        loud.push(Math.sqrt(sum / win) > SILENCE);
+      for (let i = 0; i < n; i += win) {
+        let sum = 0, c = 0;
+        for (let j = i; j < i + win && j < n; j++) { const s = view.getInt16(header + j * 2, true) / 32768; sum += s * s; c++; }
+        loud.push(Math.sqrt(sum / Math.max(1, c)) > SILENCE);
       }
       const winDur = win / sr;
       // Construye segmentos con sonido dentro del recorte [trimStart, trimEnd]
@@ -392,7 +361,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         if (last && s.start - last.end < MIN_GAP) last.end = s.end;
         else merged.push({ ...s });
       }
-      actx.close();
 
       const total = trimEnd - trimStart;
       const kept = merged.reduce((a, s) => a + (s.end - s.start), 0);
@@ -455,6 +423,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     });
     ffmpegRef.current = ffmpeg;
     return ffmpeg;
+  };
+
+  // Extrae el audio del video con ffmpeg (WAV PCM mono 16kHz). Robusto para mp4/mov/webm.
+  const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
+    const ffmpeg = await loadFFmpeg();
+    await ffmpeg.writeFile('aud_src', await fetchFile(url));
+    await ffmpeg.exec(['-i', 'aud_src', '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
+    const data = await ffmpeg.readFile('aud_out.wav');
+    const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
+    return { base64: bytesToBase64(bytes), bytes };
   };
 
   const exportReel = async () => {

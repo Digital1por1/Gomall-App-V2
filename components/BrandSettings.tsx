@@ -167,7 +167,13 @@ const BrandSettings: React.FC<BrandSettingsProps> = ({ profile, userId, onClose,
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Sitio web o Instagram</label>
-              <input type="text" placeholder="www.tunegocio.com o @tunegocio" className={inputClass} value={website} onChange={(e) => { setWebsite(e.target.value); setSaved(false); }} />
+              <div className="flex gap-2">
+                <input type="text" placeholder="www.tunegocio.com o @tunegocio" className={`${inputClass} flex-1`} value={website} onChange={(e) => { setWebsite(e.target.value); setSaved(false); }} />
+                <button onClick={analyzeSite} disabled={analyzing || !website.trim()} className="shrink-0 px-4 rounded-2xl bg-[#EA5B25] text-white text-[10px] font-black uppercase tracking-widest active:scale-95 disabled:opacity-40 transition-all">
+                  {analyzing ? <i className="fa-solid fa-circle-notch fa-spin"></i> : 'Actualizar'}
+                </button>
+              </div>
+              <p className="text-[9px] text-slate-400 font-bold px-1">Si cambió tu web, tocá "Actualizar" y la IA vuelve a leerla para refrescar la historia de tu marca.</p>
             </div>
             <div className="space-y-2">
               <label className={labelClass}>Rubro</label>
