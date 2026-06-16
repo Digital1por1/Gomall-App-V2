@@ -66,6 +66,14 @@ interface Subtitle {
   end: number;
 }
 
+interface Clip {
+  id: string;
+  url: string;
+  duration: number;
+  trimStart: number;
+  trimEnd: number;
+}
+
 const CANVAS_W = 1080;
 const CANVAS_H = 1920;
 const FPS = 30;
@@ -82,10 +90,16 @@ const fmt = (s: number) => {
 const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }) => {
   const kit = profile?.brandKits?.[0];
 
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [duration, setDuration] = useState(0);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimEnd, setTrimEnd] = useState(0);
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const activeClip = clips[activeIdx];
+  const videoUrl = activeClip?.url || null;
+  const duration = activeClip?.duration || 0;
+  const trimStart = activeClip?.trimStart || 0;
+  const trimEnd = activeClip?.trimEnd || 0;
+  const setActiveTrim = (patch: Partial<Clip>) => setClips(prev => prev.map((c, i) => i === activeIdx ? { ...c, ...patch } : c));
+  const setTrimStart = (v: number) => setActiveTrim({ trimStart: v });
+  const setTrimEnd = (v: number) => setActiveTrim({ trimEnd: v });
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
 
@@ -140,11 +154,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     img.src = url;
   }, [kit?.logoUrls]);
 
-  const handleVideoFile = (file: File) => {
+  const addClip = (file: File) => {
     const url = URL.createObjectURL(file);
-    setVideoUrl(url);
+    setClips(prev => {
+      const next = [...prev, { id: `clip_${Date.now()}`, url, duration: 0, trimStart: 0, trimEnd: 0 }];
+      setActiveIdx(next.length - 1);
+      return next;
+    });
     setExportedUrl(null);
   };
+  const removeClip = (id: string) => {
+    setClips(prev => {
+      const next = prev.filter(c => c.id !== id);
+      setActiveIdx(a => Math.max(0, Math.min(a, next.length - 1)));
+      return next;
+    });
+  };
+  const handleVideoFile = (file: File) => addClip(file);
 
   const handleMusicFile = (file: File) => {
     const url = URL.createObjectURL(file);
@@ -155,9 +181,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const onLoadedMetadata = () => {
     const v = videoRef.current;
     if (!v) return;
-    setDuration(v.duration);
-    setTrimStart(0);
-    setTrimEnd(v.duration);
+    // Solo fija duración/recorte la primera vez que se mide este clip
+    if (activeClip && !activeClip.duration) {
+      setActiveTrim({ duration: v.duration, trimStart: 0, trimEnd: v.duration });
+    }
   };
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas
@@ -494,28 +521,39 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
       });
 
-      // Segmentos a grabar: los detectados (sin pausas) o el recorte completo
-      const segs = (segments && segments.length) ? segments : [{ start: trimStart, end: trimEnd }];
+      // Rangos a grabar: si hay 1 clip con pausas detectadas, sus segmentos; si no, el recorte de cada clip (concatenados)
+      let ranges: { url: string; start: number; end: number }[];
+      if (clips.length === 1 && segments && segments.length) {
+        ranges = segments.map(s => ({ url: clips[0].url, start: s.start, end: s.end }));
+      } else {
+        ranges = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
+      }
 
       setExportMsg('Grabando el reel…');
       recorder.start(100);
       if (musicUrl && musicElRef.current) musicElRef.current.play().catch(() => {});
       if (voiceUrl && voiceElRef.current) voiceElRef.current.play().catch(() => {});
 
-      // Reproduce cada segmento en orden; la grabación es continua → quedan unidos sin las pausas
-      for (const seg of segs) {
-        v.currentTime = seg.start;
+      // Reproduce cada rango en orden (cambiando de clip si hace falta); la grabación es continua → quedan unidos
+      for (const range of ranges) {
+        if (v.src !== range.url) {
+          v.src = range.url;
+          await new Promise<void>((res) => { const h = () => { v.removeEventListener('loadeddata', h); res(); }; v.addEventListener('loadeddata', h); });
+        }
+        v.currentTime = range.start;
         await new Promise<void>((res) => { v.onseeked = () => res(); });
         await v.play().catch(() => {});
         await new Promise<void>((resolve) => {
           const step = () => {
             drawFrame(v.currentTime);
-            if (v.currentTime >= seg.end || v.ended) { v.pause(); resolve(); return; }
+            if (v.currentTime >= range.end || v.ended) { v.pause(); resolve(); return; }
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
         });
       }
+      // Restaura el clip activo en la previsualización
+      if (activeClip && v.src !== activeClip.url) v.src = activeClip.url;
       if (musicElRef.current) musicElRef.current.pause();
       if (voiceElRef.current) voiceElRef.current.pause();
 
@@ -559,12 +597,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        {!videoUrl ? (
+        {clips.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center p-8 text-center gap-5">
             <div className="w-20 h-20 bg-purple-50 text-purple-300 rounded-[32px] flex items-center justify-center"><i className="fa-solid fa-film text-3xl"></i></div>
             <div className="space-y-1">
               <h3 className="font-display text-2xl text-slate-900">Subí un video para empezar</h3>
-              <p className="text-slate-400 text-sm">Lo recortamos a formato Reel (9:16) y le sumás música y subtítulos.</p>
+              <p className="text-slate-400 text-sm">Podés sumar varios, recortar cada uno y se unen en formato Reel (9:16).</p>
             </div>
             <label className="px-6 h-14 bg-purple-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center gap-3 cursor-pointer">
               <i className="fa-solid fa-arrow-up-from-bracket"></i> Subir video
@@ -590,9 +628,27 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
             {/* Controls */}
             <div className="space-y-7">
+              {/* Clips */}
+              <div className="space-y-2">
+                <span className={labelClass}>Clips ({clips.length})</span>
+                <div className="flex gap-2 flex-wrap items-center">
+                  {clips.map((c, i) => (
+                    <div key={c.id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
+                      <button onClick={() => setActiveIdx(i)}><i className="fa-solid fa-film mr-1"></i>Clip {i + 1}</button>
+                      {clips.length > 1 && <button onClick={() => removeClip(c.id)} className="text-red-400 hover:text-red-600"><i className="fa-solid fa-xmark"></i></button>}
+                    </div>
+                  ))}
+                  <label className="rounded-xl border-2 border-dashed border-purple-200 text-purple-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-purple-50 transition-all">
+                    <i className="fa-solid fa-plus mr-1"></i>Video
+                    <input type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addClip(f); e.currentTarget.value = ''; }} />
+                  </label>
+                </div>
+                {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Seleccioná un clip para recortarlo. Se exportan unidos, en orden.</p>}
+              </div>
+
               {/* Recorte */}
               <div className="space-y-3">
-                <span className={labelClass}>Recorte</span>
+                <span className={labelClass}>{clips.length > 1 ? `Recorte del Clip ${activeIdx + 1}` : 'Recorte'}</span>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-bold text-slate-400"><span>Inicio: {fmt(trimStart)}</span></div>
                   <input type="range" min={0} max={duration || 0} step={0.1} value={trimStart} onChange={(e) => { const val = Math.min(Number(e.target.value), trimEnd - 0.5); setTrimStart(val); seek(val); }} className="w-full h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
