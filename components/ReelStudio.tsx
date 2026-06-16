@@ -93,6 +93,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [musicName, setMusicName] = useState('');
   const [musicVolume, setMusicVolume] = useState(0.8);
 
+  // Voz en off (subida o grabada)
+  const [voiceUrl, setVoiceUrl] = useState<string | null>(null);
+  const [voiceName, setVoiceName] = useState('');
+  const [voiceVolume, setVoiceVolume] = useState(1);
+  const [recording, setRecording] = useState(false);
+
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [subStyle, setSubStyle] = useState<string>('capcut');
   const [subColor, setSubColor] = useState('#FFFFFF');
@@ -118,6 +124,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const musicElRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const musicSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const videoSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const voiceElRef = useRef<HTMLAudioElement | null>(null);
+  const voiceSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const micRecorderRef = useRef<MediaRecorder | null>(null);
+  const micChunksRef = useRef<Blob[]>([]);
 
   // Carga del logo de marca para el overlay
   useEffect(() => {
@@ -374,6 +385,37 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
+  // --- Voz en off ---
+  const handleVoiceFile = (file: File) => {
+    setVoiceUrl(URL.createObjectURL(file));
+    setVoiceName(file.name);
+    voiceElRef.current = null;
+    voiceSourceRef.current = null;
+  };
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      micChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) micChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(micChunksRef.current, { type: 'audio/webm' });
+        setVoiceUrl(URL.createObjectURL(blob));
+        setVoiceName('Grabación de voz');
+        voiceElRef.current = null;
+        voiceSourceRef.current = null;
+      };
+      micRecorderRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      alert('No se pudo acceder al micrófono. Revisá los permisos del navegador.');
+    }
+  };
+  const stopRecording = () => { micRecorderRef.current?.stop(); setRecording(false); };
+  const removeVoice = () => { setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; voiceSourceRef.current = null; };
+
   const loadFFmpeg = async () => {
     if (ffmpegRef.current) return ffmpegRef.current;
     const ffmpeg = new FFmpeg();
@@ -400,31 +442,45 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
       const tracks: MediaStreamTrack[] = [canvasStream.getVideoTracks()[0]];
 
-      // Audio: música (vía WebAudio) o audio propio del video
+      // Mezcla de audio en un solo destino: audio del video + música + voz en off
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      const actx = audioCtxRef.current;
+      if (actx.state === 'suspended') await actx.resume();
+      const dest = actx.createMediaStreamDestination();
+      let hasAudio = false;
+
+      // Audio propio del video
+      try {
+        if (!videoSourceRef.current) videoSourceRef.current = actx.createMediaElementSource(v);
+        const vGain = actx.createGain();
+        vGain.gain.value = 1;
+        videoSourceRef.current.connect(vGain);
+        vGain.connect(dest);
+        vGain.connect(actx.destination); // mantiene el sonido del video en la previsualización
+        hasAudio = true;
+      } catch { /* ya conectado */ }
+
+      // Música
       if (musicUrl) {
-        if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-        const actx = audioCtxRef.current;
-        if (actx.state === 'suspended') await actx.resume();
-        if (!musicElRef.current) {
-          musicElRef.current = new Audio(musicUrl);
-          musicElRef.current.crossOrigin = 'anonymous';
-        }
-        const musicEl = musicElRef.current;
-        musicEl.currentTime = 0;
-        if (!musicSourceRef.current) {
-          musicSourceRef.current = actx.createMediaElementSource(musicEl);
-        }
-        const gain = actx.createGain();
-        gain.gain.value = musicVolume;
-        const dest = actx.createMediaStreamDestination();
-        musicSourceRef.current.connect(gain);
-        gain.connect(dest);
-        tracks.push(dest.stream.getAudioTracks()[0]);
-      } else {
-        const vStream = (v as any).captureStream?.() as MediaStream | undefined;
-        const aT = vStream?.getAudioTracks?.()[0];
-        if (aT) tracks.push(aT);
+        if (!musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; }
+        musicElRef.current.currentTime = 0;
+        if (!musicSourceRef.current) musicSourceRef.current = actx.createMediaElementSource(musicElRef.current);
+        const g = actx.createGain(); g.gain.value = musicVolume;
+        musicSourceRef.current.connect(g); g.connect(dest);
+        hasAudio = true;
       }
+
+      // Voz en off
+      if (voiceUrl) {
+        if (!voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
+        voiceElRef.current.currentTime = 0;
+        if (!voiceSourceRef.current) voiceSourceRef.current = actx.createMediaElementSource(voiceElRef.current);
+        const g = actx.createGain(); g.gain.value = voiceVolume;
+        voiceSourceRef.current.connect(g); g.connect(dest);
+        hasAudio = true;
+      }
+
+      if (hasAudio) tracks.push(dest.stream.getAudioTracks()[0]);
 
       const combined = new MediaStream(tracks);
       const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
@@ -444,6 +500,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       setExportMsg('Grabando el reel…');
       recorder.start(100);
       if (musicUrl && musicElRef.current) musicElRef.current.play().catch(() => {});
+      if (voiceUrl && voiceElRef.current) voiceElRef.current.play().catch(() => {});
 
       // Reproduce cada segmento en orden; la grabación es continua → quedan unidos sin las pausas
       for (const seg of segs) {
@@ -460,6 +517,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         });
       }
       if (musicElRef.current) musicElRef.current.pause();
+      if (voiceElRef.current) voiceElRef.current.pause();
 
       recorder.stop();
       const webmBlob = await stopped;
@@ -579,6 +637,38 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     + Subir música
                     <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleMusicFile(f); }} />
                   </label>
+                )}
+              </div>
+
+              {/* Voz en off */}
+              <div className="space-y-3">
+                <span className={labelClass}>Voz en off</span>
+                <p className="text-[10px] text-slate-400 font-bold leading-relaxed">¿Tu video no tiene voz? Grabá una narración o subí un audio.</p>
+                {voiceUrl ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
+                      <span className="text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-microphone-lines text-emerald-500 mr-2"></i>{voiceName}</span>
+                      <button onClick={removeVoice} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
+                      <input type="range" min={0} max={1} step={0.05} value={voiceVolume} onChange={(e) => setVoiceVolume(Number(e.target.value))} className="flex-1 h-1.5 accent-emerald-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                    </div>
+                  </div>
+                ) : recording ? (
+                  <button onClick={stopRecording} className="w-full py-2.5 bg-red-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md active:scale-95 transition-all animate-pulse">
+                    <i className="fa-solid fa-stop mr-1.5"></i>Detener grabación
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={startRecording} className="py-2.5 bg-emerald-50 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all border border-emerald-100">
+                      <i className="fa-solid fa-microphone mr-1.5"></i>Grabar
+                    </button>
+                    <label className="py-2.5 text-emerald-600 text-[9px] font-black uppercase tracking-widest text-center hover:bg-emerald-50 rounded-xl transition-all border border-emerald-100 border-dashed cursor-pointer">
+                      <i className="fa-solid fa-arrow-up-from-bracket mr-1.5"></i>Subir
+                      <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVoiceFile(f); }} />
+                    </label>
+                  </div>
                 )}
               </div>
 
