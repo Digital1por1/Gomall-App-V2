@@ -267,7 +267,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         if (clipPeaks[c.id] || peaksBusyRef.current.has(c.id)) continue;
         peaksBusyRef.current.add(c.id);
         try {
-          const { bytes } = await getAudioWav(c.url);
+          const bytes = await getAudioBytes(c.url);
           const peaks = wavToPeaks(bytes, 220);
           if (!cancelled && peaks.length) setClipPeaks(prev => ({ ...prev, [c.id]: peaks }));
         } catch { /* sin audio → onda plana */ }
@@ -320,8 +320,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (videoGainRef.current) { try { videoGainRef.current.gain.value = videoVolume; } catch {} }
     else if (v) { v.muted = videoVolume === 0; v.volume = videoVolume; } // antes de construir el grafo
   }, [videoVolume]);
-  useEffect(() => { if (musicGainRef.current) { try { musicGainRef.current.gain.value = musicVolume; } catch {} } }, [musicVolume]);
-  useEffect(() => { if (voiceGainRef.current) { try { voiceGainRef.current.gain.value = voiceVolume; } catch {} } }, [voiceVolume]);
+  useEffect(() => { if (musicSourceRef.current && musicGainRef.current) { try { musicGainRef.current.gain.value = musicVolume; } catch {} } else if (musicElRef.current) musicElRef.current.volume = musicVolume; }, [musicVolume]);
+  useEffect(() => { if (voiceSourceRef.current && voiceGainRef.current) { try { voiceGainRef.current.gain.value = voiceVolume; } catch {} } else if (voiceElRef.current) voiceElRef.current.volume = voiceVolume; }, [voiceVolume]);
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas
   const drawFrame = useCallback((t: number) => {
@@ -488,13 +488,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     for (let i = 0; i < activeIdx; i++) off += Math.max(0, (clips[i].trimEnd - clips[i].trimStart));
     return off;
   };
-  // Reproduce música/voz sincronizadas con el video (preview)
+  // Crea (perezosamente) los elementos de audio para el preview nativo
+  const ensureMusicEl = () => {
+    if (musicUrl && !musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; }
+    return musicElRef.current;
+  };
+  const ensureVoiceEl = () => {
+    if (voiceUrl && !voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
+    return voiceElRef.current;
+  };
+  // Reproduce música/voz sincronizadas con el video (preview, audio nativo)
   const playBeds = () => {
     const pos = globalOffsetActive() + Math.max(0, (videoRef.current?.currentTime || 0) - trimStart);
-    const m = musicElRef.current;
-    if (m && musicUrl) { const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
-    const vo = voiceElRef.current;
-    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { vo.currentTime = pos; vo.play().catch(() => {}); }
+    const m = ensureMusicEl();
+    if (m && musicUrl) { if (!musicSourceRef.current) m.volume = musicVolume; const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
+    const vo = ensureVoiceEl();
+    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { if (!voiceSourceRef.current) vo.volume = voiceVolume; vo.currentTime = pos; vo.play().catch(() => {}); }
   };
   const pauseBeds = () => { musicElRef.current?.pause(); voiceElRef.current?.pause(); };
 
@@ -503,8 +512,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (!v) return;
     if (playing) { v.pause(); pauseBeds(); setPlaying(false); }
     else {
-      ensureAudioGraph();
-      audioCtxRef.current?.resume?.();
+      // Preview con audio NATIVO (no WebAudio): evita cortes/distorsión por el dibujado del canvas.
+      // El grafo WebAudio se arma solo al exportar.
+      if (!videoSourceRef.current) { v.muted = videoVolume === 0; v.volume = videoVolume; }
       if (v.currentTime < trimStart || v.currentTime >= trimEnd) v.currentTime = trimStart;
       v.play();
       playBeds();
@@ -564,7 +574,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setCutMsg('');
     try {
       // Extrae el audio con ffmpeg (WAV PCM s16 mono 16kHz) — robusto para mp4/mov/webm
-      const { bytes } = await getAudioWav(videoUrl);
+      const bytes = await getAudioBytes(videoUrl);
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const sr = 16000;
       const header = 44;                 // WAV estándar
@@ -682,7 +692,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
 
   // Extrae el audio del video con ffmpeg (WAV PCM mono 16kHz). Robusto para mp4/mov/webm.
-  const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
+  const getAudioBytes = async (url: string): Promise<Uint8Array> => {
     const ffmpeg = await loadFFmpeg();
     const blob = await (await fetch(url)).blob();
     const t = (blob.type || '').toLowerCase();
@@ -706,6 +716,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
     const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
     if (!bytes || bytes.byteLength < 200) throw new Error('Este video no tiene pista de audio (o está en silencio), así que no hay voz para transcribir.');
+    return bytes;
+  };
+  // Solo para transcripción: agrega el base64 (caro), por eso no se usa para la onda.
+  const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
+    const bytes = await getAudioBytes(url);
     return { base64: bytesToBase64(bytes), bytes };
   };
 
