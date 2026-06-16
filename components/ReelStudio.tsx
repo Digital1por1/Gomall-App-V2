@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 import { UserProfile } from '../types';
 import { recordUsage } from './usageTracker';
 
@@ -45,10 +45,11 @@ interface Clip {
 const CANVAS_W = 1080;
 const CANVAS_H = 1920;
 const FPS = 30;
+// El worker de @ffmpeg/ffmpeg es type:"module": no puede usar importScripts, así que
+// importa el core dinámicamente con import(). Por eso el core debe ser ESM y por URL
+// directa (no blob), para que el import() dinámico resuelva correctamente.
 const CORE_VERSION = '0.12.6';
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
-const FFMPEG_VERSION = '0.12.15';
-const FFMPEG_WORKER_URL = `https://unpkg.com/@ffmpeg/ffmpeg@${FFMPEG_VERSION}/dist/umd/814.ffmpeg.js`;
+const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 const fmt = (s: number) => {
   if (!isFinite(s) || s < 0) s = 0;
@@ -457,9 +458,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     ffmpeg.on('log', ({ message }) => { ffmpegLogRef.current += message + '\n'; });
     try {
       await ffmpeg.load({
-        classWorkerURL: await toBlobURL(FFMPEG_WORKER_URL, 'text/javascript'),
-        coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
+        coreURL: `${CORE_BASE}/ffmpeg-core.js`,
+        wasmURL: `${CORE_BASE}/ffmpeg-core.wasm`,
       });
     } catch (e: any) {
       throw new Error('No se pudo cargar el motor de video (ffmpeg). Revisá tu conexión y reintentá. ' + (e?.message || String(e)));
