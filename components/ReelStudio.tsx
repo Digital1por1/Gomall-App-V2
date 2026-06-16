@@ -156,6 +156,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end' } | null>(null);
   const [clipPeaks, setClipPeaks] = useState<Record<string, number[]>>({}); // onda de audio por clip
   const peaksBusyRef = useRef<Set<string>>(new Set());
+  const scrubRef = useRef(false);              // true mientras se arrastra el cabezal
+  const pendingSeekRef = useRef<number | null>(null); // seek a aplicar tras cambiar de clip
 
   // Carga del logo de marca para el overlay
   useEffect(() => {
@@ -203,7 +205,40 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       ? (d.edge === 'start' ? { ...c, trimStart: Math.min(t, c.trimEnd - 0.3) } : { ...c, trimEnd: Math.max(t, c.trimStart + 0.3) })
       : c));
   };
-  const endDrag = () => { draggingRef.current = null; };
+  const endDrag = () => { draggingRef.current = null; scrubRef.current = false; };
+
+  // --- Scrubbing: mover el cabezal con click/arrastre sobre la timeline ---
+  const locFromClientX = (clientX: number): { idx: number; local: number } | null => {
+    const track = trackRef.current;
+    if (!track || clips.length === 0) return null;
+    const rect = track.getBoundingClientRect();
+    const x = clientX - rect.left - 8 + track.scrollLeft; // -8 = padding p-2 del contenedor
+    let acc = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const w = (clips[i].duration || 0) * TL_PX;
+      if (x < acc + w || i === clips.length - 1) {
+        return { idx: i, local: Math.max(0, Math.min(clips[i].duration || 0, (x - acc) / TL_PX)) };
+      }
+      acc += w;
+    }
+    return null;
+  };
+  const scrubTo = (clientX: number) => {
+    const loc = locFromClientX(clientX);
+    if (!loc) return;
+    if (loc.idx === activeIdx) seek(loc.local);
+    else { pendingSeekRef.current = loc.local; setActiveIdx(loc.idx); }
+  };
+  const onTimelinePointerDown = (e: React.PointerEvent) => {
+    if (draggingRef.current) return; // se está arrastrando un borde (recorte)
+    scrubRef.current = true;
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+    scrubTo(e.clientX);
+  };
+  const onTimelinePointerMove = (e: React.PointerEvent) => {
+    if (draggingRef.current) { onTrackPointerMove(e); return; }
+    if (scrubRef.current) scrubTo(e.clientX);
+  };
 
   // Calcula la onda de audio de cada clip (lazy, con ffmpeg). No bloquea la edición; si no hay audio queda plano.
   const clipIdsKey = clips.map(c => c.id).join('|');
@@ -246,6 +281,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     // Solo fija duración/recorte la primera vez que se mide este clip
     if (activeClip && !activeClip.duration) {
       setActiveTrim({ duration: v.duration, trimStart: 0, trimEnd: v.duration });
+    }
+    // Aplica un seek pendiente tras cambiar de clip (scrubbing entre clips)
+    if (pendingSeekRef.current != null) {
+      const t = Math.max(0, Math.min(v.duration || 0, pendingSeekRef.current));
+      pendingSeekRef.current = null;
+      v.currentTime = t;
+      setCurrentTime(t);
+      drawFrame(t);
     }
   };
 
@@ -790,7 +833,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <span className={labelClass}>Línea de tiempo</span>
                   <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
                 </div>
-                <div ref={trackRef} onPointerMove={onTrackPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none">
+                <div ref={trackRef} onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none cursor-pointer">
                   <div className="relative" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
                     {/* Pista de video */}
                     <div className="relative h-14">
