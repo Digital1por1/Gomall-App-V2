@@ -27,6 +27,8 @@ interface SidebarProps {
   compressBase64Image?: (base64Str: string, maxWidth: number, quality: number, preserveAlpha: boolean) => Promise<string>;
   pendingPrompt?: string | null;
   onPendingPromptConsumed?: () => void;
+  pendingImprove?: { image: string; prompt: string } | null;
+  onPendingImproveConsumed?: () => void;
 }
 
 const SYSTEM_FONTS = [
@@ -71,7 +73,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
   selectedField, activeLayout = 'feed', onApplyTemplate,
   savedProjects = [], onLoadProject, onDeleteProject,
   githubToken, onGithubConnect, onGithubDisconnect,
-  compressBase64Image, pendingPrompt, onPendingPromptConsumed
+  compressBase64Image, pendingPrompt, onPendingPromptConsumed, pendingImprove, onPendingImproveConsumed
 }) => {
   const [promptIA, setPromptIA] = useState('');
   const [genStatus, setGenStatus] = useState<'idle' | 'generating' | 'ready'>('idle');
@@ -102,6 +104,18 @@ const SidebarModules: React.FC<SidebarProps> = ({
       generateAI('image', p);
     }
   }, [pendingPrompt]);
+
+  // Recibe la foto del producto + prompt desde una campaña: genera partiendo del producto (lo mantiene igual)
+  useEffect(() => {
+    if (pendingImprove && pendingImprove.image) {
+      const { image, prompt } = pendingImprove;
+      setTempImproveImage(image);
+      setPromptIA(prompt || '');
+      setOpenSection('IMAGEN');
+      onPendingImproveConsumed?.();
+      generateAI('improve', prompt || 'Convertí esta foto de producto en una imagen publicitaria profesional.', image);
+    }
+  }, [pendingImprove]);
 
   // EFECTO "PASTOR" ACTUALIZADO: Sincroniza la selección del canvas con la barra lateral
   useEffect(() => {
@@ -189,17 +203,18 @@ const SidebarModules: React.FC<SidebarProps> = ({
     updateState({ selectedCopyIndex: newIndex });
   };
 
-  const generateAI = async (genType: 'image' | 'improve' | 'copy', overridePrompt?: string) => {
+  const generateAI = async (genType: 'image' | 'improve' | 'copy', overridePrompt?: string, overrideImage?: string) => {
     const effectivePrompt = overridePrompt ?? promptIA;
+    const effectiveImage = overrideImage ?? tempImproveImage;
     if (genType === 'image' && !effectivePrompt.trim()) {
       alert('Por favor, ingresa una idea para la imagen.');
       return;
     }
-    if (genType === 'improve' && !effectivePrompt.trim() && !tempImproveImage) {
+    if (genType === 'improve' && !effectivePrompt.trim() && !effectiveImage) {
       alert('Por favor, selecciona una imagen a mejorar o describe los cambios.');
       return;
     }
-    
+
     setGenStatus('generating');
     try {
       if (genType === 'image' || genType === 'improve') {
@@ -209,7 +224,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
           body: JSON.stringify({
             prompt: effectivePrompt,
             genType,
-            tempImproveImage: tempImproveImage || null,
+            tempImproveImage: effectiveImage || null,
             activeLayout
           })
         });

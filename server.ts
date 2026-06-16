@@ -193,11 +193,15 @@ INSTRUCCIONES:
    - "copy": el texto/caption en español, persuasivo y acorde al tono de marca, sin incitar a "hacer click".
    - "rationale": una frase breve en español explicando por qué esta pieza ayuda a cumplir el objetivo.
 4. El campo "name" es un nombre creativo y corto para la campaña completa.
-5. No incluyas nombres de tiendas dentro de los copies si no aportan valor; enfocate en beneficios.`;
+5. No incluyas nombres de tiendas dentro de los copies si no aportan valor; enfocate en beneficios.
+${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: tenés fotos del producto/referencia de la marca. Los "imagePrompt" deben describir escenas publicitarias que muestren ESE producto tal cual (mismo producto, no inventes otro), ubicándolo en el contexto del objetivo.' : ''}`;
 
+        const imgParts = (Array.isArray(brief.images) ? brief.images : [])
+          .filter((im: any) => im && im.data)
+          .map((im: any) => ({ inlineData: { data: im.data, mimeType: im.mime || 'image/jpeg' } }));
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: [{ role: 'user', parts: [{ text: campaignPrompt }] }],
+          contents: [{ role: 'user', parts: [...imgParts, { text: campaignPrompt }] }],
           config: {
             responseMimeType: 'application/json',
             responseSchema: {

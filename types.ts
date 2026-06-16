@@ -156,6 +156,7 @@ export interface Campaign {
   keyMessage: string;
   pieces: CampaignPiece[];
   createdAt: number;
+  productImage?: string; // foto del producto/referencia para generar las imágenes
 }
 
 export interface ProjectState {

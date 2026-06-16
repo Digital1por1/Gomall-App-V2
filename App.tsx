@@ -147,6 +147,7 @@ const App: React.FC = () => {
   const [showProductAd, setShowProductAd] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [pendingImprove, setPendingImprove] = useState<{ image: string; prompt: string } | null>(null);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -605,7 +606,13 @@ const App: React.FC = () => {
     setAppView('editor');
   };
 
-  const handleUsePiece = (piece: CampaignPiece, campaignId?: string) => {
+  const toDataUrl = async (src: string): Promise<string> => {
+    if (src.startsWith('data:')) return src;
+    const blob = await (await fetch(src)).blob();
+    return await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(blob); });
+  };
+
+  const handleUsePiece = async (piece: CampaignPiece, campaignId?: string, productImage?: string) => {
     // Las piezas de reel van al editor de video
     if (piece.type === 'reel') {
       setReelCopy(piece.copy || null);
@@ -633,13 +640,22 @@ const App: React.FC = () => {
         textLayers: layers,
       };
     });
-    // Dispara la generación automática de la imagen con el prompt sugerido por la campaña
-    setPendingPrompt(piece.imagePrompt || '');
     setReturnCampaignId(campaignId || null);
     setShowCampaigns(false);
     setActiveTab('editor');
     setOpenSection('IMAGEN');
     setAppView('editor');
+    // Si hay foto del producto, genera partiendo de ella (la mantiene igual); si no, genera desde el prompt
+    if (productImage) {
+      try {
+        const img = await toDataUrl(productImage);
+        setPendingImprove({ image: img, prompt: piece.imagePrompt || '' });
+      } catch {
+        setPendingPrompt(piece.imagePrompt || '');
+      }
+    } else {
+      setPendingPrompt(piece.imagePrompt || '');
+    }
   };
 
   const handleLayerAction = (layerName: string, action: 'front' | 'up' | 'down') => {
@@ -1251,6 +1267,8 @@ const App: React.FC = () => {
             compressBase64Image={compressBase64Image}
             pendingPrompt={pendingPrompt}
             onPendingPromptConsumed={() => setPendingPrompt(null)}
+            pendingImprove={pendingImprove}
+            onPendingImproveConsumed={() => setPendingImprove(null)}
             savedProjects={savedProjects}
             onLoadProject={(projectState) => {
               console.log("Loading project state:", projectState);

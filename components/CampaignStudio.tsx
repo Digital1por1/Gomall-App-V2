@@ -3,13 +3,31 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { UserProfile, Campaign, CampaignPiece } from '../types';
 import { recordUsage } from './usageTracker';
+import { persistImage } from './storage';
+
+const compressImage = (file: File): Promise<string> => new Promise((resolve) => {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height; const max = 1024;
+      if (w > max) { h = Math.round((h * max) / w); w = max; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.src = ev.target?.result as string;
+  };
+  reader.readAsDataURL(file);
+});
 
 interface CampaignStudioProps {
   profile: UserProfile | null;
   userId: string;
   onClose: () => void;
   updateUsage: (tokens: number) => Promise<void>;
-  onUsePiece: (piece: CampaignPiece, campaignId?: string) => void;
+  onUsePiece: (piece: CampaignPiece, campaignId?: string, productImage?: string) => void;
   initialBrief?: { keyMessage?: string; dates?: string } | null;
   openCampaignId?: string | null;
 }
@@ -29,6 +47,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   // Brief
   const [objective, setObjective] = useState('');
   const [product, setProduct] = useState('');
+  const [briefImages, setBriefImages] = useState<string[]>([]);
   const [audience, setAudience] = useState('');
   const [dates, setDates] = useState(initialBrief?.dates || '');
   const [platforms, setPlatforms] = useState<string[]>(['Feed / Stories']);
@@ -47,7 +66,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   }, [openCampaignId]);
 
   const resetBrief = () => {
-    setObjective(''); setProduct(''); setAudience(''); setDates('');
+    setObjective(''); setProduct(''); setBriefImages([]); setAudience(''); setDates('');
     setPlatforms(['Feed / Stories']); setKeyMessage(''); setPieceCount(4);
   };
 
@@ -66,7 +85,10 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           genType: 'campaign',
-          campaignBrief: { objective, product, audience, dates, platforms, keyMessage, pieceCount },
+          campaignBrief: {
+            objective, product, audience, dates, platforms, keyMessage, pieceCount,
+            images: briefImages.map(d => ({ data: d.split(',')[1], mime: (d.match(/^data:([^;]+)/) || [])[1] || 'image/jpeg' })),
+          },
           brandContext: {
             business: profile?.business || '',
             industry: profile?.industry || '',
@@ -99,6 +121,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
         objective, audience, product, dates, platforms, keyMessage,
         pieces,
         createdAt: Date.now(),
+        productImage: briefImages[0] || undefined,
       };
 
       await updateUsage(4000);
@@ -117,7 +140,14 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
     if (!activeCampaign) return;
     setSaving(true);
     try {
-      const updated = [activeCampaign, ...savedCampaigns.filter(c => c.id !== activeCampaign.id)];
+      // Sube la foto del producto a Storage (no guardar base64 pesado en Firestore)
+      let toSave = activeCampaign;
+      if (activeCampaign.productImage && activeCampaign.productImage.startsWith('data:')) {
+        const url = await persistImage(activeCampaign.productImage, 'campanas');
+        toSave = { ...activeCampaign, productImage: url || undefined };
+        setActiveCampaign(toSave);
+      }
+      const updated = [toSave, ...savedCampaigns.filter(c => c.id !== toSave.id)];
       await firebase.firestore().collection('profiles').doc(userId).update({ campaigns: updated });
       setIsSaved(true);
     } catch {
@@ -220,6 +250,26 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                 <input type="text" placeholder="Ej: Nueva colección de invierno" className={inputClass} value={product} onChange={(e) => setProduct(e.target.value)} />
               </div>
 
+              <div className="space-y-2">
+                <label className={labelClass}>Foto del producto y referencias <span className="text-slate-300 normal-case font-bold">(opcional)</span></label>
+                <p className="text-[9px] text-slate-300 font-bold px-1">La IA usa estas fotos para que los prompts y las imágenes muestren tu producto real.</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {briefImages.map((src, idx) => (
+                    <div key={idx} className="relative aspect-square bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden group">
+                      <img src={src} className="w-full h-full object-cover" />
+                      <button onClick={() => setBriefImages(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1 right-1 w-5 h-5 bg-white/90 text-red-500 rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"><i className="fa-solid fa-xmark"></i></button>
+                      {idx === 0 && <span className="absolute bottom-0 inset-x-0 bg-[#EA5B25] text-white text-[7px] font-black uppercase tracking-wider text-center py-0.5">Producto</span>}
+                    </div>
+                  ))}
+                  {briefImages.length < 4 && (
+                    <label className="aspect-square bg-orange-50 text-[#EA5B25] rounded-2xl border border-dashed border-orange-200 flex items-center justify-center hover:bg-orange-100 transition-all cursor-pointer">
+                      <i className="fa-solid fa-plus"></i>
+                      <input type="file" accept="image/*" className="hidden" onChange={async (e) => { const input = e.currentTarget; const f = input.files?.[0]; if (f) { const img = await compressImage(f); setBriefImages(prev => [...prev, img]); } input.value = ''; }} />
+                    </label>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className={labelClass}>Público objetivo</label>
@@ -306,7 +356,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => { navigator.clipboard?.writeText(piece.copy); }} className="flex-1 py-2.5 bg-slate-50 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100"><i className="fa-solid fa-copy mr-1.5"></i>Copiar texto</button>
                         {(piece.type === 'imagen' || piece.type === 'reel') && (
-                          <button onClick={() => onUsePiece(piece, activeCampaign.id)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
+                          <button onClick={() => onUsePiece(piece, activeCampaign.id, activeCampaign.productImage)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
                         )}
                       </div>
                     </div>
