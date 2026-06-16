@@ -2,6 +2,55 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { UserProfile } from '../types';
+import { recordUsage } from './usageTracker';
+
+// Estilos de subtítulo predeterminados (incluye look CapCut)
+interface SubStyle { label: string; y: number; size: number; weight: number; box: boolean; outline: number; outlineColor: string; shadow: boolean; upper: boolean; def: string; }
+const SUB_STYLES: Record<string, SubStyle> = {
+  capcut:  { label: 'CapCut',  y: 0.74, size: 74, weight: 900, box: false, outline: 14, outlineColor: '#000000', shadow: false, upper: true,  def: '#FFFFFF' },
+  caja:    { label: 'Caja',    y: 0.82, size: 56, weight: 800, box: true,  outline: 0,  outlineColor: '#000000', shadow: false, upper: false, def: '#FFFFFF' },
+  clasico: { label: 'Clásico', y: 0.82, size: 60, weight: 700, box: false, outline: 0,  outlineColor: '#000000', shadow: true,  upper: false, def: '#FFFFFF' },
+  neon:    { label: 'Neón',    y: 0.78, size: 70, weight: 900, box: false, outline: 12, outlineColor: '#000000', shadow: false, upper: true,  def: '#FFE600' },
+  minimal: { label: 'Minimal', y: 0.88, size: 46, weight: 600, box: false, outline: 0,  outlineColor: '#000000', shadow: true,  upper: false, def: '#FFFFFF' },
+};
+
+// --- Audio → WAV mono 16kHz (para transcripción) ---
+function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+  const samples = buffer.getChannelData(0);
+  const sampleRate = buffer.sampleRate;
+  const dataLen = samples.length * 2;
+  const ab = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(ab);
+  const w = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); w(8, 'WAVE');
+  w(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  w(36, 'data'); view.setUint32(40, dataLen, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2; }
+  return ab;
+}
+function abToBase64(ab: ArrayBuffer): string {
+  const bytes = new Uint8Array(ab);
+  let bin = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  return btoa(bin);
+}
+async function extractAudioWavBase64(videoUrl: string): Promise<{ data: string; mime: string }> {
+  const ab = await (await fetch(videoUrl)).arrayBuffer();
+  const ac = new AudioContext();
+  const decoded = await ac.decodeAudioData(ab.slice(0));
+  ac.close();
+  const targetRate = 16000;
+  const len = Math.max(1, Math.ceil(decoded.duration * targetRate));
+  const off = new OfflineAudioContext(1, len, targetRate);
+  const src = off.createBufferSource();
+  src.buffer = decoded;
+  src.connect(off.destination);
+  src.start();
+  const rendered = await off.startRendering();
+  return { data: abToBase64(audioBufferToWav(rendered)), mime: 'audio/wav' };
+}
 
 interface ReelStudioProps {
   profile: UserProfile | null;
@@ -45,7 +94,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [musicVolume, setMusicVolume] = useState(0.8);
 
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
-  const [subColor, setSubColor] = useState(kit?.headlineColor || '#FFFFFF');
+  const [subStyle, setSubStyle] = useState<string>('capcut');
+  const [subColor, setSubColor] = useState('#FFFFFF');
+  const [transcribing, setTranscribing] = useState(false);
   const subFont = kit?.headlineFont || 'Inter';
 
   const [logoEnabled, setLogoEnabled] = useState(false);
@@ -129,16 +180,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       ctx.drawImage(img, (CANVAS_W - lw) / 2, CANVAS_H * 0.06, lw, lh);
     }
 
-    // Subtítulo activo
+    // Subtítulo activo (con estilo elegido)
     const active = subtitles.find(s => t >= s.start && t <= s.end);
     if (active && active.text.trim()) {
-      const fontSize = 64;
-      ctx.font = `700 ${fontSize}px ${subFont}, sans-serif`;
+      const st = SUB_STYLES[subStyle] || SUB_STYLES.capcut;
+      const fontSize = st.size;
+      ctx.font = `${st.weight} ${fontSize}px ${subFont}, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const maxWidth = CANVAS_W * 0.86;
-      const words = active.text.split(/\s+/);
+      const raw = st.upper ? active.text.toUpperCase() : active.text;
+      const words = raw.split(/\s+/);
       const lines: string[] = [];
       let line = '';
       for (const w of words) {
@@ -150,21 +203,35 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       const lineH = fontSize * 1.25;
       const blockH = lines.length * lineH;
-      const baseY = CANVAS_H * 0.82 - blockH / 2;
+      const baseY = CANVAS_H * st.y - blockH / 2;
+
+      // Caja de fondo
+      if (st.box) {
+        lines.forEach((ln, i) => {
+          const y = baseY + i * lineH + lineH / 2;
+          const w = ctx.measureText(ln).width;
+          ctx.fillStyle = 'rgba(0,0,0,0.62)';
+          ctx.fillRect((CANVAS_W - w) / 2 - 28, y - lineH / 2, w + 56, lineH);
+        });
+      }
+      // Sombra (estilo clásico/minimal)
+      if (st.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3; }
+      else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; }
 
       lines.forEach((ln, i) => {
         const y = baseY + i * lineH + lineH / 2;
-        const w = ctx.measureText(ln).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect((CANVAS_W - w) / 2 - 24, y - lineH / 2, w + 48, lineH);
-      });
-      ctx.fillStyle = subColor;
-      lines.forEach((ln, i) => {
-        const y = baseY + i * lineH + lineH / 2;
+        if (st.outline > 0) {
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = st.outline;
+          ctx.strokeStyle = st.outlineColor;
+          ctx.strokeText(ln, CANVAS_W / 2, y);
+        }
+        ctx.fillStyle = subColor;
         ctx.fillText(ln, CANVAS_W / 2, y);
       });
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     }
-  }, [logoEnabled, subtitles, subColor, subFont]);
+  }, [logoEnabled, subtitles, subColor, subFont, subStyle]);
 
   // Loop de previsualización
   const tick = useCallback(() => {
@@ -211,6 +278,35 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const addSubtitle = () => {
     const start = Math.round(currentTime * 10) / 10;
     setSubtitles(prev => [...prev, { id: `sub_${Date.now()}`, text: '', start, end: Math.min(start + 3, trimEnd || start + 3) }]);
+  };
+
+  // Transcribe el audio del video con IA y crea los subtítulos cronometrados
+  const generateSubtitles = async () => {
+    if (!videoUrl) return;
+    setTranscribing(true);
+    try {
+      const { data, mime } = await extractAudioWavBase64(videoUrl);
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: data, mime }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'No se pudo transcribir el audio.');
+      recordUsage('subtitulos', json.usage);
+      const clean = String(json.text || '').replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      const segs = (parsed.segments || []).filter((s: any) => s?.text && String(s.text).trim());
+      if (!segs.length) { alert('No se detectó voz para transcribir en este video.'); return; }
+      setSubtitles(segs.map((s: any, i: number) => {
+        const start = Math.max(0, Number(s.start) || 0);
+        return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
+      }));
+    } catch (e: any) {
+      alert(e?.message || 'No se pudieron generar los subtítulos. El video puede no tener voz o el formato no ser compatible.');
+    } finally {
+      setTranscribing(false);
+    }
   };
 
   // Analiza el audio del video y arma los segmentos a conservar quitando los silencios (tiempos muertos)
@@ -505,8 +601,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <button onClick={addSubtitle} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all">+ En {fmt(currentTime)}</button>
                   </div>
                 </div>
+
+                {/* Auto-subtítulos con IA */}
+                <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 disabled:opacity-50 transition-all">
+                  {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Transcribiendo el audio…</> : <><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Generar subtítulos del audio</>}
+                </button>
+
+                {/* Estilos predeterminados */}
+                <div className="space-y-1.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Estilo</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(SUB_STYLES).map(([id, st]) => (
+                      <button key={id} onClick={() => { setSubStyle(id); setSubColor(st.def); }} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${subStyle === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{st.label}</button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="space-y-2">
-                  {subtitles.length === 0 && <p className="text-[10px] text-slate-300 font-bold">Movete por el video y agregá subtítulos en el momento que quieras.</p>}
+                  {subtitles.length === 0 && <p className="text-[10px] text-slate-300 font-bold">Generá los subtítulos del audio con IA, o agregalos a mano en el momento que quieras.</p>}
                   {subtitles.map((s) => (
                     <div key={s.id} className="bg-slate-50 rounded-xl border border-slate-100 p-2.5 space-y-2">
                       <div className="flex items-center gap-2">

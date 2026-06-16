@@ -299,6 +299,52 @@ INSTRUCCIONES:
     }
   });
 
+  // Transcribe el audio de un reel en segmentos de subtítulo cronometrados
+  app.post("/api/transcribe", async (req, res) => {
+    try {
+      const { audio, mime } = req.body;
+      if (!audio) return res.status(400).json({ error: "Falta el audio." });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { data: audio, mimeType: mime || "audio/wav" } },
+            { text: "Transcribí este audio en su idioma original (probablemente español) en segmentos cortos de subtítulo, de máximo 7 palabras cada uno. Para cada segmento dame el tiempo de inicio y de fin en SEGUNDOS (números, ej 3.2) y el texto. No inventes texto si hay silencio. Devolvé solo JSON." }
+          ]
+        }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              segments: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    start: { type: Type.NUMBER },
+                    end: { type: Type.NUMBER },
+                    text: { type: Type.STRING }
+                  },
+                  required: ["start", "end", "text"]
+                }
+              }
+            },
+            required: ["segments"]
+          }
+        }
+      });
+      let text = "";
+      if (typeof response?.text === "string") text = response.text;
+      else text = (response?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      res.json({ text, usage: extractUsage(response) });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error al transcribir el audio" });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { 
