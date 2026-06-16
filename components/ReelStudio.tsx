@@ -159,15 +159,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  // Elementos de audio del PREVIEW (siempre nativos, nunca pasan por WebAudio).
   const musicElRef = useRef<HTMLAudioElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const musicSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const musicGainRef = useRef<GainNode | null>(null);
-  const videoSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const videoGainRef = useRef<GainNode | null>(null);
   const voiceElRef = useRef<HTMLAudioElement | null>(null);
-  const voiceSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const voiceGainRef = useRef<GainNode | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micChunksRef = useRef<Blob[]>([]);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -289,10 +283,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   const handleMusicFile = (file: File) => {
     const url = URL.createObjectURL(file);
-    // Reconstruye el nodo de audio con la pista nueva
     musicElRef.current?.pause();
-    try { musicSourceRef.current?.disconnect(); musicGainRef.current?.disconnect(); } catch {}
-    musicElRef.current = null; musicSourceRef.current = null; musicGainRef.current = null;
+    musicElRef.current = null; // se recrea con la pista nueva
     setMusicUrl(url);
     setMusicName(file.name);
   };
@@ -314,19 +306,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
-  // Volúmenes en vivo (preview y export comparten el mismo gain)
-  useEffect(() => {
-    const v = videoRef.current;
-    if (videoGainRef.current) { try { videoGainRef.current.gain.value = videoVolume; } catch {} }
-    else if (v) { v.muted = videoVolume === 0; v.volume = videoVolume; } // antes de construir el grafo
-  }, [videoVolume]);
-  useEffect(() => { if (musicSourceRef.current && musicGainRef.current) { try { musicGainRef.current.gain.value = musicVolume; } catch {} } else if (musicElRef.current) musicElRef.current.volume = musicVolume; }, [musicVolume]);
-  useEffect(() => { if (voiceSourceRef.current && voiceGainRef.current) { try { voiceGainRef.current.gain.value = voiceVolume; } catch {} } else if (voiceElRef.current) voiceElRef.current.volume = voiceVolume; }, [voiceVolume]);
+  // Volúmenes del preview (nativos). El export aplica el volumen aparte, en su propio grafo.
+  useEffect(() => { const v = videoRef.current; if (v) { v.muted = videoVolume === 0; v.volume = videoVolume; } }, [videoVolume]);
+  useEffect(() => { if (musicElRef.current) musicElRef.current.volume = musicVolume; }, [musicVolume]);
+  useEffect(() => { if (voiceElRef.current) voiceElRef.current.volume = voiceVolume; }, [voiceVolume]);
 
-  // Dibuja un frame (video + logo + subtítulo activo) en el canvas
-  const drawFrame = useCallback((t: number) => {
+  // Dibuja un frame (video + logo + subtítulo activo) en el canvas.
+  // srcEl permite dibujar desde otro elemento de video (el del export aislado).
+  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement) => {
     const canvas = canvasRef.current;
-    const v = videoRef.current;
+    const v = srcEl || videoRef.current;
     if (!canvas || !v) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -451,37 +440,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (first) seek((first.start + first.end) / 2);
   }, [subStyle, subFont]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Construye (una sola vez) el grafo de audio: video + música + voz → gains → salida.
-  // El mismo grafo sirve para escuchar en el preview y para exportar.
-  const ensureAudioGraph = () => {
-    const v = videoRef.current;
-    if (!v) return null;
-    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-    const actx = audioCtxRef.current;
-    try {
-      if (!videoSourceRef.current) { videoSourceRef.current = actx.createMediaElementSource(v); v.muted = false; v.volume = 1; }
-      if (!videoGainRef.current) { videoGainRef.current = actx.createGain(); videoSourceRef.current.connect(videoGainRef.current); videoGainRef.current.connect(actx.destination); }
-      videoGainRef.current.gain.value = videoVolume;
-    } catch {}
-    if (musicUrl) {
-      if (!musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; }
-      try {
-        if (!musicSourceRef.current) musicSourceRef.current = actx.createMediaElementSource(musicElRef.current);
-        if (!musicGainRef.current) { musicGainRef.current = actx.createGain(); musicSourceRef.current.connect(musicGainRef.current); musicGainRef.current.connect(actx.destination); }
-        musicGainRef.current.gain.value = musicVolume;
-      } catch {}
-    }
-    if (voiceUrl) {
-      if (!voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
-      try {
-        if (!voiceSourceRef.current) voiceSourceRef.current = actx.createMediaElementSource(voiceElRef.current);
-        if (!voiceGainRef.current) { voiceGainRef.current = actx.createGain(); voiceSourceRef.current.connect(voiceGainRef.current); voiceGainRef.current.connect(actx.destination); }
-        voiceGainRef.current.gain.value = voiceVolume;
-      } catch {}
-    }
-    return actx;
-  };
-
   // Tiempo global (en el reel concatenado) en el que está parado el preview
   const globalOffsetActive = () => {
     let off = 0;
@@ -490,20 +448,20 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   // Crea (perezosamente) los elementos de audio para el preview nativo
   const ensureMusicEl = () => {
-    if (musicUrl && !musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; }
+    if (musicUrl && !musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; musicElRef.current.volume = musicVolume; }
     return musicElRef.current;
   };
   const ensureVoiceEl = () => {
-    if (voiceUrl && !voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); }
+    if (voiceUrl && !voiceElRef.current) { voiceElRef.current = new Audio(voiceUrl); voiceElRef.current.volume = voiceVolume; }
     return voiceElRef.current;
   };
   // Reproduce música/voz sincronizadas con el video (preview, audio nativo)
   const playBeds = () => {
     const pos = globalOffsetActive() + Math.max(0, (videoRef.current?.currentTime || 0) - trimStart);
     const m = ensureMusicEl();
-    if (m && musicUrl) { if (!musicSourceRef.current) m.volume = musicVolume; const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
+    if (m && musicUrl) { m.volume = musicVolume; const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
     const vo = ensureVoiceEl();
-    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { if (!voiceSourceRef.current) vo.volume = voiceVolume; vo.currentTime = pos; vo.play().catch(() => {}); }
+    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { vo.volume = voiceVolume; vo.currentTime = pos; vo.play().catch(() => {}); }
   };
   const pauseBeds = () => { musicElRef.current?.pause(); voiceElRef.current?.pause(); };
 
@@ -512,9 +470,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (!v) return;
     if (playing) { v.pause(); pauseBeds(); setPlaying(false); }
     else {
-      // Preview con audio NATIVO (no WebAudio): evita cortes/distorsión por el dibujado del canvas.
-      // El grafo WebAudio se arma solo al exportar.
-      if (!videoSourceRef.current) { v.muted = videoVolume === 0; v.volume = videoVolume; }
+      // Preview con audio NATIVO. El export corre aislado, con sus propios elementos.
+      v.muted = videoVolume === 0; v.volume = videoVolume;
       if (v.currentTime < trimStart || v.currentTime >= trimEnd) v.currentTime = trimStart;
       v.play();
       playBeds();
@@ -634,12 +591,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // --- Voz en off ---
   const handleVoiceFile = (file: File) => {
-    try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {}
+    voiceElRef.current?.pause();
     setVoiceUrl(URL.createObjectURL(file));
     setVoiceName(file.name);
     voiceElRef.current = null;
-    voiceSourceRef.current = null;
-    voiceGainRef.current = null;
   };
   const startRecording = async () => {
     try {
@@ -650,12 +605,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       rec.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
         const blob = new Blob(micChunksRef.current, { type: 'audio/webm' });
-        try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {}
         setVoiceUrl(URL.createObjectURL(blob));
         setVoiceName('Grabación de voz');
         voiceElRef.current = null;
-        voiceSourceRef.current = null;
-        voiceGainRef.current = null;
       };
       micRecorderRef.current = rec;
       rec.start();
@@ -665,7 +617,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
   const stopRecording = () => { micRecorderRef.current?.stop(); setRecording(false); };
-  const removeVoice = () => { voiceElRef.current?.pause(); try { voiceSourceRef.current?.disconnect(); voiceGainRef.current?.disconnect(); } catch {} setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; voiceSourceRef.current = null; voiceGainRef.current = null; };
+  const removeVoice = () => { voiceElRef.current?.pause(); setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; };
 
   const ffmpegLogRef = useRef<string>('');
   const loadFFmpeg = async () => {
@@ -733,25 +685,55 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setExportPct(0);
     setExportMsg('Preparando grabación…');
 
+    // Export AISLADO: usa sus propios elementos y AudioContext, que se descartan al terminar.
+    // Así nunca toca los elementos del editor → el preview siempre suena nativo y fluido.
+    const exV = document.createElement('video');
+    exV.crossOrigin = 'anonymous'; exV.playsInline = true; exV.muted = false; exV.style.display = 'none';
+    document.body.appendChild(exV);
+    let exActx: AudioContext | null = null;
+    let exMusic: HTMLAudioElement | null = null;
+    let exVoice: HTMLAudioElement | null = null;
+    const cleanupExport = () => {
+      try { exV.pause(); } catch {}
+      try { exMusic?.pause(); exVoice?.pause(); } catch {}
+      try { exActx?.close(); } catch {}
+      try { exV.removeAttribute('src'); exV.load(); } catch {}
+      try { exV.remove(); } catch {}
+    };
+
     try {
+      // Pausa el preview mientras se exporta
+      try { v.pause(); pauseBeds(); } catch {}
+      setPlaying(false);
+
       // Asegura que la tipografía de los subtítulos esté cargada antes de grabar
       try { await (document as any).fonts?.load(`900 74px "${subFont}"`); } catch {}
 
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
       const tracks: MediaStreamTrack[] = [canvasStream.getVideoTracks()[0]];
 
-      // Mezcla de audio: reutiliza el MISMO grafo que el preview (un solo camino → sin eco)
-      const actx = ensureAudioGraph();
-      if (!actx) throw new Error('No se pudo iniciar el audio.');
-      if (actx.state === 'suspended') await actx.resume();
-      const dest = actx.createMediaStreamDestination();
+      // Grafo de audio del export (aislado)
+      exActx = new AudioContext();
+      if (exActx.state === 'suspended') await exActx.resume();
+      const dest = exActx.createMediaStreamDestination();
       let hasAudio = false;
 
-      // Conecta cada gain también al destino de grabación (además del monitor del preview)
-      if (videoGainRef.current) { videoGainRef.current.gain.value = videoVolume; videoGainRef.current.connect(dest); hasAudio = true; }
-      if (musicUrl && musicElRef.current && musicGainRef.current) { musicElRef.current.currentTime = 0; musicGainRef.current.gain.value = musicVolume; musicGainRef.current.connect(dest); hasAudio = true; }
-      if (voiceUrl && voiceElRef.current && voiceGainRef.current) { voiceElRef.current.currentTime = 0; voiceGainRef.current.gain.value = voiceVolume; voiceGainRef.current.connect(dest); hasAudio = true; }
-
+      // Audio del video
+      try {
+        const s = exActx.createMediaElementSource(exV);
+        const g = exActx.createGain(); g.gain.value = videoVolume;
+        s.connect(g); g.connect(dest); hasAudio = true;
+      } catch {}
+      // Música
+      if (musicUrl) {
+        exMusic = new Audio(musicUrl); exMusic.crossOrigin = 'anonymous'; exMusic.loop = true;
+        try { const s = exActx.createMediaElementSource(exMusic); const g = exActx.createGain(); g.gain.value = musicVolume; s.connect(g); g.connect(dest); hasAudio = true; } catch {}
+      }
+      // Voz en off
+      if (voiceUrl) {
+        exVoice = new Audio(voiceUrl);
+        try { const s = exActx.createMediaElementSource(exVoice); const g = exActx.createGain(); g.gain.value = voiceVolume; s.connect(g); g.connect(dest); hasAudio = true; } catch {}
+      }
       if (hasAudio) tracks.push(dest.stream.getAudioTracks()[0]);
 
       const combined = new MediaStream(tracks);
@@ -784,32 +766,32 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       setExportMsg('Grabando el reel… 0%');
       setExportPct(0);
       recorder.start(100);
-      if (musicUrl && musicElRef.current) musicElRef.current.play().catch(() => {});
-      if (voiceUrl && voiceElRef.current) voiceElRef.current.play().catch(() => {});
+      if (exMusic) { exMusic.currentTime = 0; exMusic.play().catch(() => {}); }
+      if (exVoice) { exVoice.currentTime = 0; exVoice.play().catch(() => {}); }
 
-      // Reproduce cada rango en orden (cambiando de clip si hace falta); la grabación es continua → quedan unidos
+      // Reproduce cada rango en orden sobre el elemento aislado; la grabación es continua → quedan unidos
       for (const range of ranges) {
-        if (v.src !== range.url) {
-          v.src = range.url;
-          await new Promise<void>((res) => { const h = () => { v.removeEventListener('loadeddata', h); res(); }; v.addEventListener('loadeddata', h); });
+        if (exV.src !== range.url) {
+          exV.src = range.url;
+          await new Promise<void>((res) => { const h = () => { exV.removeEventListener('loadeddata', h); res(); }; exV.addEventListener('loadeddata', h); });
         }
-        v.currentTime = range.start;
-        await new Promise<void>((res) => { v.onseeked = () => res(); });
-        await v.play().catch(() => {});
+        exV.currentTime = range.start;
+        await new Promise<void>((res) => { exV.onseeked = () => res(); });
+        await exV.play().catch(() => {});
         await new Promise<void>((resolve) => {
           let lastUi = 0;
           const step = () => {
-            drawFrame(v.currentTime);
+            drawFrame(exV.currentTime, exV);
             // El estado se actualiza como mucho cada 250ms para no recargar React en cada frame (evita el tirón).
             const now = performance.now();
             if (now - lastUi > 250) {
               lastUi = now;
-              const done = elapsedBefore + Math.max(0, v.currentTime - range.start);
+              const done = elapsedBefore + Math.max(0, exV.currentTime - range.start);
               const pct = Math.min(69, Math.round((done / totalDur) * 70));
               setExportPct(pct);
               setExportMsg(`Grabando el reel… ${pct}%`);
             }
-            if (v.currentTime >= range.end || v.ended) { v.pause(); resolve(); return; }
+            if (exV.currentTime >= range.end || exV.ended) { exV.pause(); resolve(); return; }
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -817,18 +799,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         elapsedBefore += Math.max(0, range.end - range.start);
       }
       setExportPct(70);
-      // Restaura el clip activo en la previsualización
-      if (activeClip && v.src !== activeClip.url) v.src = activeClip.url;
-      if (musicElRef.current) musicElRef.current.pause();
-      if (voiceElRef.current) voiceElRef.current.pause();
+      exMusic?.pause(); exVoice?.pause(); exV.pause();
 
       recorder.stop();
       const recBlob = await stopped;
 
-      // Desconecta los gains del destino de grabación (el monitor del preview queda intacto)
-      try { videoGainRef.current?.disconnect(dest); } catch {}
-      try { musicGainRef.current?.disconnect(dest); } catch {}
-      try { voiceGainRef.current?.disconnect(dest); } catch {}
+      // Cierra el contexto aislado del export (el preview no se toca)
+      try { await exActx.close(); } catch {}
 
       let mp4Blob: Blob;
       if (isMp4) {
@@ -855,8 +832,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       setExportMsg('');
       alert(`No se pudo exportar el reel: ${e?.message || 'error desconocido'}`);
     } finally {
+      cleanupExport();
       setExporting(false);
       setPlaying(false);
+      // Restaura el frame del preview (el canvas mostró frames del export)
+      drawFrame(currentTime);
     }
   };
 
@@ -1031,7 +1011,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <div className="space-y-2">
                     <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
                       <span className="text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-music text-purple-500 mr-2"></i>{musicName}</span>
-                      <button onClick={() => { musicElRef.current?.pause(); try { musicSourceRef.current?.disconnect(); musicGainRef.current?.disconnect(); } catch {} setMusicUrl(null); setMusicName(''); musicElRef.current = null; musicSourceRef.current = null; musicGainRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
+                      <button onClick={() => { musicElRef.current?.pause(); setMusicUrl(null); setMusicName(''); musicElRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="flex items-center gap-2">
                       <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
