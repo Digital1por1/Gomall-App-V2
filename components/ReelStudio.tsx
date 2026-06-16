@@ -99,6 +99,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [subStyle, setSubStyle] = useState<string>('capcut');
   const [subColor, setSubColor] = useState('#FFFFFF');
+  const [subScale, setSubScale] = useState(1); // multiplicador de tamaño de subtítulos
   const [transcribing, setTranscribing] = useState(false);
   const [subFont, setSubFont] = useState<string>(kit?.headlineFont || 'Inter');
 
@@ -111,6 +112,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
+  const [exportPct, setExportPct] = useState(0); // 0-100, progreso real de exportación
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -236,7 +238,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const active = subtitles.find(s => t >= s.start && t <= s.end);
     if (active && active.text.trim()) {
       const st = SUB_STYLES[subStyle] || SUB_STYLES.capcut;
-      const fontSize = st.size;
+      const fontSize = Math.round(st.size * subScale);
       ctx.font = `${st.weight} ${fontSize}px "${subFont}", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -283,7 +285,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       });
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     }
-  }, [logoEnabled, subtitles, subColor, subFont, subStyle]);
+  }, [logoEnabled, subtitles, subColor, subFont, subStyle, subScale]);
 
   // Loop de previsualización
   const tick = useCallback(() => {
@@ -484,7 +486,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (ffmpegRef.current) return ffmpegRef.current;
     const ffmpeg = new FFmpeg();
     ffmpeg.on('progress', ({ progress }) => {
-      setExportMsg(`Convirtiendo a MP4… ${Math.min(100, Math.round(progress * 100))}%`);
+      const p = Math.max(0, Math.min(1, progress));
+      // La conversión a MP4 ocupa el tramo 70→100% de la barra de exportación
+      const pct = Math.round(70 + p * 30);
+      setExportPct(pct);
+      setExportMsg(`Convirtiendo a MP4… ${pct}%`);
     });
     ffmpeg.on('log', ({ message }) => { ffmpegLogRef.current += message + '\n'; });
     try {
@@ -533,6 +539,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (!v || !canvas) return;
     setExporting(true);
     setExportedUrl(null);
+    setExportPct(0);
     setExportMsg('Preparando grabación…');
 
     try {
@@ -602,7 +609,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         ranges = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
       }
 
-      setExportMsg('Grabando el reel…');
+      // Duración total a grabar (para el progreso 0→70%)
+      const totalDur = Math.max(0.1, ranges.reduce((acc, r) => acc + Math.max(0, r.end - r.start), 0));
+      let elapsedBefore = 0;
+
+      setExportMsg('Grabando el reel… 0%');
+      setExportPct(0);
       recorder.start(100);
       if (musicUrl && musicElRef.current) musicElRef.current.play().catch(() => {});
       if (voiceUrl && voiceElRef.current) voiceElRef.current.play().catch(() => {});
@@ -619,12 +631,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         await new Promise<void>((resolve) => {
           const step = () => {
             drawFrame(v.currentTime);
+            const done = elapsedBefore + Math.max(0, v.currentTime - range.start);
+            const pct = Math.min(69, Math.round((done / totalDur) * 70));
+            setExportPct(pct);
+            setExportMsg(`Grabando el reel… ${pct}%`);
             if (v.currentTime >= range.end || v.ended) { v.pause(); resolve(); return; }
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
         });
+        elapsedBefore += Math.max(0, range.end - range.start);
       }
+      setExportPct(70);
       // Restaura el clip activo en la previsualización
       if (activeClip && v.src !== activeClip.url) v.src = activeClip.url;
       if (musicElRef.current) musicElRef.current.pause();
@@ -642,6 +660,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
       const url = URL.createObjectURL(mp4Blob);
       setExportedUrl(url);
+      setExportPct(100);
       setExportMsg('¡Listo! Tu reel está disponible para descargar.');
     } catch (e: any) {
       console.error(e);
@@ -874,6 +893,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </div>
                 </div>
 
+                {/* Tamaño */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tamaño</span>
+                    <span className="text-[9px] font-black text-purple-600 tabular-nums">{Math.round(subScale * 100)}%</span>
+                  </div>
+                  <input type="range" min={0.6} max={1.6} step={0.05} value={subScale} onChange={(e) => setSubScale(Number(e.target.value))} className="w-full h-1.5 accent-purple-600 bg-slate-200 rounded-full appearance-none cursor-pointer" />
+                </div>
+
                 <div className="space-y-2">
                   {subtitles.length === 0 && <p className="text-[10px] text-slate-300 font-bold">Generá los subtítulos del audio con IA, o agregalos a mano en el momento que quieras.</p>}
                   {subtitles.map((s) => (
@@ -903,6 +931,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <button onClick={exportReel} disabled={exporting} className="w-full h-14 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
                     {exporting ? <><i className="fa-solid fa-circle-notch fa-spin"></i> Exportando…</> : <><i className="fa-solid fa-clapperboard"></i> Exportar reel</>}
                   </button>
+                )}
+                {exporting && (
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-purple-600 to-violet-500 transition-all duration-200 rounded-full" style={{ width: `${exportPct}%` }} />
+                  </div>
                 )}
                 {exportMsg && <p className="text-[10px] text-slate-400 font-bold text-center">{exportMsg}</p>}
                 {initialCopy && (
