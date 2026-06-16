@@ -14,6 +14,18 @@ const SUB_STYLES: Record<string, SubStyle> = {
   minimal: { label: 'Minimal', y: 0.88, size: 46, weight: 600, box: false, outline: 0,  outlineColor: '#000000', shadow: true,  upper: false, def: '#FFFFFF' },
 };
 
+// Tipografías disponibles para subtítulos (todas cargadas en index.html)
+const SUB_FONTS: { label: string; value: string }[] = [
+  { label: 'Inter', value: 'Inter' },
+  { label: 'Montserrat', value: 'Montserrat' },
+  { label: 'Anton', value: 'Anton' },
+  { label: 'Bebas Neue', value: 'Bebas Neue' },
+  { label: 'Oswald', value: 'Oswald' },
+  { label: 'Playfair', value: 'Playfair Display' },
+  { label: 'Marker', value: 'Permanent Marker' },
+  { label: 'Pacifico', value: 'Pacifico' },
+];
+
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = ''; const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
@@ -88,7 +100,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [subStyle, setSubStyle] = useState<string>('capcut');
   const [subColor, setSubColor] = useState('#FFFFFF');
   const [transcribing, setTranscribing] = useState(false);
-  const subFont = kit?.headlineFont || 'Inter';
+  const [subFont, setSubFont] = useState<string>(kit?.headlineFont || 'Inter');
 
   const [logoEnabled, setLogoEnabled] = useState(false);
 
@@ -225,7 +237,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (active && active.text.trim()) {
       const st = SUB_STYLES[subStyle] || SUB_STYLES.capcut;
       const fontSize = st.size;
-      ctx.font = `${st.weight} ${fontSize}px ${subFont}, sans-serif`;
+      ctx.font = `${st.weight} ${fontSize}px "${subFont}", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
@@ -295,6 +307,25 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // Redibuja al cambiar overlays mientras está pausado
   useEffect(() => { if (!playing && videoUrl) drawFrame(currentTime); }, [drawFrame, playing, videoUrl, currentTime]);
+
+  // Carga la fuente elegida (sino el canvas la ignora) y redibuja al estar lista
+  useEffect(() => {
+    if (!(document as any).fonts?.load) return;
+    Promise.all([
+      (document as any).fonts.load(`900 74px "${subFont}"`),
+      (document as any).fonts.load(`700 60px "${subFont}"`),
+    ]).then(() => { if (!playing) drawFrame(currentTime); }).catch(() => {});
+  }, [subFont]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Al cambiar estilo/fuente, si hay subtítulos pero ninguno visible en el cabezal,
+  // saltá al primero para que el efecto se vea de inmediato.
+  useEffect(() => {
+    if (playing || !videoUrl || subtitles.length === 0) return;
+    const active = subtitles.find(s => currentTime >= s.start && currentTime <= s.end && s.text.trim());
+    if (active) return;
+    const first = [...subtitles].filter(s => s.text.trim()).sort((a, b) => a.start - b.start)[0];
+    if (first) seek((first.start + first.end) / 2);
+  }, [subStyle, subFont]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -505,6 +536,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setExportMsg('Preparando grabación…');
 
     try {
+      // Asegura que la tipografía de los subtítulos esté cargada antes de grabar
+      try { await (document as any).fonts?.load(`900 74px "${subFont}"`); } catch {}
+
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
       const tracks: MediaStreamTrack[] = [canvasStream.getVideoTracks()[0]];
 
@@ -826,6 +860,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <div className="flex flex-wrap gap-1.5">
                     {Object.entries(SUB_STYLES).map(([id, st]) => (
                       <button key={id} onClick={() => { setSubStyle(id); setSubColor(st.def); }} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${subStyle === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{st.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tipografía */}
+                <div className="space-y-1.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tipografía</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SUB_FONTS.map((f) => (
+                      <button key={f.value} onClick={() => setSubFont(f.value)} style={{ fontFamily: `"${f.value}", sans-serif` }} className={`px-3 py-1.5 rounded-lg text-sm transition-all ${subFont === f.value ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-500 border border-slate-100 hover:border-slate-200'}`}>{f.label}</button>
                     ))}
                   </div>
                 </div>
