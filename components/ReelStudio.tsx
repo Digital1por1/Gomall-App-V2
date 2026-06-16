@@ -328,7 +328,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio: base64, mime: 'audio/wav' }),
       });
-      const json = await res.json();
+      let json;
+      try { json = await res.json(); } catch { throw new Error('El servidor no respondió (puede faltar el deploy con /api/transcribe).'); }
       if (!res.ok) throw new Error(json?.error || 'No se pudo transcribir el audio.');
       recordUsage('subtitulos', json.usage);
       const clean = String(json.text || '').replace(/```json|```/g, '').trim();
@@ -340,7 +341,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
       }));
     } catch (e: any) {
-      alert(e?.message || 'No se pudieron generar los subtítulos. El video puede no tener voz o el formato no ser compatible.');
+      console.error('Subtítulos:', e);
+      alert('No se pudieron generar los subtítulos.\n\nMotivo: ' + (e?.message || 'error desconocido'));
     } finally {
       setTranscribing(false);
     }
@@ -459,10 +461,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   // Extrae el audio del video con ffmpeg (WAV PCM mono 16kHz). Robusto para mp4/mov/webm.
   const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
     const ffmpeg = await loadFFmpeg();
-    await ffmpeg.writeFile('aud_src', await fetchFile(url));
-    await ffmpeg.exec(['-i', 'aud_src', '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
+    const blob = await (await fetch(url)).blob();
+    const t = (blob.type || '').toLowerCase();
+    const ext = t.includes('quicktime') || t.includes('mov') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('matroska') ? 'mkv' : 'mp4';
+    const inName = `aud_src.${ext}`;
+    await ffmpeg.writeFile(inName, await fetchFile(blob));
+    await ffmpeg.exec(['-i', inName, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
     const data = await ffmpeg.readFile('aud_out.wav');
     const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
+    if (!bytes || bytes.byteLength < 200) throw new Error('ffmpeg no devolvió audio (el video puede no tener pista de audio).');
     return { base64: bytesToBase64(bytes), bytes };
   };
 
