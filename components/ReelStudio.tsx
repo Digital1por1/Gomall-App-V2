@@ -299,9 +299,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const clip = clips[activeIdx];
     if (!clip) return;
     const t = currentTime;
-    if (t <= clip.trimStart + 0.3 || t >= clip.trimEnd - 0.3) { alert('Mové el cabezal a un punto dentro del clip para dividirlo.'); return; }
+    // Solo no divide si el cabezal está pegado a un borde (no tendría sentido)
+    if (t <= clip.trimStart + 0.08 || t >= clip.trimEnd - 0.08) return;
     const a = { ...clip, trimEnd: t };
     const b: Clip = { ...clip, id: `clip_${Date.now()}`, trimStart: t };
+    // Queda seleccionado el tramo IZQUIERDO (a): así, al dividir de nuevo más adelante,
+    // el tramo del medio queda seleccionado y se puede borrar con "Borrar tramo".
     setClips(prev => { const next = [...prev]; next.splice(activeIdx, 1, a, b); return next; });
   };
 
@@ -1095,7 +1098,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                         const left = clipLeftPx(idx);
                         const width = (c.duration || 0) * TL_PX;
                         return (
-                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 ${idx === activeIdx ? 'border-purple-400' : 'border-slate-700'}`} style={{ left, width }}>
+                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-yellow-300 ring-2 ring-yellow-300/60' : 'border-slate-700'}`} style={{ left, width }}>
                             <div className="absolute inset-0 bg-purple-950/60" />
                             <div className="absolute top-0 bottom-0 bg-purple-600/60 flex items-center" style={{ left: c.trimStart * TL_PX, width: Math.max(0, (c.trimEnd - c.trimStart) * TL_PX) }}>
                               <span className="text-[8px] text-white font-black uppercase px-2 truncate">Clip {idx + 1}</span>
@@ -1146,7 +1149,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + currentTime * TL_PX }} />
                   </div>
                 </div>
-                <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar desde las puntas. Tocá la timeline para mover el cabezal.<br/><b>Para sacar una parte del medio:</b> poné el cabezal al inicio de esa parte y tocá "Dividir acá", repetí al final, y borrá el clip del medio con la ✕.</p>
+                <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar las puntas. Tocá la timeline para mover el cabezal (línea amarilla).<br/><b>Cortar una parte del medio:</b> 1) cabezal al inicio de esa parte → <b>Dividir acá</b>. 2) movés el cabezal al final → <b>Dividir acá</b>. 3) el tramo del medio queda <b>seleccionado (borde amarillo)</b> → tocá <b>Borrar tramo</b>.</p>
               </div>
             </div>
 
