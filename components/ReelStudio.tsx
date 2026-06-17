@@ -1216,7 +1216,27 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                         );
                       })}
                     </div>
-                    {/* Cabezal (cruza ambas pistas) */}
+                    {/* Pista de MÚSICA (global, estilo CapCut) */}
+                    {musicUrl && (
+                      <div className="relative h-8 mt-1.5" style={{ width: timelineW() }}>
+                        <div className="absolute inset-0 rounded-lg bg-purple-600/30 border border-purple-500/40 flex items-center gap-2 px-2 overflow-hidden">
+                          <button onClick={(e) => { e.stopPropagation(); togglePreview('music', musicUrl); }} className="w-5 h-5 shrink-0 rounded-full bg-purple-600 text-white flex items-center justify-center"><i className={`fa-solid ${previewing === 'music' ? 'fa-pause' : 'fa-play'} text-[8px]`}></i></button>
+                          <i className="fa-solid fa-music text-purple-300 text-[10px] shrink-0"></i>
+                          <span className="text-[9px] text-purple-100 font-black truncate">{musicName || 'Música'}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Pista de VOZ EN OFF (global) */}
+                    {voiceUrl && (
+                      <div className="relative h-8 mt-1.5" style={{ width: timelineW() }}>
+                        <div className="absolute inset-0 rounded-lg bg-emerald-600/25 border border-emerald-500/40 flex items-center gap-2 px-2 overflow-hidden">
+                          <button onClick={(e) => { e.stopPropagation(); togglePreview('voice', voiceUrl); }} className="w-5 h-5 shrink-0 rounded-full bg-emerald-500 text-white flex items-center justify-center"><i className={`fa-solid ${previewing === 'voice' ? 'fa-pause' : 'fa-play'} text-[8px]`}></i></button>
+                          <i className="fa-solid fa-microphone-lines text-emerald-300 text-[10px] shrink-0"></i>
+                          <span className="text-[9px] text-emerald-100 font-black truncate">{voiceName || 'Voz en off'}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Cabezal (cruza todas las pistas) */}
                     <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + (currentTime - (activeClip?.trimStart || 0)) * TL_PX }} />
                   </div>
                 </div>
