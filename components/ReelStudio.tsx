@@ -894,15 +894,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       // --- 2) Render del video. Vía PRINCIPAL: WebCodecs (determinístico, robusto). ---
       let mp4Blob: Blob | null = null;
+      let engine = '';
       const hasWebCodecs = 'VideoEncoder' in window && 'AudioEncoder' in window && 'VideoFrame' in window && 'AudioData' in window;
+      console.info('[export] WebCodecs disponible:', hasWebCodecs);
       if (hasWebCodecs) {
         try {
-          setExportMsg('Renderizando video…');
+          setExportMsg('Renderizando video (WebCodecs)…');
           setExportPct(12);
           mp4Blob = await renderMp4WebCodecs(ranges, totalDur, mixBuf, exV, (done, total) => {
             const pct = Math.min(96, 10 + Math.round((done / total) * 86));
             setExportPct(pct); setExportMsg(`Renderizando video… ${pct}%`);
           });
+          engine = 'WebCodecs';
           console.info('[export] vía WebCodecs OK');
         } catch (err) {
           console.warn('[export] WebCodecs no se pudo usar, fallback a MediaRecorder:', err);
@@ -914,6 +917,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       // --- Fallback: grabación en tiempo real con MediaRecorder (si WebCodecs no estaba/ falló) ---
       if (!mp4Blob) {
+        engine = 'grabación';
         const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
         let srcNode: AudioBufferSourceNode | null = null;
         if (mixBuf) {
@@ -1002,7 +1006,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       } catch {}
       setExportedUrl(url);
       setExportPct(100);
-      setExportMsg(mixBuf ? '✅ Exportación completa. Descargá tu reel MP4.' : '✅ Exportación completa (sin audio detectado).');
+      setExportMsg(`✅ Exportación completa (motor: ${engine}${mixBuf ? '' : ' · sin audio'}). Descargá tu reel MP4.`);
     } catch (e: any) {
       console.error('[export] ERROR:', e);
       setExportMsg('');
