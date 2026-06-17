@@ -160,6 +160,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [voiceName, setVoiceName] = useState('');
   const [voiceVolume, setVoiceVolume] = useState(1);
   const [recording, setRecording] = useState(false);
+  const [previewing, setPreviewing] = useState<'music' | 'voice' | null>(null); // play de audio aislado
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [subStyle, setSubStyle] = useState<string>('capcut');
@@ -497,11 +499,29 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const pauseBeds = () => { musicElRef.current?.pause(); voiceElRef.current?.pause(); };
 
+  // Escuchar música o voz por separado (botón play propio)
+  const togglePreview = (kind: 'music' | 'voice', url: string | null) => {
+    if (!url) return;
+    // Si ya está sonando ese, pausar
+    if (previewing === kind) { previewAudioRef.current?.pause(); setPreviewing(null); return; }
+    // Frena cualquier otra reproducción
+    try { previewAudioRef.current?.pause(); } catch {}
+    if (playing) { videoRef.current?.pause(); pauseBeds(); setPlaying(false); }
+    const a = new Audio(url);
+    a.volume = kind === 'voice' ? voiceVolume : musicVolume;
+    a.onended = () => setPreviewing(null);
+    a.onpause = () => setPreviewing(p => (p === kind ? null : p));
+    previewAudioRef.current = a;
+    a.play().then(() => setPreviewing(kind)).catch((e) => { console.warn('[preview audio]', e); setPreviewing(null); alert('No se pudo reproducir el audio en este navegador.'); });
+  };
+
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
     if (playing) { v.pause(); pauseBeds(); setPlaying(false); }
     else {
+      // Frena el preview de audio aislado si estaba sonando
+      try { previewAudioRef.current?.pause(); } catch {} setPreviewing(null);
       // Preview con audio NATIVO. El export corre aislado, con sus propios elementos.
       v.muted = videoVolume === 0; v.volume = videoVolume;
       if (v.currentTime < trimStart || v.currentTime >= trimEnd) v.currentTime = trimStart;
@@ -1218,9 +1238,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               <Accordion title="Música" icon="fa-music" open={!!openSec.musica} onToggle={() => toggleSec('musica')} badge={musicUrl ? '1' : undefined}>
                 {musicUrl ? (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
-                      <span className="text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-music text-purple-500 mr-2"></i>{musicName}</span>
-                      <button onClick={() => { musicElRef.current?.pause(); setMusicUrl(null); setMusicName(''); musicElRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
+                    <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
+                      <button onClick={() => togglePreview('music', musicUrl)} className="w-7 h-7 shrink-0 rounded-full bg-purple-600 text-white flex items-center justify-center active:scale-95 transition-all" title="Escuchar"><i className={`fa-solid ${previewing === 'music' ? 'fa-pause' : 'fa-play'} text-[10px]`}></i></button>
+                      <span className="flex-1 text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-music text-purple-500 mr-2"></i>{musicName}</span>
+                      <button onClick={() => { togglePreview('music', null); previewAudioRef.current?.pause(); musicElRef.current?.pause(); setMusicUrl(null); setMusicName(''); musicElRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs shrink-0"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="flex items-center gap-2">
                       <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
@@ -1240,9 +1261,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <p className="text-[10px] text-slate-400 font-bold leading-relaxed">¿Tu video no tiene voz? Grabá una narración o subí un audio.</p>
                 {voiceUrl ? (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
-                      <span className="text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-microphone-lines text-emerald-500 mr-2"></i>{voiceName}</span>
-                      <button onClick={removeVoice} className="text-red-400 hover:text-red-600 text-xs"><i className="fa-solid fa-xmark"></i></button>
+                    <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
+                      <button onClick={() => togglePreview('voice', voiceUrl)} className="w-7 h-7 shrink-0 rounded-full bg-emerald-500 text-white flex items-center justify-center active:scale-95 transition-all" title="Escuchar"><i className={`fa-solid ${previewing === 'voice' ? 'fa-pause' : 'fa-play'} text-[10px]`}></i></button>
+                      <span className="flex-1 text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-microphone-lines text-emerald-500 mr-2"></i>{voiceName}</span>
+                      <button onClick={() => { previewAudioRef.current?.pause(); removeVoice(); }} className="text-red-400 hover:text-red-600 text-xs shrink-0"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="flex items-center gap-2">
                       <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
