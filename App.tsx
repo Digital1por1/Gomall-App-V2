@@ -545,6 +545,8 @@ const App: React.FC = () => {
         description: { align: 'center', size: 15, w: 84, feed: { x: 50, y: 49 }, story: { x: 50, y: 50 } },
         additional:  { align: 'center', size: 12, w: 80, feed: { x: 50, y: 56 }, story: { x: 50, y: 57 } },
         cta:         { align: 'center', size: 14, w: 56, feed: { x: 50, y: 72 }, story: { x: 50, y: 74 } },
+        logo:        { size: 14, feed: { x: 50, y: 12 }, story: { x: 50, y: 10 } },
+        resource:    { size: 18, feed: { x: 50, y: 24 }, story: { x: 50, y: 22 } },
       },
       editorial: {
         overlay: 32,
@@ -552,6 +554,8 @@ const App: React.FC = () => {
         description: { align: 'left', size: 14, w: 76, feed: { x: 50, y: 59 }, story: { x: 50, y: 58 } },
         additional:  { align: 'left', size: 12, w: 72, feed: { x: 50, y: 66 }, story: { x: 50, y: 64 } },
         cta:         { align: 'left', size: 13, w: 46, feed: { x: 50, y: 80 }, story: { x: 50, y: 78 } },
+        logo:        { size: 13, feed: { x: 22, y: 12 }, story: { x: 22, y: 10 } },
+        resource:    { size: 22, feed: { x: 78, y: 82 }, story: { x: 78, y: 84 } },
       },
       bold: {
         overlay: 45,
@@ -559,6 +563,8 @@ const App: React.FC = () => {
         description: { align: 'center', size: 16, w: 84, feed: { x: 50, y: 49 }, story: { x: 50, y: 51 } },
         additional:  { align: 'center', size: 13, w: 78, feed: { x: 50, y: 57 }, story: { x: 50, y: 58 } },
         cta:         { align: 'center', size: 15, w: 60, feed: { x: 50, y: 73 }, story: { x: 50, y: 74 } },
+        logo:        { size: 16, feed: { x: 50, y: 12 }, story: { x: 50, y: 11 } },
+        resource:    { size: 24, feed: { x: 50, y: 24 }, story: { x: 50, y: 24 } },
       },
       minimal: {
         overlay: 12,
@@ -566,6 +572,8 @@ const App: React.FC = () => {
         description: { align: 'center', size: 14, w: 78, feed: { x: 50, y: 70 }, story: { x: 50, y: 69 } },
         additional:  { align: 'center', size: 12, w: 74, feed: { x: 50, y: 76 }, story: { x: 50, y: 75 } },
         cta:         { align: 'center', size: 13, w: 56, feed: { x: 50, y: 86 }, story: { x: 50, y: 84 } },
+        logo:        { size: 12, feed: { x: 50, y: 10 }, story: { x: 50, y: 9 } },
+        resource:    { size: 16, feed: { x: 50, y: 20 }, story: { x: 50, y: 19 } },
       },
     };
     const cfg = layouts[type];
@@ -579,8 +587,10 @@ const App: React.FC = () => {
       };
       return {
         ...prev,
-        // Las plantillas solo acomodan los textos; no oscurecen ni modifican el fondo.
+        // Las plantillas acomodan textos y, si están cargados, también el logo y el recurso (posición/tamaño).
         textLayers: { headline: build('headline'), description: build('description'), additional: build('additional'), cta: build('cta') },
+        logo: { ...prev.logo, size: cfg.logo.size, feedPosition: cfg.logo.feed, storyPosition: cfg.logo.story },
+        resource: { ...prev.resource, size: cfg.resource.size, feedPosition: cfg.resource.feed, storyPosition: cfg.resource.story },
       };
     });
   };
