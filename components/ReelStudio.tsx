@@ -1156,10 +1156,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             </label>
           </div>
         ) : (
-          <div className="max-w-6xl mx-auto p-5 sm:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Preview + línea de tiempo */}
-            <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-              <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '54vh' }}>
+          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 flex flex-col gap-5">
+            {/* Player + línea de tiempo (a todo el ancho, estilo CapCut) */}
+            <div className="space-y-4">
+              <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '48vh' }}>
                 <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${logoEnabled ? 'cursor-move' : ''}`} />
                 <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
@@ -1310,8 +1310,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               </div>
             </div>
 
-            {/* Controles (desplegables) */}
-            <div className="space-y-3">
+            {/* Controles (desplegables) — en grilla para aprovechar el ancho */}
+            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
               {/* Audio del video */}
               <Accordion title="Audio del video" icon="fa-volume-high" open={!!openSec.audiovideo} onToggle={() => toggleSec('audiovideo')} badge={videoVolume === 0 ? 'Silenciado' : undefined}>
                 <div className="flex items-center justify-end">
@@ -1482,7 +1482,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               </Accordion>
 
               {/* Export */}
-              <div className="space-y-3 pt-2">
+              <div className="space-y-3 pt-2 sm:col-span-2 xl:col-span-3">
                 {exportedUrl ? (
                   <a href={exportedUrl} download="reel-gomall.mp4" className="w-full h-14 bg-green-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
                     <i className="fa-solid fa-download"></i> Descargar reel MP4
