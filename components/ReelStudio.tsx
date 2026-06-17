@@ -174,11 +174,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   const [logoEnabled, setLogoEnabled] = useState(false);
 
-  // Segmentos a conservar (para cortes / quitar tiempos muertos). null = video completo recortado.
-  const [segments, setSegments] = useState<{ start: number; end: number }[] | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [cutMsg, setCutMsg] = useState('');
-
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
   const [exportPct, setExportPct] = useState(0); // 0-100, progreso real de exportación
@@ -579,70 +574,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
-  // Analiza el audio del video y arma los segmentos a conservar quitando los silencios (tiempos muertos)
-  const detectDeadTimes = async () => {
-    if (!videoUrl) return;
-    setAnalyzing(true);
-    setCutMsg('');
-    try {
-      // Extrae el audio con ffmpeg (WAV PCM s16 mono 16kHz) — robusto para mp4/mov/webm
-      const bytes = await getAudioBytes(videoUrl);
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      const sr = 16000;
-      const header = 44;                 // WAV estándar
-      const n = Math.max(0, Math.floor((bytes.byteLength - header) / 2));
-      const win = Math.floor(sr * 0.05); // ventanas de 50ms
-      const SILENCE = 0.015;             // umbral RMS de silencio
-      const MIN_GAP = 0.45;              // pausa mínima a eliminar (s)
-      const PAD = 0.08;                  // pequeño margen para no cortar abrupto
-
-      // RMS por ventana → marca sonido/silencio
-      const loud: boolean[] = [];
-      for (let i = 0; i < n; i += win) {
-        let sum = 0, c = 0;
-        for (let j = i; j < i + win && j < n; j++) { const s = view.getInt16(header + j * 2, true) / 32768; sum += s * s; c++; }
-        loud.push(Math.sqrt(sum / Math.max(1, c)) > SILENCE);
-      }
-      const winDur = win / sr;
-      // Construye segmentos con sonido dentro del recorte [trimStart, trimEnd]
-      const keep: { start: number; end: number }[] = [];
-      let segStart: number | null = null;
-      for (let k = 0; k < loud.length; k++) {
-        const t = k * winDur;
-        if (loud[k]) { if (segStart === null) segStart = t; }
-        else if (segStart !== null) {
-          if (t - segStart >= 0.2) keep.push({ start: Math.max(trimStart, segStart - PAD), end: Math.min(trimEnd, t + PAD) });
-          segStart = null;
-        }
-      }
-      if (segStart !== null) keep.push({ start: Math.max(trimStart, segStart - PAD), end: trimEnd });
-
-      // Une segmentos muy cercanos (pausas menores al mínimo no se cortan)
-      const merged: { start: number; end: number }[] = [];
-      for (const s of keep) {
-        if (s.end <= s.start) continue;
-        const last = merged[merged.length - 1];
-        if (last && s.start - last.end < MIN_GAP) last.end = s.end;
-        else merged.push({ ...s });
-      }
-
-      const total = trimEnd - trimStart;
-      const kept = merged.reduce((a, s) => a + (s.end - s.start), 0);
-      const removed = Math.max(0, total - kept);
-      if (merged.length === 0 || removed < 0.3) {
-        setSegments(null);
-        setCutMsg('No se detectaron pausas significativas para quitar.');
-      } else {
-        setSegments(merged);
-        setCutMsg(`Detectamos ${merged.length} tramo(s) con contenido · se quitan ~${removed.toFixed(1)}s de pausas.`);
-      }
-    } catch (e) {
-      setSegments(null);
-      setCutMsg('No pudimos analizar el audio de este video (formato no compatible). Podés recortar manualmente.');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   // --- Voz en off ---
   const handleVoiceFile = (file: File) => {
@@ -654,18 +585,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
+      // Elegí un mime de audio soportado; el blob se crea con el mime real del recorder.
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } }) || '';
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       micChunksRef.current = [];
       rec.ondataavailable = (e) => { if (e.data.size > 0) micChunksRef.current.push(e.data); };
       rec.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(micChunksRef.current, { type: 'audio/webm' });
+        const type = rec.mimeType || mime || 'audio/webm';
+        const blob = new Blob(micChunksRef.current, { type });
+        console.info('[voz] grabación:', (blob.size / 1024).toFixed(0) + 'KB', type);
+        if (blob.size < 512) { alert('La grabación quedó vacía. Revisá el micrófono e intentá de nuevo.'); return; }
+        voiceElRef.current = null;
         setVoiceUrl(URL.createObjectURL(blob));
         setVoiceName('Grabación de voz');
-        voiceElRef.current = null;
       };
       micRecorderRef.current = rec;
-      rec.start();
+      rec.start(100); // timeslice: asegura que ondataavailable junte datos
       setRecording(true);
     } catch {
       alert('No se pudo acceder al micrófono. Revisá los permisos del navegador.');
@@ -922,13 +859,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       // Asegura que la tipografía de los subtítulos esté cargada antes de grabar
       try { await (document as any).fonts?.load(`900 74px "${subFont}"`); } catch {}
 
-      // Rangos a exportar: si hay 1 clip con pausas detectadas, sus segmentos; si no, el recorte de cada clip
-      let ranges: { url: string; start: number; end: number }[];
-      if (clips.length === 1 && segments && segments.length) {
-        ranges = segments.map(s => ({ url: clips[0].url, start: s.start, end: s.end }));
-      } else {
-        ranges = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
-      }
+      // Rangos a exportar: el recorte de cada clip (en orden, concatenados)
+      const ranges: { url: string; start: number; end: number }[] = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
       const totalDur = Math.max(0.1, ranges.reduce((acc, r) => acc + Math.max(0, r.end - r.start), 0));
       console.info('[export] inicio', { clips: clips.length, rangos: ranges.length, duracion: +totalDur.toFixed(2) + 's', formato: '9:16', tam: `${CANVAS_W}x${CANVAS_H}`, musica: !!musicUrl, voz: !!voiceUrl, volVideo: videoVolume });
 
@@ -1210,7 +1142,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + currentTime * TL_PX }} />
                   </div>
                 </div>
-                <p className="text-[9px] text-slate-300 font-bold">Arriba el video, abajo la onda de audio. Arrastrá los bordes blancos para recortar desde las puntas. Tocá la timeline para mover el cabezal. Para dividir, ubicá el cabezal y tocá "Dividir acá".</p>
+                <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar desde las puntas. Tocá la timeline para mover el cabezal.<br/><b>Para sacar una parte del medio:</b> poné el cabezal al inicio de esa parte y tocá "Dividir acá", repetí al final, y borrá el clip del medio con la ✕.</p>
               </div>
             </div>
 
@@ -1224,22 +1156,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <div className="flex items-center justify-between text-[10px] font-bold text-slate-400"><span>Fin: {fmt(trimEnd)}</span></div>
                   <input type="range" min={0} max={duration || 0} step={0.1} value={trimEnd} onChange={(e) => setTrimEnd(Math.max(Number(e.target.value), trimStart + 0.5))} className="w-full h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
                 </div>
-              </Accordion>
-
-              {/* Tiempos muertos */}
-              <Accordion title="Quitar tiempos muertos" icon="fa-scissors" open={!!openSec.pausas} onToggle={() => toggleSec('pausas')} badge={segments ? `${segments.length} tramos` : undefined}>
-                <p className="text-[10px] text-slate-400 font-bold leading-relaxed">Analizamos el audio y eliminamos las pausas/silencios para un reel más dinámico.</p>
-                {segments ? (
-                  <div className="flex items-center justify-between bg-purple-50 rounded-xl border border-purple-100 px-3 py-2.5">
-                    <span className="text-[11px] font-black text-purple-700"><i className="fa-solid fa-scissors mr-1.5"></i>{segments.length} tramos · pausas quitadas</span>
-                    <button onClick={() => { setSegments(null); setCutMsg(''); }} className="text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-colors">Deshacer</button>
-                  </div>
-                ) : (
-                  <button onClick={detectDeadTimes} disabled={analyzing} className="w-full py-2.5 text-purple-600 text-[9px] font-black uppercase tracking-widest hover:bg-purple-50 rounded-xl transition-all border border-purple-100 border-dashed disabled:opacity-50">
-                    {analyzing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1"></i>Analizando audio…</> : <><i className="fa-solid fa-scissors mr-1"></i>Detectar y quitar pausas</>}
-                  </button>
-                )}
-                {cutMsg && <p className="text-[10px] text-slate-400 font-bold">{cutMsg}</p>}
               </Accordion>
 
               {/* Audio del video */}
