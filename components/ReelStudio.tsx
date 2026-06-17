@@ -229,7 +229,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     });
   };
   // --- Línea de tiempo (estilo CapCut): cada tramo se dibuja con su ANCHO RECORTADO real ---
-  const TL_PX = Math.max(8, Math.round(48 * tlZoom)); // píxeles por segundo (escala con el zoom)
+  const TL_PX = Math.max(10, Math.round(60 * tlZoom)); // píxeles por segundo (escala con el zoom)
+  // Reordenar clips (arrastrando los chips)
+  const dragFromRef = useRef<number | null>(null);
+  const moveClip = (from: number, to: number) => {
+    setClips(prev => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+      const next = [...prev]; const [m] = next.splice(from, 1); next.splice(to, 0, m);
+      return next;
+    });
+    setActiveIdx(to);
+  };
   const clipW = (c: Clip) => Math.max(12, ((c.trimEnd || 0) - (c.trimStart || 0)) * TL_PX);
   const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + clipW(c), 0);
   const timelineW = () => Math.max(40, clips.reduce((a, c) => a + clipW(c), 0));
@@ -1166,7 +1176,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <span className={labelClass}>Clips ({clips.length})</span>
                 <div className="flex gap-2 flex-wrap items-center">
                   {clips.map((c, i) => (
-                    <div key={c.id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
+                    <div
+                      key={c.id}
+                      draggable
+                      onDragStart={() => { dragFromRef.current = i; }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); if (dragFromRef.current != null) moveClip(dragFromRef.current, i); dragFromRef.current = null; }}
+                      onDragEnd={() => { dragFromRef.current = null; }}
+                      className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all cursor-grab active:cursor-grabbing ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}
+                    >
+                      <i className="fa-solid fa-grip-vertical text-slate-300" title="Arrastrá para reordenar"></i>
                       <button onClick={() => setActiveIdx(i)}><i className="fa-solid fa-film mr-1"></i>Clip {i + 1}</button>
                       <button onClick={() => { if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="text-red-400 hover:text-red-600" title="Borrar clip"><i className="fa-solid fa-xmark"></i></button>
                     </div>
@@ -1176,7 +1195,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => { addClips(Array.from(e.target.files || [])); e.currentTarget.value = ''; }} />
                   </label>
                 </div>
-                {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Seleccioná un clip para recortarlo. Se exportan unidos, en orden.</p>}
+                {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Arrastrá los clips (⠿) para cambiar el orden. Se exportan unidos, en ese orden.</p>}
               </div>
 
               {/* Línea de tiempo */}
@@ -1194,17 +1213,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <button onClick={() => { const c = clips[activeIdx]; if (!c) return; if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all" title="Borrar el tramo seleccionado"><i className="fa-solid fa-trash mr-1.5"></i>Borrar tramo</button>
                   </div>
                 </div>
-                <div ref={trackRef} onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none cursor-pointer">
+                <div ref={trackRef} onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-3 select-none touch-none cursor-pointer">
                   <div className="relative" style={{ width: timelineW() }}>
                     {/* Pista de video — cada bloque = el tramo recortado real */}
-                    <div className="relative h-14">
+                    <div className="relative h-20">
                       {clips.map((c, idx) => {
                         const left = clipLeftPx(idx);
                         const width = clipW(c);
                         return (
-                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-yellow-300 ring-2 ring-yellow-300/60' : 'border-slate-700'}`} style={{ left, width }}>
+                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-20 rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-yellow-300 ring-2 ring-yellow-300/60' : 'border-slate-700'}`} style={{ left: left + 2, width: Math.max(10, width - 4) }}>
                             <div className="absolute inset-0 bg-purple-600/55" />
-                            <span className="absolute left-2.5 top-1.5 text-[8px] text-white font-black uppercase truncate max-w-[70%] pointer-events-none">Clip {idx + 1}</span>
+                            <span className="absolute left-2.5 top-1.5 text-[9px] text-white font-black uppercase truncate max-w-[70%] pointer-events-none">Clip {idx + 1}</span>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 left-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 right-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
                             {idx === activeIdx && (
@@ -1215,7 +1234,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                       })}
                     </div>
                     {/* Pista de audio (onda recortada) */}
-                    <div className="relative h-10 mt-1.5">
+                    <div className="relative h-12 mt-2">
                       {clips.map((c, idx) => {
                         const left = clipLeftPx(idx);
                         const width = clipW(c);
@@ -1225,7 +1244,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                           ? peaks.slice(Math.floor((c.trimStart / dur) * peaks.length), Math.max(Math.floor((c.trimStart / dur) * peaks.length) + 1, Math.ceil((c.trimEnd / dur) * peaks.length)))
                           : peaks;
                         return (
-                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-10 rounded-lg overflow-hidden border ${idx === activeIdx ? 'border-emerald-400/70' : 'border-slate-700'}`} style={{ left, width }}>
+                          <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-12 rounded-lg overflow-hidden border ${idx === activeIdx ? 'border-emerald-400/70' : 'border-slate-700'}`} style={{ left: left + 2, width: Math.max(10, width - 4) }}>
                             <div className="absolute inset-0 bg-emerald-950/40" />
                             {peaks === undefined ? (
                               <div className="absolute inset-0 flex items-center justify-center">
@@ -1247,7 +1266,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     </div>
                     {/* Pista de MÚSICA (global, estilo CapCut) */}
                     {musicUrl && (
-                      <div className="relative h-8 mt-1.5" style={{ width: timelineW() }}>
+                      <div className="relative h-9 mt-2" style={{ width: timelineW() }}>
                         <div className="absolute inset-0 rounded-lg bg-purple-600/30 border border-purple-500/40 flex items-center gap-2 px-2 overflow-hidden">
                           <button onClick={(e) => { e.stopPropagation(); togglePreview('music', musicUrl); }} className="w-5 h-5 shrink-0 rounded-full bg-purple-600 text-white flex items-center justify-center"><i className={`fa-solid ${previewing === 'music' ? 'fa-pause' : 'fa-play'} text-[8px]`}></i></button>
                           <i className="fa-solid fa-music text-purple-300 text-[10px] shrink-0"></i>
@@ -1257,7 +1276,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     )}
                     {/* Pista de VOZ EN OFF (global) */}
                     {voiceUrl && (
-                      <div className="relative h-8 mt-1.5" style={{ width: timelineW() }}>
+                      <div className="relative h-9 mt-2" style={{ width: timelineW() }}>
                         <div className="absolute inset-0 rounded-lg bg-emerald-600/25 border border-emerald-500/40 flex items-center gap-2 px-2 overflow-hidden">
                           <button onClick={(e) => { e.stopPropagation(); togglePreview('voice', voiceUrl); }} className="w-5 h-5 shrink-0 rounded-full bg-emerald-500 text-white flex items-center justify-center"><i className={`fa-solid ${previewing === 'voice' ? 'fa-pause' : 'fa-play'} text-[8px]`}></i></button>
                           <i className="fa-solid fa-microphone-lines text-emerald-300 text-[10px] shrink-0"></i>
