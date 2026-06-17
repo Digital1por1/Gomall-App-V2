@@ -217,7 +217,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const addClips = (files: File[]) => {
     const fresh = files.filter(Boolean).map(f => ({ id: uid(), url: URL.createObjectURL(f), duration: 0, trimStart: 0, trimEnd: 0 }));
     if (!fresh.length) return;
-    setClips(prev => { const next = [...prev, ...fresh]; setActiveIdx(next.length - 1); return next; });
+    setClips(prev => [...prev, ...fresh]);
+    // El cabezal arranca al inicio del reel (primer clip)
+    setActiveIdx(0);
+    setCurrentTime(0);
     setExportedUrl(null);
   };
   const addClip = (file: File) => addClips([file]);
@@ -1212,18 +1215,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               {/* Clips */}
               <div className="space-y-2">
                 <span className={labelClass}>Clips ({clips.length})</span>
-                <div className="flex gap-2 flex-wrap items-center">
+                <div
+                  className="flex gap-2 flex-wrap items-center"
+                  onPointerUp={(e) => {
+                    const from = dragFromRef.current; dragFromRef.current = null;
+                    document.body.style.cursor = '';
+                    if (from == null) return;
+                    const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('[data-clip-idx]') as HTMLElement | null;
+                    const to = el ? Number(el.dataset.clipIdx) : NaN;
+                    if (!isNaN(to)) moveClip(from, to);
+                  }}
+                >
                   {clips.map((c, i) => (
                     <div
                       key={c.id}
-                      draggable
-                      onDragStart={() => { dragFromRef.current = i; }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => { e.preventDefault(); if (dragFromRef.current != null) moveClip(dragFromRef.current, i); dragFromRef.current = null; }}
-                      onDragEnd={() => { dragFromRef.current = null; }}
-                      className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all cursor-grab active:cursor-grabbing ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}
+                      data-clip-idx={i}
+                      className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}
                     >
-                      <i className="fa-solid fa-grip-vertical text-slate-300" title="Arrastrá para reordenar"></i>
+                      <i className="fa-solid fa-grip-vertical text-slate-400 cursor-grab active:cursor-grabbing touch-none" title="Arrastrá para reordenar" onPointerDown={(e) => { e.preventDefault(); dragFromRef.current = i; document.body.style.cursor = 'grabbing'; }}></i>
                       <button onClick={() => setActiveIdx(i)}><i className="fa-solid fa-film mr-1"></i>Clip {i + 1}</button>
                       <button onClick={() => { if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="text-red-400 hover:text-red-600" title="Borrar clip"><i className="fa-solid fa-xmark"></i></button>
                     </div>
@@ -1233,7 +1242,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => { addClips(Array.from(e.target.files || [])); e.currentTarget.value = ''; }} />
                   </label>
                 </div>
-                {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Arrastrá los clips (⠿) para cambiar el orden. Se exportan unidos, en ese orden.</p>}
+                {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Arrastrá un clip de su ⠿ y soltalo sobre otro para cambiar el orden. Se exportan en ese orden.</p>}
               </div>
 
               {/* Línea de tiempo */}
@@ -1322,8 +1331,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                         </div>
                       </div>
                     )}
-                    {/* Cabezal (cruza todas las pistas) */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + (currentTime - (activeClip?.trimStart || 0)) * TL_PX }} />
+                    {/* Cabezal (cruza todas las pistas) con perilla para agarrarlo */}
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + (currentTime - (activeClip?.trimStart || 0)) * TL_PX }}>
+                      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-yellow-300 border-2 border-slate-900 shadow" />
+                    </div>
                   </div>
                 </div>
                 <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar las puntas. Tocá la timeline para mover el cabezal (línea amarilla).<br/><b>Cortar una parte del medio:</b> 1) cabezal al inicio de esa parte → <b>Dividir acá</b>. 2) movés el cabezal al final → <b>Dividir acá</b>. 3) el tramo del medio queda <b>seleccionado (borde amarillo)</b> → tocá <b>Borrar tramo</b>.</p>
