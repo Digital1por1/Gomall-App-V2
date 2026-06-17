@@ -288,13 +288,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     let cancelled = false;
     (async () => {
       for (const c of clips) {
-        if (clipPeaks[c.id] || peaksBusyRef.current.has(c.id)) continue;
+        if (clipPeaks[c.id] !== undefined || peaksBusyRef.current.has(c.id)) continue;
         peaksBusyRef.current.add(c.id);
         try {
           const bytes = await getAudioBytes(c.url);
           const peaks = wavToPeaks(bytes, 220);
-          if (!cancelled && peaks.length) setClipPeaks(prev => ({ ...prev, [c.id]: peaks }));
-        } catch { /* sin audio → onda plana */ }
+          // Siempre guardamos (aunque sea []): así la pista deja de mostrar "cargando".
+          if (!cancelled) setClipPeaks(prev => ({ ...prev, [c.id]: peaks }));
+        } catch { if (!cancelled) setClipPeaks(prev => ({ ...prev, [c.id]: [] })); } // sin pista de audio → vacío
         finally { peaksBusyRef.current.delete(c.id); }
       }
     })();
@@ -544,12 +545,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setSubtitles(prev => [...prev, { id: `sub_${Date.now()}`, text: '', start, end: Math.min(start + 3, trimEnd || start + 3) }]);
   };
 
-  // Transcribe el audio del video con IA y crea los subtítulos cronometrados
+  // Transcribe el audio (la voz en off si existe, si no el video) y crea los subtítulos cronometrados
   const generateSubtitles = async () => {
-    if (!videoUrl) return;
+    // Subtitulamos la NARRACIÓN: si hay voz en off, esa; si no, el audio del video.
+    const srcUrl = voiceUrl || videoUrl;
+    if (!srcUrl) { alert('Subí un video o una voz en off para generar subtítulos.'); return; }
     setTranscribing(true);
     try {
-      const { base64 } = await getAudioWav(videoUrl);
+      const base64 = await getWavBase64(srcUrl);
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -562,7 +565,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const clean = String(json.text || '').replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(clean);
       const segs = (parsed.segments || []).filter((s: any) => s?.text && String(s.text).trim());
-      if (!segs.length) { alert('No se detectó voz para transcribir en este video.'); return; }
+      if (!segs.length) { alert(voiceUrl ? 'No se detectó voz en la narración.' : 'Este video no tiene voz. Grabá o subí una voz en off y generá los subtítulos de ahí.'); return; }
       setSubtitles(segs.map((s: any, i: number) => {
         const start = Math.max(0, Number(s.start) || 0);
         return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
@@ -728,6 +731,19 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
     const bytes = await getAudioBytes(url);
     return { base64: bytesToBase64(bytes), bytes };
+  };
+  // WAV en base64 para transcribir. Decodifica con el navegador (mp3/m4a/wav/opus) y cae a ffmpeg si hace falta.
+  const getWavBase64 = async (url: string): Promise<string> => {
+    try {
+      const ab = await (await fetch(url)).arrayBuffer();
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const buf = await ctx.decodeAudioData(ab.slice(0));
+      try { await ctx.close(); } catch {}
+      return bytesToBase64(audioBufferToWav(buf));
+    } catch {
+      const { base64 } = await getAudioWav(url);
+      return base64;
+    }
   };
 
   // === Mezcla de audio offline (modelo CapCut/Canva): video + música + voz → un AudioBuffer ===
@@ -1166,7 +1182,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                         return (
                           <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-10 rounded-lg overflow-hidden border ${idx === activeIdx ? 'border-emerald-400/70' : 'border-slate-700'}`} style={{ left, width }}>
                             <div className="absolute inset-0 bg-emerald-950/40" />
-                            {peaks ? (
+                            {peaks === undefined ? (
+                              // Todavía calculando la onda
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-[8px] text-emerald-300/50 font-black uppercase tracking-widest"><i className="fa-solid fa-circle-notch fa-spin mr-1"></i>Audio</span>
+                              </div>
+                            ) : peaks.length > 0 ? (
                               <div className="absolute inset-0 flex items-center gap-px px-px">
                                 {peaks.map((p, i) => {
                                   const tt = (i / peaks.length) * (c.duration || 0);
@@ -1175,8 +1196,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                                 })}
                               </div>
                             ) : (
+                              // Clip sin pista de audio (ej. video generado)
                               <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-[8px] text-emerald-300/50 font-black uppercase tracking-widest"><i className="fa-solid fa-circle-notch fa-spin mr-1"></i>Audio</span>
+                                <div className="h-px w-[90%] bg-slate-600" />
+                                <span className="absolute text-[8px] text-slate-400 font-black uppercase tracking-widest">Sin audio</span>
                               </div>
                             )}
                           </div>
@@ -1310,7 +1333,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
                 {/* Auto-subtítulos con IA */}
                 <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 disabled:opacity-50 transition-all">
-                  {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Transcribiendo el audio…</> : <><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Generar subtítulos del audio</>}
+                  {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Transcribiendo…</> : <><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>{voiceUrl ? 'Generar subtítulos de la voz en off' : 'Generar subtítulos del audio'}</>}
                 </button>
 
                 {/* Estilos predeterminados */}
