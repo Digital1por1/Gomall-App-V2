@@ -818,9 +818,20 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     // --- Audio: mezcla offline → AAC ---
     if (hasAudio) {
       let aErr: any = null;
-      const aenc = new AE({ output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta), error: (e: any) => { aErr = e; } });
+      let audioChunks = 0;
+      const aenc = new AE({
+        output: (chunk: any, meta: any) => { audioChunks++; muxer.addAudioChunk(chunk, meta); },
+        error: (e: any) => { aErr = e; console.error('[export] AudioEncoder error:', e); },
+      });
       const ch = mixBuf!.numberOfChannels, sr = mixBuf!.sampleRate, total = mixBuf!.length;
-      aenc.configure({ codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, bitrate: 192_000 });
+      // aac.format:'aac' → AAC "raw" con decoderConfig (lo que mp4-muxer necesita). Sin esto puede salir
+      // en ADTS y el MP4 queda SIN audio. bitstreamFormat es el nombre alterno en algunos navegadores.
+      const aacCfg: any = { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, bitrate: 192_000, aac: { format: 'aac' } };
+      try {
+        const sup = await AE.isConfigSupported?.(aacCfg);
+        console.info('[export] AAC soportado:', sup?.supported !== false);
+      } catch {}
+      aenc.configure(aacCfg);
       const chans: Float32Array[] = [];
       for (let c = 0; c < ch; c++) chans.push(mixBuf!.getChannelData(c));
       const CHUNK = 1024;
@@ -831,10 +842,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         for (let c = 0; c < ch; c++) planar.set(chans[c].subarray(pos, pos + n), c * n);
         const ad = new AD({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round((pos / sr) * 1e6), data: planar });
         aenc.encode(ad); ad.close();
+        if (aenc.encodeQueueSize > 16) await new Promise((r2) => setTimeout(r2, 0));
       }
       await aenc.flush();
       aenc.close();
       if (aErr) throw aErr;
+      console.info('[export] audio AAC chunks:', audioChunks);
+      if (audioChunks === 0) console.warn('[export] ⚠ el encoder AAC no produjo datos → el MP4 saldrá sin audio.');
     }
 
     muxer.finalize();
