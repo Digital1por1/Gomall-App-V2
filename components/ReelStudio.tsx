@@ -688,7 +688,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     // Export AISLADO: usa sus propios elementos y AudioContext, que se descartan al terminar.
     // Así nunca toca los elementos del editor → el preview siempre suena nativo y fluido.
     const exV = document.createElement('video');
-    exV.crossOrigin = 'anonymous'; exV.playsInline = true; exV.muted = false; exV.style.display = 'none';
+    exV.crossOrigin = 'anonymous'; exV.playsInline = true; exV.muted = false;
+    // Fuera de pantalla (no display:none, para que siga decodificando frames y no salga negro)
+    exV.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
     document.body.appendChild(exV);
     let exActx: AudioContext | null = null;
     let exMusic: HTMLAudioElement | null = null;
@@ -710,7 +712,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       try { await (document as any).fonts?.load(`900 74px "${subFont}"`); } catch {}
 
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
-      const tracks: MediaStreamTrack[] = [canvasStream.getVideoTracks()[0]];
 
       // Grafo de audio del export (aislado)
       exActx = new AudioContext();
@@ -734,16 +735,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         exVoice = new Audio(voiceUrl);
         try { const s = exActx.createMediaElementSource(exVoice); const g = exActx.createGain(); g.gain.value = voiceVolume; s.connect(g); g.connect(dest); hasAudio = true; } catch {}
       }
-      if (hasAudio) tracks.push(dest.stream.getAudioTracks()[0]);
 
-      const combined = new MediaStream(tracks);
-      // Si el navegador puede grabar MP4 nativo, lo usamos y nos salteamos la conversión con ffmpeg (mucho más rápido).
+      // Adjuntar el audio a la MISMA stream del canvas (addTrack es más confiable que new MediaStream([...]))
+      const combined = canvasStream;
+      if (hasAudio) { const at = dest.stream.getAudioTracks()[0]; if (at) combined.addTrack(at); }
+
+      // Grabamos WebM (Opus) que captura el audio de forma confiable, y convertimos a MP4 con ffmpeg.
+      // El MP4 nativo de MediaRecorder a veces descarta el audio, por eso solo se usa si no hay WebM (Safari).
+      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
+        : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
       const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
         .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
-      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
-      const isMp4 = !!mp4Mime;
-      const recMime = mp4Mime || webmMime;
-      const recorder = new MediaRecorder(combined, { mimeType: recMime });
+      const isMp4 = !webmMime && !!mp4Mime;
+      const recMime = webmMime || mp4Mime || '';
+      const recorder = recMime ? new MediaRecorder(combined, { mimeType: recMime }) : new MediaRecorder(combined);
+      console.log('[export] mime:', recMime || '(default)', '· audio tracks:', combined.getAudioTracks().length);
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
