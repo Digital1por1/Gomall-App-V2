@@ -176,6 +176,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [logoPos, setLogoPos] = useState({ x: 50, y: 10 }); // % del canvas (centro del logo)
   const [logoSize, setLogoSize] = useState(28); // % del ancho del canvas
   const [tlZoom, setTlZoom] = useState(1); // zoom de la línea de tiempo
+  const [transition, setTransition] = useState<'none' | 'fade' | 'white'>('none'); // transición entre clips
+  const [transDur, setTransDur] = useState(0.5); // duración total de la transición (s)
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
@@ -349,7 +351,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas.
   // srcEl permite dibujar desde otro elemento de video (el del export aislado).
-  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement) => {
+  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement, fadeAlpha = 0) => {
     const canvas = canvasRef.current;
     const v = srcEl || videoRef.current;
     if (!canvas || !v) return;
@@ -446,7 +448,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       ctx.textAlign = 'center';
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     }
-  }, [logoEnabled, logoPos, logoSize, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent]);
+
+    // Transición entre clips: velo (negro o blanco) sobre todo el frame
+    if (fadeAlpha > 0) {
+      const rgb = transition === 'white' ? '255,255,255' : '0,0,0';
+      ctx.fillStyle = `rgba(${rgb},${Math.min(1, fadeAlpha)})`;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
+  }, [logoEnabled, logoPos, logoSize, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent, transition]);
 
   // Arrastrar el logo sobre el preview
   const canvasPt = (e: React.PointerEvent) => {
@@ -474,12 +483,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const activeIdxRef = useRef(activeIdx); activeIdxRef.current = activeIdx;
   const continuePlayRef = useRef(false); // reproducir el próximo clip al terminar el actual
 
+  // Opacidad del velo de transición según cercanía a un borde con clip adyacente
+  const fadeAt = (hasPrev: boolean, hasNext: boolean, fromStart: number, toEnd: number) => {
+    if (transition === 'none' || transDur <= 0) return 0;
+    const fl = transDur / 2;
+    let a = 0;
+    if (hasNext && toEnd < fl) a = Math.max(a, 1 - toEnd / fl);
+    if (hasPrev && fromStart < fl) a = Math.max(a, 1 - fromStart / fl);
+    return Math.max(0, Math.min(1, a));
+  };
+
   // Loop de previsualización (reproduce los clips en cadena, continuo)
   const tick = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
-    drawFrame(v.currentTime);
+    const ci = activeIdxRef.current; const cc = clipsRef.current[ci];
+    const fade = cc ? fadeAt(ci > 0, ci < clipsRef.current.length - 1, v.currentTime - cc.trimStart, cc.trimEnd - v.currentTime) : 0;
+    drawFrame(v.currentTime, undefined, fade);
     if (v.currentTime >= trimEnd) {
       const idx = activeIdxRef.current;
       const cl = clipsRef.current;
@@ -506,7 +527,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       return;
     }
     rafRef.current = requestAnimationFrame(tick);
-  }, [drawFrame, trimEnd]);
+  }, [drawFrame, trimEnd, transition, transDur]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (playing) rafRef.current = requestAnimationFrame(tick);
@@ -515,7 +536,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   }, [playing, tick]);
 
   // Redibuja al cambiar overlays mientras está pausado
-  useEffect(() => { if (!playing && videoUrl) drawFrame(currentTime); }, [drawFrame, playing, videoUrl, currentTime]);
+  useEffect(() => {
+    if (playing || !videoUrl) return;
+    const c = activeClip;
+    const fade = c ? fadeAt(activeIdx > 0, activeIdx < clips.length - 1, currentTime - c.trimStart, c.trimEnd - currentTime) : 0;
+    drawFrame(currentTime, undefined, fade);
+  }, [drawFrame, playing, videoUrl, currentTime, transition, transDur]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Carga la fuente elegida (sino el canvas la ignora) y redibuja al estar lista
   useEffect(() => {
@@ -866,7 +892,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       try { exV.currentTime = tt; } catch { fin(); }
       setTimeout(fin, 600);
     });
-    for (const r of ranges) {
+    for (let ri = 0; ri < ranges.length; ri++) {
+      const r = ranges[ri];
       if (exV.src !== r.url) {
         exV.src = r.url;
         await new Promise<void>((res) => { const h = () => { exV.removeEventListener('loadeddata', h); res(); }; exV.addEventListener('loadeddata', h); });
@@ -877,7 +904,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         if (encErr) throw encErr;
         const srcT = Math.min(r.start + f / FPS, Math.max(r.start, r.end - 0.001));
         await seekTo(srcT);
-        drawFrame(exV.currentTime, exV);
+        const fade = fadeAt(ri > 0, ri < ranges.length - 1, srcT - r.start, r.end - srcT);
+        drawFrame(exV.currentTime, exV, fade);
         const vf = new VF(canvas, { timestamp: Math.round(frameIndex * frameDurUs), duration: Math.round(frameDurUs) });
         venc.encode(vf, { keyFrame: frameIndex % (FPS * 2) === 0 });
         vf.close();
@@ -1012,7 +1040,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         setExportPct(10);
         console.info('[export] grabando (MediaRecorder)…', recMime || '(default)', '· pistas de audio:', canvasStream.getAudioTracks().length);
         recorder.start(100);
-        for (const range of ranges) {
+        for (let ri = 0; ri < ranges.length; ri++) {
+          const range = ranges[ri];
           if (audioStarted && exActx) { try { await exActx.suspend(); } catch {} }
           if (exV.src !== range.url) {
             exV.src = range.url;
@@ -1028,7 +1057,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           await new Promise<void>((resolve) => {
             let lastUi = 0;
             const step = () => {
-              drawFrame(exV.currentTime, exV);
+              drawFrame(exV.currentTime, exV, fadeAt(ri > 0, ri < ranges.length - 1, exV.currentTime - range.start, range.end - exV.currentTime));
               const now = performance.now();
               if (now - lastUi > 250) {
                 lastUi = now;
@@ -1241,6 +1270,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </div>
                 </div>
                 <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar las puntas. Tocá la timeline para mover el cabezal (línea amarilla).<br/><b>Cortar una parte del medio:</b> 1) cabezal al inicio de esa parte → <b>Dividir acá</b>. 2) movés el cabezal al final → <b>Dividir acá</b>. 3) el tramo del medio queda <b>seleccionado (borde amarillo)</b> → tocá <b>Borrar tramo</b>.</p>
+
+                {/* Transiciones entre clips */}
+                {clips.length > 1 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className={labelClass}>Transición entre clips</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {([['none', 'Ninguna'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco']] as const).map(([id, label]) => (
+                        <button key={id} onClick={() => setTransition(id)} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${transition === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{label}</button>
+                      ))}
+                      {transition !== 'none' && (
+                        <span className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 ml-1">
+                          {transDur.toFixed(1)}s
+                          <input type="range" min={0.2} max={1.2} step={0.1} value={transDur} onChange={(e) => setTransDur(Number(e.target.value))} className="w-20 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
