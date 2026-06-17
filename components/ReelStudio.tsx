@@ -596,6 +596,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     for (let i = 0; i < activeIdx; i++) off += Math.max(0, (clips[i].trimEnd - clips[i].trimStart));
     return off;
   };
+  // Duración total del reel (suma de los tramos recortados) y posición global del cabezal
+  const reelTotal = () => clips.reduce((a, c) => a + Math.max(0, (c.trimEnd || 0) - (c.trimStart || 0)), 0);
+  const globalTime = () => globalOffsetActive() + Math.max(0, currentTime - (activeClip?.trimStart || 0));
+  // Mover el cabezal por tiempo GLOBAL del reel (la barra del reproductor)
+  const seekGlobal = (t: number) => {
+    let acc = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const d = Math.max(0, clips[i].trimEnd - clips[i].trimStart);
+      if (t <= acc + d || i === clips.length - 1) {
+        const local = clips[i].trimStart + Math.max(0, Math.min(d, t - acc));
+        if (i === activeIdx) seek(local);
+        else { pendingSeekRef.current = local; setActiveIdx(i); }
+        return;
+      }
+      acc += d;
+    }
+  };
   // Crea (perezosamente) los elementos de audio para el preview nativo
   const ensureMusicEl = () => {
     if (musicUrl && !musicElRef.current) { musicElRef.current = new Audio(musicUrl); musicElRef.current.crossOrigin = 'anonymous'; musicElRef.current.loop = true; musicElRef.current.volume = musicVolume; }
@@ -1192,13 +1209,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <button onClick={togglePlay} className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-all shrink-0">
                   <i className={`fa-solid ${playing ? 'fa-pause' : 'fa-play'}`}></i>
                 </button>
-                <input type="range" min={0} max={duration || 0} step={0.05} value={currentTime} onChange={(e) => seek(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
-                <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">{fmt(currentTime)} / {fmt(duration)}</span>
+                <input type="range" min={0} max={reelTotal() || 0} step={0.05} value={globalTime()} onChange={(e) => seekGlobal(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">{fmt(globalTime())} / {fmt(reelTotal())}</span>
               </div>
             </div>
 
-            {/* Línea de tiempo (a todo el ancho, abajo) */}
-            <div className="space-y-2 min-w-0 lg:[grid-column:1/3] lg:[grid-row:2]">
+            {/* Línea de tiempo (debajo del video) */}
+            <div className="space-y-2 min-w-0 lg:[grid-column:1] lg:[grid-row:2]">
               {/* Clips */}
               <div className="space-y-2">
                 <span className={labelClass}>Clips ({clips.length})</span>
@@ -1338,8 +1355,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               </div>
             </div>
 
-            {/* Opciones (a la derecha del video) */}
-            <div className="space-y-3 lg:[grid-column:2] lg:[grid-row:1]">
+            {/* Opciones (a la derecha, alto completo) */}
+            <div className="space-y-3 lg:[grid-column:2] lg:[grid-row:1/3]">
               {/* Audio del video */}
               <Accordion title="Audio del video" icon="fa-volume-high" open={!!openSec.audiovideo} onToggle={() => toggleSec('audiovideo')} badge={videoVolume === 0 ? 'Silenciado' : undefined}>
                 <div className="flex items-center justify-end">
