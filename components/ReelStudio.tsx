@@ -359,25 +359,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (activeClip && !activeClip.duration) {
       setActiveTrim({ duration: v.duration, trimStart: 0, trimEnd: v.duration });
     }
-    // Aplica un seek pendiente tras cambiar de clip (scrubbing o reproducción continua)
-    if (pendingSeekRef.current != null) {
+    // Aplica un seek pendiente tras cambiar de clip por scrubbing (cuando NO se está reproduciendo)
+    if (pendingSeekRef.current != null && !playing) {
       const t = Math.max(0, Math.min(v.duration || 0, pendingSeekRef.current));
       pendingSeekRef.current = null;
-      const resume = continuePlayRef.current;
-      continuePlayRef.current = false;
       v.currentTime = t;
       setCurrentTime(t);
       drawFrame(t);
-      if (resume) {
-        // Esperar a que el seek esté listo, reproducir y recién ahí soltar el candado
-        const go = () => { v.onseeked = null; v.play().catch(() => {}); advancingRef.current = false; };
-        v.onseeked = go;
-        setTimeout(go, 400); // fallback por si 'seeked' no dispara
-      } else {
-        advancingRef.current = false;
-      }
-    } else {
-      advancingRef.current = false;
     }
   };
 
@@ -515,11 +503,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const onCanvasPointerUp = () => { logoDragRef.current = null; };
 
-  // Refs espejo para que el loop lea el estado actual sin recrearse
+  // Ref espejo para que el loop lea los clips actuales sin recrearse
   const clipsRef = useRef(clips); clipsRef.current = clips;
-  const activeIdxRef = useRef(activeIdx); activeIdxRef.current = activeIdx;
-  const continuePlayRef = useRef(false); // reproducir el próximo clip al terminar el actual
-  const advancingRef = useRef(false);    // true mientras carga el próximo clip (otro video)
 
   // Opacidad del velo de transición según cercanía a un borde con clip adyacente
   const fadeAt = (hasPrev: boolean, hasNext: boolean, fromStart: number, toEnd: number) => {
@@ -531,51 +516,59 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     return Math.max(0, Math.min(1, a));
   };
 
-  // Loop de previsualización (reproduce los clips en cadena, continuo)
-  const tick = useCallback(() => {
+  // --- Reproducción en cadena SECUENCIAL (mismo enfoque robusto que el export) ---
+  const stopRef = useRef(false);
+  const waitForClip = (v: HTMLVideoElement, url: string) => new Promise<void>((res) => {
+    if (v.currentSrc === url && v.readyState >= 2) { res(); return; }
+    let done = false;
+    const fin = () => { if (done) return; done = true; v.removeEventListener('loadeddata', fin); v.removeEventListener('canplay', fin); res(); };
+    v.addEventListener('loadeddata', fin);
+    v.addEventListener('canplay', fin);
+    setTimeout(fin, 2500);
+  });
+  const seekVideo = (v: HTMLVideoElement, t: number) => new Promise<void>((res) => {
+    let done = false;
+    const fin = () => { if (done) return; done = true; v.removeEventListener('seeked', fin); res(); };
+    v.addEventListener('seeked', fin);
+    try { v.currentTime = t; } catch { fin(); }
+    setTimeout(fin, 1000);
+  });
+  const playReel = async (startIdx: number) => {
     const v = videoRef.current;
-    if (!v) return;
-    // Mientras carga el próximo clip, no chequear el borde (evita saltar de largo por el tiempo viejo)
-    if (advancingRef.current) { rafRef.current = requestAnimationFrame(tick); return; }
-    setCurrentTime(v.currentTime);
-    const ci = activeIdxRef.current; const cc = clipsRef.current[ci];
-    const fade = cc ? fadeAt(ci > 0, ci < clipsRef.current.length - 1, v.currentTime - cc.trimStart, cc.trimEnd - v.currentTime) : 0;
-    drawFrame(v.currentTime, undefined, fade);
-    if (v.currentTime >= trimEnd) {
-      const idx = activeIdxRef.current;
-      const cl = clipsRef.current;
-      if (idx < cl.length - 1) {
-        const next = cl[idx + 1];
-        if (next.url === cl[idx].url) {
-          // Mismo video (clip dividido): saltar dentro del mismo source, sin recargar
-          v.currentTime = next.trimStart;
-          setActiveIdx(idx + 1); // el efecto reinicia el loop con el nuevo trimEnd; el video sigue sonando
-          return;
-        }
-        // Otro video: recargar src, buscar su inicio y seguir (música/voz no se frenan)
-        v.pause();
-        advancingRef.current = true; // candado hasta que el nuevo clip esté listo
-        continuePlayRef.current = true;
-        pendingSeekRef.current = next.trimStart;
-        setActiveIdx(idx + 1);
-        return;
-      }
-      // Último clip: fin
-      v.pause();
-      musicElRef.current?.pause();
-      voiceElRef.current?.pause();
-      advancingRef.current = false;
-      setPlaying(false);
-      return;
+    if (!v || !clipsRef.current.length) return;
+    stopRef.current = false;
+    setPlaying(true);
+    v.muted = videoVolume === 0; v.volume = videoVolume;
+    playBeds(0); // música/voz desde el inicio del reel
+    for (let i = startIdx; i < clipsRef.current.length; i++) {
+      if (stopRef.current) break;
+      const c = clipsRef.current[i];
+      if (!c) break;
+      setActiveIdx(i);                 // React actualiza el src del <video>
+      await waitForClip(v, c.url);     // espera a que ese clip esté cargado y listo
+      if (stopRef.current) break;
+      await seekVideo(v, c.trimStart);  // posiciona al inicio del recorte
+      if (stopRef.current) break;
+      await v.play().catch(() => {});
+      // reproduce hasta el fin del recorte de este clip, dibujando cada frame
+      await new Promise<void>((resolve) => {
+        const step = () => {
+          if (stopRef.current || !videoRef.current) { try { v.pause(); } catch {} return resolve(); }
+          setCurrentTime(v.currentTime);
+          const fade = fadeAt(i > 0, i < clipsRef.current.length - 1, v.currentTime - c.trimStart, c.trimEnd - v.currentTime);
+          drawFrame(v.currentTime, undefined, fade);
+          if (v.currentTime >= c.trimEnd - 0.02 || v.ended) { try { v.pause(); } catch {} return resolve(); }
+          rafRef.current = requestAnimationFrame(step);
+        };
+        rafRef.current = requestAnimationFrame(step);
+      });
     }
-    rafRef.current = requestAnimationFrame(tick);
-  }, [drawFrame, trimEnd, transition, transDur]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (playing) rafRef.current = requestAnimationFrame(tick);
-    else if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [playing, tick]);
+    pauseBeds();
+    stopRef.current = false;
+    setPlaying(false);
+  };
+  // Cancela el loop al desmontar
+  useEffect(() => () => { stopRef.current = true; if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
   // Redibuja al cambiar overlays mientras está pausado
   useEffect(() => {
@@ -669,25 +662,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) { v.pause(); pauseBeds(); advancingRef.current = false; setPlaying(false); return; }
-    // Iniciar: reproduce TODO el reel desde el primer clip (en cadena)
+    if (playing) { stopRef.current = true; try { v.pause(); } catch {} pauseBeds(); setPlaying(false); return; }
+    // Iniciar: reproduce TODO el reel desde el primer clip (en cadena, secuencial)
     try { previewAudioRef.current?.pause(); } catch {} setPreviewing(null);
-    const first = clips[0];
-    if (!first) return;
-    setPlaying(true);
-    playBeds(0); // música/voz desde el inicio del reel
-    if (activeIdx === 0) {
-      v.muted = videoVolume === 0; v.volume = videoVolume;
-      v.currentTime = first.trimStart; v.play().catch(() => {});
-    } else if (clips[activeIdx]?.url === first.url) {
-      // mismo source que el clip 0 (split): salto sin recargar
-      v.muted = videoVolume === 0; v.volume = videoVolume;
-      setActiveIdx(0); v.currentTime = first.trimStart; v.play().catch(() => {});
-    } else {
-      // otro video: recargar el clip 0 y arrancar (la cadena sigue sola)
-      advancingRef.current = true;
-      continuePlayRef.current = true; pendingSeekRef.current = first.trimStart; setActiveIdx(0);
-    }
+    playReel(0);
   };
 
   const seek = (t: number) => {
