@@ -258,7 +258,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       return { ...c, trimEnd: Math.min(c.duration || (d.origEnd + delta), Math.max(d.origEnd + delta, d.origStart + 0.3)) };
     }));
   };
-  const endDrag = () => { draggingRef.current = null; scrubRef.current = false; };
+  const scrubTargetRef = useRef<number | null>(null); // último tiempo a buscar (coalescido por rAF)
+  const scrubRafRef = useRef<number | null>(null);
+  const scrubLoop = () => {
+    const v = videoRef.current; const t = scrubTargetRef.current;
+    if (v && t != null && Math.abs(v.currentTime - t) > 0.015) v.currentTime = t; // un seek por frame, al último objetivo
+    if (scrubRef.current) scrubRafRef.current = requestAnimationFrame(scrubLoop);
+  };
+  const endDrag = () => {
+    draggingRef.current = null;
+    if (scrubRef.current) {
+      scrubRef.current = false;
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current);
+      const v = videoRef.current; const t = scrubTargetRef.current;
+      if (v && t != null) { v.currentTime = t; v.onseeked = () => { v.onseeked = null; drawFrame(t); }; }
+    }
+  };
 
   // --- Scrubbing: mover el cabezal con click/arrastre sobre la timeline ---
   const locFromClientX = (clientX: number): { idx: number; local: number } | null => {
@@ -282,14 +297,26 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const scrubTo = (clientX: number) => {
     const loc = locFromClientX(clientX);
     if (!loc) return;
-    if (loc.idx === activeIdx) seek(loc.local);
-    else { pendingSeekRef.current = loc.local; setActiveIdx(loc.idx); }
+    if (loc.idx === activeIdx) {
+      // El cabezal se mueve al instante (estado); el seek real lo aplica scrubLoop (coalescido) → fluido
+      setCurrentTime(loc.local);
+      scrubTargetRef.current = loc.local;
+    } else {
+      // Cruce de clip (recarga el otro video)
+      scrubTargetRef.current = null;
+      pendingSeekRef.current = loc.local;
+      setActiveIdx(loc.idx);
+    }
   };
   const onTimelinePointerDown = (e: React.PointerEvent) => {
     if (draggingRef.current) return; // se está arrastrando un borde (recorte)
     scrubRef.current = true;
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+    // dibuja el frame apenas el video termina cada seek (mientras se arrastra)
+    const v = videoRef.current; if (v) v.onseeked = () => { if (scrubRef.current) drawFrame(v.currentTime); };
     scrubTo(e.clientX);
+    if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current);
+    scrubRafRef.current = requestAnimationFrame(scrubLoop);
   };
   const onTimelinePointerMove = (e: React.PointerEvent) => {
     if (draggingRef.current) { onTrackPointerMove(e); return; }
