@@ -57,6 +57,32 @@ function wavToPeaks(bytes: Uint8Array, buckets: number): number[] {
   return peaks.map(p => Math.pow(p / max, 0.7)); // realza picos chicos para que la onda se vea
 }
 
+// AudioBuffer (mezcla offline) → bytes WAV PCM 16-bit, para que ffmpeg lo muxee como AAC.
+function audioBufferToWav(buffer: AudioBuffer): Uint8Array {
+  const numCh = buffer.numberOfChannels, sr = buffer.sampleRate, len = buffer.length;
+  const blockAlign = numCh * 2;
+  const dataSize = len * blockAlign;
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+  const ws = (o: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); ws(8, 'WAVE');
+  ws(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true); view.setUint32(24, sr, true);
+  view.setUint32(28, sr * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
+  ws(36, 'data'); view.setUint32(40, dataSize, true);
+  const chans: Float32Array[] = [];
+  for (let c = 0; c < numCh; c++) chans.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < numCh; c++) {
+      const s = Math.max(-1, Math.min(1, chans[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Uint8Array(ab);
+}
+
 
 // Sección plegable para el panel de edición
 const Accordion: React.FC<{ title: string; icon: string; open: boolean; onToggle: () => void; badge?: string; children: React.ReactNode }> = ({ title, icon, open, onToggle, badge, children }) => (
@@ -742,23 +768,20 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
-  // === Render DETERMINÍSTICO con WebCodecs (modelo Canva web) ===
-  // Codifica el video frame por frame (timestamps exactos → duración correcta, sin frame-rate variable)
-  // y el audio mezclado a AAC, y los une con un muxer MP4. No usa MediaRecorder → robusto y confiable.
-  const renderMp4WebCodecs = async (
+  // === Render de VIDEO con WebCodecs (modelo Canva web) — SOLO video ===
+  // Codifica frame por frame (timestamps exactos → duración/velocidad correctas). El audio NO se mete acá:
+  // se muxea después con ffmpeg (que codifica AAC de forma 100% confiable). Así separamos lo que cada cosa
+  // hace bien: WebCodecs = video perfecto, ffmpeg = audio AAC + mux.
+  const renderVideoWebCodecs = async (
     ranges: { url: string; start: number; end: number }[],
     totalDur: number,
-    mixBuf: AudioBuffer | null,
     exV: HTMLVideoElement,
     onProgress: (done: number, total: number) => void,
   ): Promise<Blob> => {
     const VE: any = (window as any).VideoEncoder;
-    const AE: any = (window as any).AudioEncoder;
     const VF: any = (window as any).VideoFrame;
-    const AD: any = (window as any).AudioData;
-    if (!VE || !AE || !VF || !AD) throw new Error('WebCodecs no disponible');
+    if (!VE || !VF) throw new Error('WebCodecs no disponible');
 
-    // Elige un perfil H.264 soportado para 1080x1920
     const candidates = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'avc1.640020', 'avc1.42001f'];
     let vcodec = '';
     for (const c of candidates) {
@@ -767,11 +790,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (!vcodec) throw new Error('WebCodecs sin soporte H.264');
 
     const canvas = canvasRef.current!;
-    const hasAudio = !!mixBuf;
     const muxer = new Muxer({
       target: new ArrayBufferTarget(),
       video: { codec: 'avc', width: CANVAS_W, height: CANVAS_H },
-      ...(hasAudio ? { audio: { codec: 'aac', numberOfChannels: mixBuf!.numberOfChannels, sampleRate: mixBuf!.sampleRate } } : {}),
       fastStart: 'in-memory',
     } as any);
 
@@ -779,7 +800,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const venc = new VE({ output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta), error: (e: any) => { encErr = e; } });
     venc.configure({ codec: vcodec, width: CANVAS_W, height: CANVAS_H, bitrate: 8_000_000, framerate: FPS });
 
-    // --- Video: seek por frame, timestamps exactos ---
     const frameDurUs = 1e6 / FPS;
     let frameIndex = 0;
     let outBase = 0;
@@ -788,7 +808,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const fin = () => { if (done) return; done = true; exV.onseeked = null; res(); };
       exV.onseeked = fin;
       try { exV.currentTime = tt; } catch { fin(); }
-      setTimeout(fin, 600); // fallback si 'seeked' no dispara
+      setTimeout(fin, 600);
     });
     for (const r of ranges) {
       if (exV.src !== r.url) {
@@ -814,42 +834,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     await venc.flush();
     venc.close();
     if (encErr) throw encErr;
-
-    // --- Audio: mezcla offline → AAC ---
-    if (hasAudio) {
-      let aErr: any = null;
-      let audioChunks = 0;
-      const aenc = new AE({
-        output: (chunk: any, meta: any) => { audioChunks++; muxer.addAudioChunk(chunk, meta); },
-        error: (e: any) => { aErr = e; console.error('[export] AudioEncoder error:', e); },
-      });
-      const ch = mixBuf!.numberOfChannels, sr = mixBuf!.sampleRate, total = mixBuf!.length;
-      // aac.format:'aac' → AAC "raw" con decoderConfig (lo que mp4-muxer necesita). Sin esto puede salir
-      // en ADTS y el MP4 queda SIN audio. bitstreamFormat es el nombre alterno en algunos navegadores.
-      const aacCfg: any = { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, bitrate: 192_000, aac: { format: 'aac' } };
-      try {
-        const sup = await AE.isConfigSupported?.(aacCfg);
-        console.info('[export] AAC soportado:', sup?.supported !== false);
-      } catch {}
-      aenc.configure(aacCfg);
-      const chans: Float32Array[] = [];
-      for (let c = 0; c < ch; c++) chans.push(mixBuf!.getChannelData(c));
-      const CHUNK = 1024;
-      for (let pos = 0; pos < total; pos += CHUNK) {
-        if (aErr) throw aErr;
-        const n = Math.min(CHUNK, total - pos);
-        const planar = new Float32Array(n * ch);
-        for (let c = 0; c < ch; c++) planar.set(chans[c].subarray(pos, pos + n), c * n);
-        const ad = new AD({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round((pos / sr) * 1e6), data: planar });
-        aenc.encode(ad); ad.close();
-        if (aenc.encodeQueueSize > 16) await new Promise((r2) => setTimeout(r2, 0));
-      }
-      await aenc.flush();
-      aenc.close();
-      if (aErr) throw aErr;
-      console.info('[export] audio AAC chunks:', audioChunks);
-      if (audioChunks === 0) console.warn('[export] ⚠ el encoder AAC no produjo datos → el MP4 saldrá sin audio.');
-    }
 
     muxer.finalize();
     const { buffer } = (muxer.target as any);
@@ -915,10 +899,27 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         try {
           setExportMsg('Renderizando video (WebCodecs)…');
           setExportPct(12);
-          mp4Blob = await renderMp4WebCodecs(ranges, totalDur, mixBuf, exV, (done, total) => {
-            const pct = Math.min(96, 10 + Math.round((done / total) * 86));
+          // 1) WebCodecs hace el VIDEO (perfecto)
+          const videoOnly = await renderVideoWebCodecs(ranges, totalDur, exV, (done, total) => {
+            const pct = Math.min(88, 10 + Math.round((done / total) * 78));
             setExportPct(pct); setExportMsg(`Renderizando video… ${pct}%`);
           });
+          console.info('[export] video WebCodecs:', (videoOnly.size / 1048576).toFixed(1) + 'MB');
+          // 2) ffmpeg pone el AUDIO con -c:v copy (no re-codifica el video → no lo rompe; AAC siempre fiable)
+          if (mixBuf) {
+            setExportMsg('Uniendo audio…');
+            setExportPct(92);
+            const wav = audioBufferToWav(mixBuf);
+            const ffmpeg = await loadFFmpeg();
+            await ffmpeg.writeFile('wcv.mp4', await fetchFile(videoOnly));
+            await ffmpeg.writeFile('wmix.wav', wav);
+            await ffmpeg.exec(['-i', 'wcv.mp4', '-i', 'wmix.wav', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', 'wcout.mp4']);
+            const data = await ffmpeg.readFile('wcout.mp4');
+            mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+            console.info('[export] audio muxeado por ffmpeg');
+          } else {
+            mp4Blob = videoOnly;
+          }
           engine = 'WebCodecs';
           console.info('[export] vía WebCodecs OK');
         } catch (err) {
