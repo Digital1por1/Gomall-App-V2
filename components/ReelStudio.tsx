@@ -144,8 +144,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const trimStart = activeClip?.trimStart || 0;
   const trimEnd = activeClip?.trimEnd || 0;
   const setActiveTrim = (patch: Partial<Clip>) => setClips(prev => prev.map((c, i) => i === activeIdx ? { ...c, ...patch } : c));
-  const setTrimStart = (v: number) => setActiveTrim({ trimStart: v });
-  const setTrimEnd = (v: number) => setActiveTrim({ trimEnd: v });
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
 
@@ -1084,7 +1082,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className={labelClass}>Línea de tiempo</span>
-                  <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
+                    <button onClick={() => { const c = clips[activeIdx]; if (!c) return; if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all" title="Borrar el tramo seleccionado"><i className="fa-solid fa-trash mr-1.5"></i>Borrar tramo</button>
+                  </div>
                 </div>
                 <div ref={trackRef} onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none cursor-pointer">
                   <div className="relative" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
@@ -1101,6 +1102,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                             </div>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimStart * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimEnd * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
+                            {idx === activeIdx && (
+                              <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="absolute top-1 right-1 z-20 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center text-[9px] hover:bg-red-500 transition-colors" title="Borrar este tramo"><i className="fa-solid fa-xmark"></i></button>
+                            )}
                           </div>
                         );
                       })}
@@ -1148,16 +1152,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
             {/* Controles (desplegables) */}
             <div className="space-y-3">
-              {/* Recorte */}
-              <Accordion title="Recorte" icon="fa-crop-simple" open={!!openSec.recorte} onToggle={() => toggleSec('recorte')}>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400"><span>Inicio: {fmt(trimStart)}</span>{clips.length > 1 && <span className="text-purple-500">Clip {activeIdx + 1}</span>}</div>
-                  <input type="range" min={0} max={duration || 0} step={0.1} value={trimStart} onChange={(e) => { const val = Math.min(Number(e.target.value), trimEnd - 0.5); setTrimStart(val); seek(val); }} className="w-full h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
-                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400"><span>Fin: {fmt(trimEnd)}</span></div>
-                  <input type="range" min={0} max={duration || 0} step={0.1} value={trimEnd} onChange={(e) => setTrimEnd(Math.max(Number(e.target.value), trimStart + 0.5))} className="w-full h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
-                </div>
-              </Accordion>
-
               {/* Audio del video */}
               <Accordion title="Audio del video" icon="fa-volume-high" open={!!openSec.audiovideo} onToggle={() => toggleSec('audiovideo')} badge={videoVolume === 0 ? 'Silenciado' : undefined}>
                 <div className="flex items-center justify-end">
