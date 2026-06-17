@@ -173,6 +173,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [subFont, setSubFont] = useState<string>(kit?.headlineFont || 'Inter');
 
   const [logoEnabled, setLogoEnabled] = useState(false);
+  const [logoPos, setLogoPos] = useState({ x: 50, y: 10 }); // % del canvas (centro del logo)
+  const [logoSize, setLogoSize] = useState(28); // % del ancho del canvas
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
@@ -182,6 +184,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logoImgRef = useRef<HTMLImageElement | null>(null);
+  const logoRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null); // bounds del logo en el canvas
+  const logoDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const rafRef = useRef<number | null>(null);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   // Elementos de audio del PREVIEW (siempre nativos, nunca pasan por WebAudio).
@@ -364,14 +368,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const dy = (CANVAS_H - dh) / 2;
     try { ctx.drawImage(v, dx, dy, dw, dh); } catch { /* frame no listo */ }
 
-    // Logo de marca arriba al centro
+    // Logo de marca (posición y tamaño configurables, arrastrable)
     if (logoEnabled && logoImgRef.current) {
       const img = logoImgRef.current;
-      const targetW = CANVAS_W * 0.28;
-      const ratio = img.height / img.width;
-      const lw = targetW;
-      const lh = targetW * ratio;
-      ctx.drawImage(img, (CANVAS_W - lw) / 2, CANVAS_H * 0.06, lw, lh);
+      const lw = CANVAS_W * (logoSize / 100);
+      const lh = lw * (img.height / img.width);
+      const x = CANVAS_W * (logoPos.x / 100) - lw / 2;
+      const y = CANVAS_H * (logoPos.y / 100) - lh / 2;
+      ctx.drawImage(img, x, y, lw, lh);
+      logoRectRef.current = { x, y, w: lw, h: lh };
+    } else {
+      logoRectRef.current = null;
     }
 
     // Subtítulo activo (con estilo elegido)
@@ -438,7 +445,28 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       ctx.textAlign = 'center';
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     }
-  }, [logoEnabled, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent]);
+  }, [logoEnabled, logoPos, logoSize, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent]);
+
+  // Arrastrar el logo sobre el preview
+  const canvasPt = (e: React.PointerEvent) => {
+    const c = canvasRef.current!; const r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * CANVAS_W, y: (e.clientY - r.top) / r.height * CANVAS_H };
+  };
+  const onCanvasPointerDown = (e: React.PointerEvent) => {
+    if (!logoEnabled || !logoRectRef.current) return;
+    const p = canvasPt(e); const lr = logoRectRef.current;
+    if (p.x >= lr.x && p.x <= lr.x + lr.w && p.y >= lr.y && p.y <= lr.y + lr.h) {
+      logoDragRef.current = { dx: p.x - (lr.x + lr.w / 2), dy: p.y - (lr.y + lr.h / 2) };
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+    }
+  };
+  const onCanvasPointerMove = (e: React.PointerEvent) => {
+    if (!logoDragRef.current) return;
+    const p = canvasPt(e);
+    const cx = p.x - logoDragRef.current.dx, cy = p.y - logoDragRef.current.dy;
+    setLogoPos({ x: Math.max(0, Math.min(100, cx / CANVAS_W * 100)), y: Math.max(0, Math.min(100, cy / CANVAS_H * 100)) });
+  };
+  const onCanvasPointerUp = () => { logoDragRef.current = null; };
 
   // Loop de previsualización
   const tick = useCallback(() => {
@@ -1069,7 +1097,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             {/* Preview + línea de tiempo */}
             <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
               <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '54vh' }}>
-                <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="w-full h-full object-contain" />
+                <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${logoEnabled ? 'cursor-move' : ''}`} />
                 <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
               <div className="flex items-center gap-3">
@@ -1246,6 +1274,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                       <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${logoEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
+                  {logoEnabled && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest w-14">Tamaño</span>
+                        <input type="range" min={8} max={60} step={1} value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                        <span className="text-[9px] font-black text-slate-400 tabular-nums w-8 text-right">{logoSize}%</span>
+                      </div>
+                      <p className="text-[9px] text-slate-300 font-bold">Arrastrá el logo en el preview para moverlo, o usá el tamaño acá.</p>
+                    </>
+                  )}
                 </Accordion>
               )}
 
