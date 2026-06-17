@@ -110,9 +110,9 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
       {/* Beneficio / Problema */}
       <section className="max-w-4xl mx-auto px-5 sm:px-8 py-12 text-center space-y-3">
-        <h2 className="font-display text-2xl sm:text-3xl text-slate-900">Dejá de elegir entre tiempo, plata o calidad</h2>
+        <h2 className="font-display text-2xl sm:text-3xl text-slate-900">Profesional como una agencia. Rápido como vos.</h2>
         <p className="text-slate-500 text-sm sm:text-base font-medium max-w-2xl mx-auto leading-relaxed">
-          Contratar una agencia es caro. Hacerlo vos lleva horas y no siempre queda bien. Gomall Studio te da contenido de nivel agencia, en minutos y manteniendo tu identidad de marca.
+          Creá y publicá contenido para tu marca en minutos, no en semanas.
         </p>
       </section>
 
