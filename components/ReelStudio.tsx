@@ -56,6 +56,35 @@ function wavToPeaks(bytes: Uint8Array, buckets: number): number[] {
   return peaks.map(p => Math.pow(p / max, 0.7)); // realza picos chicos para que la onda se vea
 }
 
+// Convierte un AudioBuffer (mezcla offline) en bytes WAV PCM 16-bit, para muxear con ffmpeg.
+function audioBufferToWav(buffer: AudioBuffer): Uint8Array {
+  const numCh = buffer.numberOfChannels;
+  const sr = buffer.sampleRate;
+  const len = buffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numCh * bytesPerSample;
+  const dataSize = len * blockAlign;
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
+  writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true); view.setUint32(24, sr, true);
+  view.setUint32(28, sr * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
+  writeStr(36, 'data'); view.setUint32(40, dataSize, true);
+  const chans: Float32Array[] = [];
+  for (let c = 0; c < numCh; c++) chans.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < numCh; c++) {
+      let s = Math.max(-1, Math.min(1, chans[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Uint8Array(ab);
+}
+
 // Sección plegable para el panel de edición
 const Accordion: React.FC<{ title: string; icon: string; open: boolean; onToggle: () => void; badge?: string; children: React.ReactNode }> = ({ title, icon, open, onToggle, badge, children }) => (
   <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
@@ -644,19 +673,20 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
 
   // Extrae el audio del video con ffmpeg (WAV PCM mono 16kHz). Robusto para mp4/mov/webm.
-  const getAudioBytes = async (url: string): Promise<Uint8Array> => {
+  // Extrae el audio de cualquier fuente (video/audio) a WAV PCM con ffmpeg. Robusto para mp4/mov/webm.
+  const extractWav = async (url: string, rate = 16000, mono = true): Promise<Uint8Array> => {
     const ffmpeg = await loadFFmpeg();
     const blob = await (await fetch(url)).blob();
     const t = (blob.type || '').toLowerCase();
-    const ext = t.includes('quicktime') || t.includes('mov') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('matroska') ? 'mkv' : 'mp4';
+    const ext = t.includes('quicktime') || t.includes('mov') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('matroska') ? 'mkv' : t.includes('mp3') || t.includes('mpeg') ? 'mp3' : t.includes('wav') ? 'wav' : t.includes('aac') ? 'aac' : t.includes('ogg') ? 'ogg' : t.startsWith('audio') ? 'm4a' : 'mp4';
     const inName = `aud_src.${ext}`;
     await ffmpeg.writeFile(inName, await fetchFile(blob));
     ffmpegLogRef.current = '';
-    const code = await ffmpeg.exec(['-i', inName, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'aud_out.wav']);
+    const code = await ffmpeg.exec(['-i', inName, '-vn', '-ac', mono ? '1' : '2', '-ar', String(rate), '-f', 'wav', 'aud_out.wav']);
     if (typeof code === 'number' && code !== 0) {
       const log = ffmpegLogRef.current.toLowerCase();
       if (log.includes('does not contain any stream') || log.includes('output file does not contain') || log.includes('no audio')) {
-        throw new Error('Este video no tiene pista de audio, así que no hay voz para transcribir.');
+        throw new Error('Sin pista de audio.');
       }
       throw new Error('ffmpeg no pudo procesar el audio (código ' + code + ').');
     }
@@ -664,16 +694,80 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     try {
       data = await ffmpeg.readFile('aud_out.wav');
     } catch {
-      throw new Error('Este video no tiene pista de audio, así que no hay voz para transcribir.');
+      throw new Error('Sin pista de audio.');
     }
     const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
-    if (!bytes || bytes.byteLength < 200) throw new Error('Este video no tiene pista de audio (o está en silencio), así que no hay voz para transcribir.');
+    if (!bytes || bytes.byteLength < 200) throw new Error('Sin pista de audio (o silencio).');
     return bytes;
   };
+  const getAudioBytes = (url: string) => extractWav(url, 16000, true); // 16k mono: onda / transcripción
   // Solo para transcripción: agrega el base64 (caro), por eso no se usa para la onda.
   const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
     const bytes = await getAudioBytes(url);
     return { base64: bytesToBase64(bytes), bytes };
+  };
+
+  // === Mezcla de audio offline (modelo CapCut/Canva): video + música + voz → un WAV ===
+  // Determinístico (OfflineAudioContext), sin capturar streams en vivo → el audio nunca se pierde.
+  const buildMixedAudioWav = async (ranges: { url: string; start: number; end: number }[], totalDur: number): Promise<Uint8Array | null> => {
+    const SR = 48000;
+    const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    try {
+      const cache: Record<string, AudioBuffer | null> = {};
+      const decode = async (url: string): Promise<AudioBuffer | null> => {
+        if (url in cache) return cache[url];
+        try {
+          const wav = await extractWav(url, SR, false);
+          const buf = await decodeCtx.decodeAudioData(wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer);
+          cache[url] = buf; return buf;
+        } catch { cache[url] = null; return null; }
+      };
+
+      const off = new OfflineAudioContext(2, Math.max(1, Math.ceil(totalDur * SR)), SR);
+      let anyAudio = false;
+
+      // Audio propio del video (cada rango, en orden, con su volumen)
+      if (videoVolume > 0) {
+        let cursor = 0;
+        for (const r of ranges) {
+          const buf = await decode(r.url);
+          const dur = Math.max(0, r.end - r.start);
+          if (buf) {
+            const src = off.createBufferSource(); src.buffer = buf;
+            const g = off.createGain(); g.gain.value = videoVolume;
+            src.connect(g).connect(off.destination);
+            src.start(cursor, r.start, dur);
+            anyAudio = true;
+          }
+          cursor += dur;
+        }
+      }
+      // Música (en loop para cubrir todo el reel)
+      if (musicUrl) {
+        const mbuf = await decode(musicUrl);
+        if (mbuf) {
+          const src = off.createBufferSource(); src.buffer = mbuf; src.loop = true;
+          const g = off.createGain(); g.gain.value = musicVolume;
+          src.connect(g).connect(off.destination); src.start(0);
+          anyAudio = true;
+        }
+      }
+      // Voz en off (desde el inicio)
+      if (voiceUrl) {
+        const vbuf = await decode(voiceUrl);
+        if (vbuf) {
+          const src = off.createBufferSource(); src.buffer = vbuf;
+          const g = off.createGain(); g.gain.value = voiceVolume;
+          src.connect(g).connect(off.destination); src.start(0);
+          anyAudio = true;
+        }
+      }
+      if (!anyAudio) return null;
+      const rendered = await off.startRendering();
+      return audioBufferToWav(rendered);
+    } finally {
+      try { await decodeCtx.close(); } catch {}
+    }
   };
 
   const exportReel = async () => {
@@ -685,20 +779,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setExportPct(0);
     setExportMsg('Preparando grabación…');
 
-    // Export AISLADO: usa sus propios elementos y AudioContext, que se descartan al terminar.
-    // Así nunca toca los elementos del editor → el preview siempre suena nativo y fluido.
+    // Modelo CapCut/Canva: se graba SOLO el video y el audio se mezcla aparte (offline) y se muxea.
+    // El elemento de video del export es propio y se descarta al terminar (no toca el preview).
     const exV = document.createElement('video');
-    exV.crossOrigin = 'anonymous'; exV.playsInline = true; exV.muted = false;
-    // Fuera de pantalla (no display:none, para que siga decodificando frames y no salga negro)
+    exV.crossOrigin = 'anonymous'; exV.playsInline = true; exV.muted = true; // sin audio: el audio se arma aparte
     exV.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
     document.body.appendChild(exV);
-    let exActx: AudioContext | null = null;
-    let exMusic: HTMLAudioElement | null = null;
-    let exVoice: HTMLAudioElement | null = null;
     const cleanupExport = () => {
       try { exV.pause(); } catch {}
-      try { exMusic?.pause(); exVoice?.pause(); } catch {}
-      try { exActx?.close(); } catch {}
       try { exV.removeAttribute('src'); exV.load(); } catch {}
       try { exV.remove(); } catch {}
     };
@@ -711,72 +799,36 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       // Asegura que la tipografía de los subtítulos esté cargada antes de grabar
       try { await (document as any).fonts?.load(`900 74px "${subFont}"`); } catch {}
 
-      const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
-
-      // Grafo de audio del export (aislado)
-      exActx = new AudioContext();
-      if (exActx.state === 'suspended') await exActx.resume();
-      const dest = exActx.createMediaStreamDestination();
-      let hasAudio = false;
-
-      // Audio del video
-      try {
-        const s = exActx.createMediaElementSource(exV);
-        const g = exActx.createGain(); g.gain.value = videoVolume;
-        s.connect(g); g.connect(dest); hasAudio = true;
-      } catch {}
-      // Música
-      if (musicUrl) {
-        exMusic = new Audio(musicUrl); exMusic.crossOrigin = 'anonymous'; exMusic.loop = true;
-        try { const s = exActx.createMediaElementSource(exMusic); const g = exActx.createGain(); g.gain.value = musicVolume; s.connect(g); g.connect(dest); hasAudio = true; } catch {}
-      }
-      // Voz en off
-      if (voiceUrl) {
-        exVoice = new Audio(voiceUrl);
-        try { const s = exActx.createMediaElementSource(exVoice); const g = exActx.createGain(); g.gain.value = voiceVolume; s.connect(g); g.connect(dest); hasAudio = true; } catch {}
-      }
-
-      // Adjuntar el audio a la MISMA stream del canvas (addTrack es más confiable que new MediaStream([...]))
-      const combined = canvasStream;
-      if (hasAudio) { const at = dest.stream.getAudioTracks()[0]; if (at) combined.addTrack(at); }
-
-      // Preferimos MP4 nativo: NO requiere conversión con ffmpeg (que re-codifica 1080x1920 en WASM
-      // y se clava). Con addTrack el audio entra bien en el MP4. WebM+ffmpeg solo si no hay MP4 nativo.
-      const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
-        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
-      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
-        : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
-      const isMp4 = !!mp4Mime;
-      const recMime = mp4Mime || webmMime || '';
-      const recorder = recMime ? new MediaRecorder(combined, { mimeType: recMime }) : new MediaRecorder(combined);
-      console.log('[export] mime:', recMime || '(default)', '· audio tracks:', combined.getAudioTracks().length);
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-      const stopped = new Promise<Blob>((resolve) => {
-        recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
-      });
-
-      // Rangos a grabar: si hay 1 clip con pausas detectadas, sus segmentos; si no, el recorte de cada clip (concatenados)
+      // Rangos a exportar: si hay 1 clip con pausas detectadas, sus segmentos; si no, el recorte de cada clip
       let ranges: { url: string; start: number; end: number }[];
       if (clips.length === 1 && segments && segments.length) {
         ranges = segments.map(s => ({ url: clips[0].url, start: s.start, end: s.end }));
       } else {
         ranges = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
       }
-
-      // Duración total a grabar (para el progreso 0→70%)
       const totalDur = Math.max(0.1, ranges.reduce((acc, r) => acc + Math.max(0, r.end - r.start), 0));
-      let elapsedBefore = 0;
 
-      setExportMsg('Grabando el reel… 0%');
+      // --- 1) Grabar SOLO el video (canvas), sin pista de audio ---
+      const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
+      const mp4Mime = ['video/mp4;codecs=h264', 'video/mp4;codecs=avc1.42E01E', 'video/mp4']
+        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
+      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
+        : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
+      const isMp4 = !!mp4Mime;
+      const recMime = mp4Mime || webmMime || '';
+      const recorder = recMime ? new MediaRecorder(canvasStream, { mimeType: recMime }) : new MediaRecorder(canvasStream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      const stopped = new Promise<Blob>((resolve) => {
+        recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
+      });
+
+      let elapsedBefore = 0;
+      setExportMsg('Grabando el video… 0%');
       setExportPct(0);
       recorder.start(100);
-      if (exMusic) { exMusic.currentTime = 0; exMusic.play().catch(() => {}); }
-      if (exVoice) { exVoice.currentTime = 0; exVoice.play().catch(() => {}); }
 
-      // Reproduce cada rango en orden sobre el elemento aislado; la grabación es continua → quedan unidos
       for (const range of ranges) {
         if (exV.src !== range.url) {
           exV.src = range.url;
@@ -789,14 +841,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           let lastUi = 0;
           const step = () => {
             drawFrame(exV.currentTime, exV);
-            // El estado se actualiza como mucho cada 250ms para no recargar React en cada frame (evita el tirón).
             const now = performance.now();
             if (now - lastUi > 250) {
               lastUi = now;
               const done = elapsedBefore + Math.max(0, exV.currentTime - range.start);
-              const pct = Math.min(69, Math.round((done / totalDur) * 70));
+              const pct = Math.min(59, Math.round((done / totalDur) * 60));
               setExportPct(pct);
-              setExportMsg(`Grabando el reel… ${pct}%`);
+              setExportMsg(`Grabando el video… ${pct}%`);
             }
             if (exV.currentTime >= range.end || exV.ended) { exV.pause(); resolve(); return; }
             requestAnimationFrame(step);
@@ -805,36 +856,47 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         });
         elapsedBefore += Math.max(0, range.end - range.start);
       }
-      setExportPct(70);
-      exMusic?.pause(); exVoice?.pause(); exV.pause();
-
       recorder.stop();
-      const recBlob = await stopped;
+      const videoBlob = await stopped;
+      setExportPct(62);
 
-      // Cierra el contexto aislado del export (el preview no se toca)
-      try { await exActx.close(); } catch {}
+      // --- 2) Mezclar el audio offline (video + música + voz) → WAV ---
+      setExportMsg('Mezclando el audio…');
+      let audioWav: Uint8Array | null = null;
+      try { audioWav = await buildMixedAudioWav(ranges, totalDur); } catch (err) { console.error('mezcla de audio:', err); audioWav = null; }
+      setExportPct(78);
 
+      // --- 3) Muxear video + audio con ffmpeg (-c:v copy = sin re-codificar, rápido) ---
+      const ffmpeg = await loadFFmpeg();
+      const vName = isMp4 ? 'vid.mp4' : 'vid.webm';
+      await ffmpeg.writeFile(vName, await fetchFile(videoBlob));
       let mp4Blob: Blob;
-      if (isMp4) {
-        // El navegador ya grabó MP4: no hace falta convertir.
-        setExportPct(98);
-        setExportMsg('Finalizando…');
-        mp4Blob = recBlob;
+      if (audioWav) {
+        setExportMsg('Uniendo audio y video…');
+        await ffmpeg.writeFile('mix.wav', audioWav);
+        if (isMp4) {
+          // Video ya es H.264 → copia directa (instantáneo), solo se codifica el audio a AAC
+          await ffmpeg.exec(['-i', vName, '-i', 'mix.wav', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', 'out.mp4']);
+        } else {
+          // WebM (VP8/9): hay que re-codificar el video a H.264 (fallback, más lento)
+          setExportMsg('Uniendo audio y video… (puede tardar)');
+          await ffmpeg.exec(['-i', vName, '-i', 'mix.wav', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', 'out.mp4']);
+        }
       } else {
-        setExportMsg('Cargando conversor de video…');
-        const ffmpeg = await loadFFmpeg();
-        await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
-        // El WebM de MediaRecorder no trae duración en la cabecera, así que ffmpeg no reporta
-        // progreso fiable: avisamos que puede tardar para que no parezca clavado.
-        setExportMsg('Convirtiendo a MP4… (puede tardar un poco, no cierres la pestaña)');
-        await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', 'out.mp4']);
-        const data = await ffmpeg.readFile('out.mp4');
-        mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+        // Sin audio: salida solo video
+        if (isMp4) {
+          await ffmpeg.exec(['-i', vName, '-c', 'copy', '-movflags', '+faststart', 'out.mp4']);
+        } else {
+          await ffmpeg.exec(['-i', vName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'out.mp4']);
+        }
       }
+      const data = await ffmpeg.readFile('out.mp4');
+      mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+
       const url = URL.createObjectURL(mp4Blob);
       setExportedUrl(url);
       setExportPct(100);
-      setExportMsg('¡Listo! Tu reel está disponible para descargar.');
+      setExportMsg(audioWav ? '¡Listo! Tu reel está disponible para descargar.' : '¡Listo! (Nota: no se detectó audio para incluir.)');
     } catch (e: any) {
       console.error(e);
       setExportMsg('');
