@@ -175,6 +175,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [logoEnabled, setLogoEnabled] = useState(false);
   const [logoPos, setLogoPos] = useState({ x: 50, y: 10 }); // % del canvas (centro del logo)
   const [logoSize, setLogoSize] = useState(28); // % del ancho del canvas
+  const [tlZoom, setTlZoom] = useState(1); // zoom de la línea de tiempo
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
@@ -210,15 +211,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     img.src = url;
   }, [kit?.logoUrls]);
 
-  const addClip = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setClips(prev => {
-      const next = [...prev, { id: `clip_${Date.now()}`, url, duration: 0, trimStart: 0, trimEnd: 0 }];
-      setActiveIdx(next.length - 1);
-      return next;
-    });
+  const uid = () => `clip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const addClips = (files: File[]) => {
+    const fresh = files.filter(Boolean).map(f => ({ id: uid(), url: URL.createObjectURL(f), duration: 0, trimStart: 0, trimEnd: 0 }));
+    if (!fresh.length) return;
+    setClips(prev => { const next = [...prev, ...fresh]; setActiveIdx(next.length - 1); return next; });
     setExportedUrl(null);
   };
+  const addClip = (file: File) => addClips([file]);
   const removeClip = (id: string) => {
     setClips(prev => {
       const next = prev.filter(c => c.id !== id);
@@ -226,10 +226,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       return next;
     });
   };
-  const handleVideoFile = (file: File) => addClip(file);
-
   // --- Línea de tiempo (estilo CapCut): cada tramo se dibuja con su ANCHO RECORTADO real ---
-  const TL_PX = 48; // píxeles por segundo en la línea de tiempo
+  const TL_PX = Math.max(8, Math.round(48 * tlZoom)); // píxeles por segundo (escala con el zoom)
   const clipW = (c: Clip) => Math.max(12, ((c.trimEnd || 0) - (c.trimStart || 0)) * TL_PX);
   const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + clipW(c), 0);
   const timelineW = () => Math.max(40, clips.reduce((a, c) => a + clipW(c), 0));
@@ -331,13 +329,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (activeClip && !activeClip.duration) {
       setActiveTrim({ duration: v.duration, trimStart: 0, trimEnd: v.duration });
     }
-    // Aplica un seek pendiente tras cambiar de clip (scrubbing entre clips)
+    // Aplica un seek pendiente tras cambiar de clip (scrubbing o reproducción continua)
     if (pendingSeekRef.current != null) {
       const t = Math.max(0, Math.min(v.duration || 0, pendingSeekRef.current));
       pendingSeekRef.current = null;
+      const resume = continuePlayRef.current;
+      continuePlayRef.current = false;
       v.currentTime = t;
       setCurrentTime(t);
       drawFrame(t);
+      if (resume) v.play().catch(() => {}); // reproducción continua: seguir con el próximo clip
     }
   };
 
@@ -468,13 +469,36 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const onCanvasPointerUp = () => { logoDragRef.current = null; };
 
-  // Loop de previsualización
+  // Refs espejo para que el loop lea el estado actual sin recrearse
+  const clipsRef = useRef(clips); clipsRef.current = clips;
+  const activeIdxRef = useRef(activeIdx); activeIdxRef.current = activeIdx;
+  const continuePlayRef = useRef(false); // reproducir el próximo clip al terminar el actual
+
+  // Loop de previsualización (reproduce los clips en cadena, continuo)
   const tick = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
     drawFrame(v.currentTime);
     if (v.currentTime >= trimEnd) {
+      const idx = activeIdxRef.current;
+      const cl = clipsRef.current;
+      if (idx < cl.length - 1) {
+        const next = cl[idx + 1];
+        if (next.url === cl[idx].url) {
+          // Mismo video (clip dividido): saltar dentro del mismo source, sin recargar
+          v.currentTime = next.trimStart;
+          setActiveIdx(idx + 1); // el efecto reinicia el loop con el nuevo trimEnd; el video sigue sonando
+          return;
+        }
+        // Otro video: recargar src, buscar su inicio y seguir (música/voz no se frenan)
+        v.pause();
+        continuePlayRef.current = true;
+        pendingSeekRef.current = next.trimStart;
+        setActiveIdx(idx + 1);
+        return;
+      }
+      // Último clip: fin
       v.pause();
       musicElRef.current?.pause();
       voiceElRef.current?.pause();
@@ -1088,8 +1112,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               <p className="text-slate-400 text-sm">Podés sumar varios, recortar cada uno y se unen en formato Reel (9:16).</p>
             </div>
             <label className="px-6 h-14 bg-purple-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center gap-3 cursor-pointer">
-              <i className="fa-solid fa-arrow-up-from-bracket"></i> Subir video
-              <input type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVideoFile(f); }} />
+              <i className="fa-solid fa-arrow-up-from-bracket"></i> Subir video(s)
+              <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => { addClips(Array.from(e.target.files || [])); e.currentTarget.value = ''; }} />
             </label>
           </div>
         ) : (
@@ -1120,7 +1144,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   ))}
                   <label className="rounded-xl border-2 border-dashed border-purple-200 text-purple-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-purple-50 transition-all">
                     <i className="fa-solid fa-plus mr-1"></i>Video
-                    <input type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addClip(f); e.currentTarget.value = ''; }} />
+                    <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => { addClips(Array.from(e.target.files || [])); e.currentTarget.value = ''; }} />
                   </label>
                 </div>
                 {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Seleccioná un clip para recortarlo. Se exportan unidos, en orden.</p>}
@@ -1128,9 +1152,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
               {/* Línea de tiempo */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className={labelClass}>Línea de tiempo</span>
                   <div className="flex items-center gap-1.5">
+                    {/* Zoom de la timeline */}
+                    <div className="flex items-center bg-slate-100 rounded-lg">
+                      <button onClick={() => setTlZoom(z => Math.max(0.25, +(z - 0.25).toFixed(2)))} className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800" title="Alejar"><i className="fa-solid fa-magnifying-glass-minus text-xs"></i></button>
+                      <button onClick={() => setTlZoom(1)} className="px-1.5 text-[9px] font-black text-slate-500 tabular-nums" title="Zoom 100%">{Math.round(tlZoom * 100)}%</button>
+                      <button onClick={() => setTlZoom(z => Math.min(4, +(z + 0.25).toFixed(2)))} className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800" title="Acercar"><i className="fa-solid fa-magnifying-glass-plus text-xs"></i></button>
+                    </div>
                     <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
                     <button onClick={() => { const c = clips[activeIdx]; if (!c) return; if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all" title="Borrar el tramo seleccionado"><i className="fa-solid fa-trash mr-1.5"></i>Borrar tramo</button>
                   </div>
