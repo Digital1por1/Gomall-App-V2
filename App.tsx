@@ -537,7 +537,6 @@ const App: React.FC = () => {
   // y aplica las fuentes/colores de la marca, sin que el usuario tenga que ajustar nada.
   const applyTemplate = (type: 'classic' | 'editorial' | 'bold' | 'minimal') => {
     if (isBlocked) return;
-    const kit = profile?.brandKits?.[0];
     const layouts: Record<string, any> = {
       classic: {
         overlay: 25,
@@ -569,13 +568,12 @@ const App: React.FC = () => {
       },
     };
     const cfg = layouts[type];
-    const fontFor: Record<string, string | undefined> = { headline: kit?.headlineFont, description: kit?.descriptionFont, additional: kit?.additionalFont, cta: kit?.ctaFont };
     setState(prev => {
       const build = (key: 'headline' | 'description' | 'additional' | 'cta') => {
         const l = prev.textLayers[key];
         const c = cfg[key];
-        // La plantilla acomoda posición/tamaño/alineación; NO toca el color que el usuario ya eligió.
-        return { ...l, align: c.align, size: c.size, width: c.w ?? l.width, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: l.color };
+        // La plantilla SOLO acomoda posición/tamaño/alineación; conserva la tipografía y el color que el usuario eligió.
+        return { ...l, align: c.align, size: c.size, width: c.w ?? l.width, feedPosition: c.feed, storyPosition: c.story, font: l.font, color: l.color };
       };
       return {
         ...prev,
