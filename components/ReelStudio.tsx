@@ -748,7 +748,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setExporting(true);
     setExportedUrl(null);
     setExportPct(0);
-    setExportMsg('Preparando grabación…');
+    setExportMsg('Preparando exportación…');
+    const t0 = performance.now();
 
     // Modelo CapCut/Canva: el audio se mezcla aparte (offline, determinístico) y se reproduce como
     // pista EN VIVO mientras se graba el video → video+audio quedan en un solo archivo, sin remux ffmpeg
@@ -781,12 +782,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         ranges = clips.map(c => ({ url: c.url, start: c.trimStart, end: c.trimEnd }));
       }
       const totalDur = Math.max(0.1, ranges.reduce((acc, r) => acc + Math.max(0, r.end - r.start), 0));
+      console.info('[export] inicio', { clips: clips.length, rangos: ranges.length, duracion: +totalDur.toFixed(2) + 's', formato: '9:16', tam: `${CANVAS_W}x${CANVAS_H}`, musica: !!musicUrl, voz: !!voiceUrl, volVideo: videoVolume });
 
       // --- 1) Mezcla offline del audio (video + música + voz) → AudioBuffer ---
-      setExportMsg('Mezclando el audio…');
+      setExportMsg('Renderizando audio…');
       setExportPct(8);
       let mixBuf: AudioBuffer | null = null;
-      try { mixBuf = await buildMixedAudioBuffer(ranges, totalDur); } catch (err) { console.error('mezcla de audio:', err); mixBuf = null; }
+      try { mixBuf = await buildMixedAudioBuffer(ranges, totalDur); } catch (err) { console.error('[export] mezcla de audio falló:', err); mixBuf = null; }
+      console.info('[export] audio mezclado:', mixBuf ? `${mixBuf.duration.toFixed(2)}s · ${mixBuf.numberOfChannels}ch @ ${mixBuf.sampleRate}Hz` : 'SIN audio');
 
       // --- 2) Preparar grabación: canvas (video) + buffer de audio como pista en vivo ---
       const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
@@ -814,10 +817,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
       });
 
+      if (mixBuf && canvasStream.getAudioTracks().length === 0) {
+        console.warn('[export] ⚠ había audio mezclado pero no se pudo adjuntar la pista al stream.');
+      }
+
       let elapsedBefore = 0;
       let audioStarted = false;
-      setExportMsg('Grabando el reel… 0%');
+      setExportMsg('Renderizando video… 0%');
       setExportPct(10);
+      console.info('[export] grabando…', recMime || '(default)', '· pistas de audio:', canvasStream.getAudioTracks().length);
       recorder.start(100);
 
       for (const range of ranges) {
@@ -844,7 +852,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               const done = elapsedBefore + Math.max(0, exV.currentTime - range.start);
               const pct = Math.min(92, 10 + Math.round((done / totalDur) * 82));
               setExportPct(pct);
-              setExportMsg(`Grabando el reel… ${pct}%`);
+              setExportMsg(`Renderizando video… ${pct}%`);
             }
             if (exV.currentTime >= range.end || exV.ended) { exV.pause(); resolve(); return; }
             requestAnimationFrame(step);
@@ -857,6 +865,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       recorder.stop();
       const recBlob = await stopped;
       setExportPct(94);
+      console.info('[export] video grabado:', (recBlob.size / 1048576).toFixed(1) + 'MB', '·', isMp4 ? 'mp4' : 'webm');
+      if (recBlob.size < 1024) throw new Error('La grabación quedó vacía (el navegador no generó el video).');
 
       // --- 3) Salida ---
       let mp4Blob: Blob;
@@ -874,13 +884,20 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
       }
       const url = URL.createObjectURL(mp4Blob);
+      // Verificación: confirma que el MP4 es reproducible y loguea su duración real
+      try {
+        const probe = document.createElement('video'); probe.preload = 'metadata'; probe.src = url;
+        const dur = await new Promise<number>((res) => { probe.onloadedmetadata = () => res(probe.duration); probe.onerror = () => res(NaN); setTimeout(() => res(NaN), 4000); });
+        console.info('[export] MP4 listo:', (mp4Blob.size / 1048576).toFixed(1) + 'MB', '· duración:', isFinite(dur) ? dur.toFixed(2) + 's' : 'desconocida', '· esperado:', totalDur.toFixed(2) + 's', '· tiempo total:', ((performance.now() - t0) / 1000).toFixed(1) + 's');
+      } catch {}
       setExportedUrl(url);
       setExportPct(100);
-      setExportMsg(mixBuf ? '¡Listo! Tu reel está disponible para descargar.' : '¡Listo! (Nota: no se detectó audio para incluir.)');
+      setExportMsg(mixBuf ? '✅ Exportación completa. Descargá tu reel MP4.' : '✅ Exportación completa (sin audio detectado).');
     } catch (e: any) {
-      console.error(e);
+      console.error('[export] ERROR:', e);
       setExportMsg('');
-      alert(`No se pudo exportar el reel: ${e?.message || 'error desconocido'}`);
+      setExportPct(0);
+      alert(`No se pudo exportar el reel.\n\nMotivo: ${e?.message || 'error desconocido'}\n\n(Abrí la consola para ver el detalle con prefijo [export].)`);
     } finally {
       cleanupExport();
       setExporting(false);
