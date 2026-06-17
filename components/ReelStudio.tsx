@@ -188,7 +188,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micChunksRef = useRef<Blob[]>([]);
   const trackRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end' } | null>(null);
+  const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end'; startX: number; origStart: number; origEnd: number } | null>(null);
   const [clipPeaks, setClipPeaks] = useState<Record<string, number[]>>({}); // onda de audio por clip
   const peaksBusyRef = useRef<Set<string>>(new Set());
   const scrubRef = useRef(false);              // true mientras se arrastra el cabezal
@@ -222,23 +222,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const handleVideoFile = (file: File) => addClip(file);
 
-  // --- Línea de tiempo (estilo CapCut): recorte por bordes + dividir ---
+  // --- Línea de tiempo (estilo CapCut): cada tramo se dibuja con su ANCHO RECORTADO real ---
   const TL_PX = 48; // píxeles por segundo en la línea de tiempo
-  const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + (c.duration || 0) * TL_PX, 0);
+  const clipW = (c: Clip) => Math.max(12, ((c.trimEnd || 0) - (c.trimStart || 0)) * TL_PX);
+  const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + clipW(c), 0);
+  const timelineW = () => Math.max(40, clips.reduce((a, c) => a + clipW(c), 0));
   const onTrackPointerMove = (e: React.PointerEvent) => {
     const d = draggingRef.current;
     if (!d) return;
-    const idx = clips.findIndex(c => c.id === d.clipId);
-    if (idx < 0) return;
-    const clip = clips[idx];
-    const track = trackRef.current;
-    if (!track) return;
-    const rect = track.getBoundingClientRect();
-    const x = e.clientX - rect.left + track.scrollLeft - clipLeftPx(idx);
-    const t = Math.max(0, Math.min(clip.duration || 0, x / TL_PX));
-    setClips(prev => prev.map(c => c.id === d.clipId
-      ? (d.edge === 'start' ? { ...c, trimStart: Math.min(t, c.trimEnd - 0.3) } : { ...c, trimEnd: Math.max(t, c.trimStart + 0.3) })
-      : c));
+    const clip = clips.find(c => c.id === d.clipId);
+    if (!clip) return;
+    const delta = (e.clientX - d.startX) / TL_PX; // segundos arrastrados desde que se empezó
+    setClips(prev => prev.map(c => {
+      if (c.id !== d.clipId) return c;
+      if (d.edge === 'start') return { ...c, trimStart: Math.max(0, Math.min(d.origStart + delta, d.origEnd - 0.3)) };
+      return { ...c, trimEnd: Math.min(c.duration || (d.origEnd + delta), Math.max(d.origEnd + delta, d.origStart + 0.3)) };
+    }));
   };
   const endDrag = () => { draggingRef.current = null; scrubRef.current = false; };
 
@@ -250,9 +249,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const x = clientX - rect.left - 8 + track.scrollLeft; // -8 = padding p-2 del contenedor
     let acc = 0;
     for (let i = 0; i < clips.length; i++) {
-      const w = (clips[i].duration || 0) * TL_PX;
+      const c = clips[i];
+      const w = clipW(c);
       if (x < acc + w || i === clips.length - 1) {
-        return { idx: i, local: Math.max(0, Math.min(clips[i].duration || 0, (x - acc) / TL_PX)) };
+        // El ancho del bloque representa [trimStart, trimEnd] → mapeo a tiempo de fuente
+        const local = c.trimStart + Math.max(0, Math.min(w, x - acc)) / TL_PX;
+        return { idx: i, local: Math.max(c.trimStart, Math.min(c.trimEnd, local)) };
       }
       acc += w;
     }
@@ -1091,51 +1093,47 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </div>
                 </div>
                 <div ref={trackRef} onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove} onPointerUp={endDrag} onPointerLeave={endDrag} className="overflow-x-auto bg-slate-900 rounded-2xl p-2 select-none touch-none cursor-pointer">
-                  <div className="relative" style={{ width: Math.max(40, clips.reduce((a, c) => a + (c.duration || 0) * TL_PX, 0)) }}>
-                    {/* Pista de video */}
+                  <div className="relative" style={{ width: timelineW() }}>
+                    {/* Pista de video — cada bloque = el tramo recortado real */}
                     <div className="relative h-14">
                       {clips.map((c, idx) => {
                         const left = clipLeftPx(idx);
-                        const width = (c.duration || 0) * TL_PX;
+                        const width = clipW(c);
                         return (
                           <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-14 rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-yellow-300 ring-2 ring-yellow-300/60' : 'border-slate-700'}`} style={{ left, width }}>
-                            <div className="absolute inset-0 bg-purple-950/60" />
-                            <div className="absolute top-0 bottom-0 bg-purple-600/60 flex items-center" style={{ left: c.trimStart * TL_PX, width: Math.max(0, (c.trimEnd - c.trimStart) * TL_PX) }}>
-                              <span className="text-[8px] text-white font-black uppercase px-2 truncate">Clip {idx + 1}</span>
-                            </div>
-                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimStart * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
-                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end' }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 w-2.5 bg-white rounded cursor-ew-resize flex items-center justify-center z-10" style={{ left: c.trimEnd * TL_PX - 5 }}><div className="w-0.5 h-5 bg-purple-600" /></div>
+                            <div className="absolute inset-0 bg-purple-600/55" />
+                            <span className="absolute left-2.5 top-1.5 text-[8px] text-white font-black uppercase truncate max-w-[70%] pointer-events-none">Clip {idx + 1}</span>
+                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 left-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
+                            <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 right-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
                             {idx === activeIdx && (
-                              <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="absolute top-1 right-1 z-20 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center text-[9px] hover:bg-red-500 transition-colors" title="Borrar este tramo"><i className="fa-solid fa-xmark"></i></button>
+                              <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="absolute top-1 right-3 z-20 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center text-[9px] hover:bg-red-500 transition-colors" title="Borrar este tramo"><i className="fa-solid fa-xmark"></i></button>
                             )}
                           </div>
                         );
                       })}
                     </div>
-                    {/* Pista de audio (onda) */}
+                    {/* Pista de audio (onda recortada) */}
                     <div className="relative h-10 mt-1.5">
                       {clips.map((c, idx) => {
                         const left = clipLeftPx(idx);
-                        const width = (c.duration || 0) * TL_PX;
+                        const width = clipW(c);
                         const peaks = clipPeaks[c.id];
+                        const dur = c.duration || 0;
+                        const sub = (peaks && peaks.length && dur)
+                          ? peaks.slice(Math.floor((c.trimStart / dur) * peaks.length), Math.max(Math.floor((c.trimStart / dur) * peaks.length) + 1, Math.ceil((c.trimEnd / dur) * peaks.length)))
+                          : peaks;
                         return (
                           <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-10 rounded-lg overflow-hidden border ${idx === activeIdx ? 'border-emerald-400/70' : 'border-slate-700'}`} style={{ left, width }}>
                             <div className="absolute inset-0 bg-emerald-950/40" />
                             {peaks === undefined ? (
-                              // Todavía calculando la onda
                               <div className="absolute inset-0 flex items-center justify-center">
                                 <span className="text-[8px] text-emerald-300/50 font-black uppercase tracking-widest"><i className="fa-solid fa-circle-notch fa-spin mr-1"></i>Audio</span>
                               </div>
-                            ) : peaks.length > 0 ? (
+                            ) : (sub && sub.length > 0) ? (
                               <div className="absolute inset-0 flex items-center gap-px px-px">
-                                {peaks.map((p, i) => {
-                                  const tt = (i / peaks.length) * (c.duration || 0);
-                                  const inTrim = tt >= c.trimStart && tt <= c.trimEnd;
-                                  return <div key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(6, p * 100)}%`, background: inTrim ? '#34d399' : '#475569' }} />;
-                                })}
+                                {sub.map((p, i) => <div key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(6, p * 100)}%`, background: '#34d399' }} />)}
                               </div>
                             ) : (
-                              // Clip sin pista de audio (ej. video generado)
                               <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="h-px w-[90%] bg-slate-600" />
                                 <span className="absolute text-[8px] text-slate-400 font-black uppercase tracking-widest">Sin audio</span>
@@ -1146,7 +1144,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                       })}
                     </div>
                     {/* Cabezal (cruza ambas pistas) */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + currentTime * TL_PX }} />
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-300 pointer-events-none z-20" style={{ left: clipLeftPx(activeIdx) + (currentTime - (activeClip?.trimStart || 0)) * TL_PX }} />
                   </div>
                 </div>
                 <p className="text-[9px] text-slate-300 font-bold leading-relaxed">Arrastrá los bordes blancos para recortar las puntas. Tocá la timeline para mover el cabezal (línea amarilla).<br/><b>Cortar una parte del medio:</b> 1) cabezal al inicio de esa parte → <b>Dividir acá</b>. 2) movés el cabezal al final → <b>Dividir acá</b>. 3) el tramo del medio queda <b>seleccionado (borde amarillo)</b> → tocá <b>Borrar tramo</b>.</p>
