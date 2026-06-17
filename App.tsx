@@ -570,12 +570,12 @@ const App: React.FC = () => {
     };
     const cfg = layouts[type];
     const fontFor: Record<string, string | undefined> = { headline: kit?.headlineFont, description: kit?.descriptionFont, additional: kit?.additionalFont, cta: kit?.ctaFont };
-    const colorFor: Record<string, string | undefined> = { headline: kit?.headlineColor, description: kit?.descriptionColor, additional: kit?.additionalColor, cta: kit?.ctaColor };
     setState(prev => {
       const build = (key: 'headline' | 'description' | 'additional' | 'cta') => {
         const l = prev.textLayers[key];
         const c = cfg[key];
-        return { ...l, align: c.align, size: c.size, width: c.w ?? l.width, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: colorFor[key] || l.color };
+        // La plantilla acomoda posición/tamaño/alineación; NO toca el color que el usuario ya eligió.
+        return { ...l, align: c.align, size: c.size, width: c.w ?? l.width, feedPosition: c.feed, storyPosition: c.story, font: fontFor[key] || l.font, color: l.color };
       };
       return {
         ...prev,

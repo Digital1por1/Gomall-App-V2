@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { UserProfile } from '../types';
 import { recordUsage } from './usageTracker';
 
@@ -741,6 +742,106 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
+  // === Render DETERMINÍSTICO con WebCodecs (modelo Canva web) ===
+  // Codifica el video frame por frame (timestamps exactos → duración correcta, sin frame-rate variable)
+  // y el audio mezclado a AAC, y los une con un muxer MP4. No usa MediaRecorder → robusto y confiable.
+  const renderMp4WebCodecs = async (
+    ranges: { url: string; start: number; end: number }[],
+    totalDur: number,
+    mixBuf: AudioBuffer | null,
+    exV: HTMLVideoElement,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<Blob> => {
+    const VE: any = (window as any).VideoEncoder;
+    const AE: any = (window as any).AudioEncoder;
+    const VF: any = (window as any).VideoFrame;
+    const AD: any = (window as any).AudioData;
+    if (!VE || !AE || !VF || !AD) throw new Error('WebCodecs no disponible');
+
+    // Elige un perfil H.264 soportado para 1080x1920
+    const candidates = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'avc1.640020', 'avc1.42001f'];
+    let vcodec = '';
+    for (const c of candidates) {
+      try { const s = await VE.isConfigSupported({ codec: c, width: CANVAS_W, height: CANVAS_H, bitrate: 8_000_000, framerate: FPS }); if (s?.supported) { vcodec = c; break; } } catch {}
+    }
+    if (!vcodec) throw new Error('WebCodecs sin soporte H.264');
+
+    const canvas = canvasRef.current!;
+    const hasAudio = !!mixBuf;
+    const muxer = new Muxer({
+      target: new ArrayBufferTarget(),
+      video: { codec: 'avc', width: CANVAS_W, height: CANVAS_H },
+      ...(hasAudio ? { audio: { codec: 'aac', numberOfChannels: mixBuf!.numberOfChannels, sampleRate: mixBuf!.sampleRate } } : {}),
+      fastStart: 'in-memory',
+    } as any);
+
+    let encErr: any = null;
+    const venc = new VE({ output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta), error: (e: any) => { encErr = e; } });
+    venc.configure({ codec: vcodec, width: CANVAS_W, height: CANVAS_H, bitrate: 8_000_000, framerate: FPS });
+
+    // --- Video: seek por frame, timestamps exactos ---
+    const frameDurUs = 1e6 / FPS;
+    let frameIndex = 0;
+    let outBase = 0;
+    const seekTo = (tt: number) => new Promise<void>((res) => {
+      let done = false;
+      const fin = () => { if (done) return; done = true; exV.onseeked = null; res(); };
+      exV.onseeked = fin;
+      try { exV.currentTime = tt; } catch { fin(); }
+      setTimeout(fin, 600); // fallback si 'seeked' no dispara
+    });
+    for (const r of ranges) {
+      if (exV.src !== r.url) {
+        exV.src = r.url;
+        await new Promise<void>((res) => { const h = () => { exV.removeEventListener('loadeddata', h); res(); }; exV.addEventListener('loadeddata', h); });
+      }
+      const rdur = Math.max(0, r.end - r.start);
+      const nFrames = Math.max(1, Math.round(rdur * FPS));
+      for (let f = 0; f < nFrames; f++) {
+        if (encErr) throw encErr;
+        const srcT = Math.min(r.start + f / FPS, Math.max(r.start, r.end - 0.001));
+        await seekTo(srcT);
+        drawFrame(exV.currentTime, exV);
+        const vf = new VF(canvas, { timestamp: Math.round(frameIndex * frameDurUs), duration: Math.round(frameDurUs) });
+        venc.encode(vf, { keyFrame: frameIndex % (FPS * 2) === 0 });
+        vf.close();
+        frameIndex++;
+        if (frameIndex % 3 === 0) onProgress(outBase + f / FPS, totalDur);
+        if (venc.encodeQueueSize > 8) await new Promise((r2) => setTimeout(r2, 0));
+      }
+      outBase += rdur;
+    }
+    await venc.flush();
+    venc.close();
+    if (encErr) throw encErr;
+
+    // --- Audio: mezcla offline → AAC ---
+    if (hasAudio) {
+      let aErr: any = null;
+      const aenc = new AE({ output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta), error: (e: any) => { aErr = e; } });
+      const ch = mixBuf!.numberOfChannels, sr = mixBuf!.sampleRate, total = mixBuf!.length;
+      aenc.configure({ codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, bitrate: 192_000 });
+      const chans: Float32Array[] = [];
+      for (let c = 0; c < ch; c++) chans.push(mixBuf!.getChannelData(c));
+      const CHUNK = 1024;
+      for (let pos = 0; pos < total; pos += CHUNK) {
+        if (aErr) throw aErr;
+        const n = Math.min(CHUNK, total - pos);
+        const planar = new Float32Array(n * ch);
+        for (let c = 0; c < ch; c++) planar.set(chans[c].subarray(pos, pos + n), c * n);
+        const ad = new AD({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round((pos / sr) * 1e6), data: planar });
+        aenc.encode(ad); ad.close();
+      }
+      await aenc.flush();
+      aenc.close();
+      if (aErr) throw aErr;
+    }
+
+    muxer.finalize();
+    const { buffer } = (muxer.target as any);
+    return new Blob([buffer], { type: 'video/mp4' });
+  };
+
   const exportReel = async () => {
     const v = videoRef.current;
     const canvas = canvasRef.current;
@@ -791,98 +892,107 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       try { mixBuf = await buildMixedAudioBuffer(ranges, totalDur); } catch (err) { console.error('[export] mezcla de audio falló:', err); mixBuf = null; }
       console.info('[export] audio mezclado:', mixBuf ? `${mixBuf.duration.toFixed(2)}s · ${mixBuf.numberOfChannels}ch @ ${mixBuf.sampleRate}Hz` : 'SIN audio');
 
-      // --- 2) Preparar grabación: canvas (video) + buffer de audio como pista en vivo ---
-      const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
-      let srcNode: AudioBufferSourceNode | null = null;
-      if (mixBuf) {
-        exActx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        if (exActx.state === 'suspended') { try { await exActx.resume(); } catch {} }
-        const dest = exActx.createMediaStreamDestination();
-        srcNode = exActx.createBufferSource(); srcNode.buffer = mixBuf; srcNode.connect(dest);
-        const at = dest.stream.getAudioTracks()[0]; if (at) canvasStream.addTrack(at);
-      }
-
-      const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
-        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
-      const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
-        : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
-      const isMp4 = !!mp4Mime;
-      const recMime = mp4Mime || webmMime || '';
-      const recorder = recMime ? new MediaRecorder(canvasStream, { mimeType: recMime }) : new MediaRecorder(canvasStream);
-      console.log('[export] mime:', recMime || '(default)', '· audio tracks:', canvasStream.getAudioTracks().length);
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-      const stopped = new Promise<Blob>((resolve) => {
-        recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
-      });
-
-      if (mixBuf && canvasStream.getAudioTracks().length === 0) {
-        console.warn('[export] ⚠ había audio mezclado pero no se pudo adjuntar la pista al stream.');
-      }
-
-      let elapsedBefore = 0;
-      let audioStarted = false;
-      setExportMsg('Renderizando video… 0%');
-      setExportPct(10);
-      console.info('[export] grabando…', recMime || '(default)', '· pistas de audio:', canvasStream.getAudioTracks().length);
-      recorder.start(100);
-
-      for (const range of ranges) {
-        // Pausa el audio mientras carga/busca el próximo clip, para mantener la sincronía con el video
-        if (audioStarted && exActx) { try { await exActx.suspend(); } catch {} }
-        if (exV.src !== range.url) {
-          exV.src = range.url;
-          await new Promise<void>((res) => { const h = () => { exV.removeEventListener('loadeddata', h); res(); }; exV.addEventListener('loadeddata', h); });
+      // --- 2) Render del video. Vía PRINCIPAL: WebCodecs (determinístico, robusto). ---
+      let mp4Blob: Blob | null = null;
+      const hasWebCodecs = 'VideoEncoder' in window && 'AudioEncoder' in window && 'VideoFrame' in window && 'AudioData' in window;
+      if (hasWebCodecs) {
+        try {
+          setExportMsg('Renderizando video…');
+          setExportPct(12);
+          mp4Blob = await renderMp4WebCodecs(ranges, totalDur, mixBuf, exV, (done, total) => {
+            const pct = Math.min(96, 10 + Math.round((done / total) * 86));
+            setExportPct(pct); setExportMsg(`Renderizando video… ${pct}%`);
+          });
+          console.info('[export] vía WebCodecs OK');
+        } catch (err) {
+          console.warn('[export] WebCodecs no se pudo usar, fallback a MediaRecorder:', err);
+          mp4Blob = null;
         }
-        exV.currentTime = range.start;
-        await new Promise<void>((res) => { exV.onseeked = () => res(); });
-        await exV.play().catch(() => {});
-        if (exActx && srcNode) {
-          if (!audioStarted) { try { srcNode.start(0); } catch {} audioStarted = true; }
-          try { await exActx.resume(); } catch {}
-        }
-        await new Promise<void>((resolve) => {
-          let lastUi = 0;
-          const step = () => {
-            drawFrame(exV.currentTime, exV);
-            const now = performance.now();
-            if (now - lastUi > 250) {
-              lastUi = now;
-              const done = elapsedBefore + Math.max(0, exV.currentTime - range.start);
-              const pct = Math.min(92, 10 + Math.round((done / totalDur) * 82));
-              setExportPct(pct);
-              setExportMsg(`Renderizando video… ${pct}%`);
-            }
-            if (exV.currentTime >= range.end || exV.ended) { exV.pause(); resolve(); return; }
-            requestAnimationFrame(step);
-          };
-          requestAnimationFrame(step);
-        });
-        elapsedBefore += Math.max(0, range.end - range.start);
-      }
-      if (exActx) { try { await exActx.suspend(); } catch {} }
-      recorder.stop();
-      const recBlob = await stopped;
-      setExportPct(94);
-      console.info('[export] video grabado:', (recBlob.size / 1048576).toFixed(1) + 'MB', '·', isMp4 ? 'mp4' : 'webm');
-      if (recBlob.size < 1024) throw new Error('La grabación quedó vacía (el navegador no generó el video).');
-
-      // --- 3) Salida ---
-      let mp4Blob: Blob;
-      if (isMp4) {
-        // El MP4 grabado se usa directo (sin ffmpeg) → el video queda intacto.
-        setExportMsg('Finalizando…');
-        mp4Blob = recBlob;
       } else {
-        // Fallback WebM (ej. Firefox): re-codificar a MP4 (re-encode = video limpio, aunque más lento)
-        setExportMsg('Convirtiendo a MP4… (puede tardar un poco)');
-        const ffmpeg = await loadFFmpeg();
-        await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
-        await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'out.mp4']);
-        const data = await ffmpeg.readFile('out.mp4');
-        mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+        console.info('[export] WebCodecs no disponible, usando MediaRecorder.');
       }
+
+      // --- Fallback: grabación en tiempo real con MediaRecorder (si WebCodecs no estaba/ falló) ---
+      if (!mp4Blob) {
+        const canvasStream = (canvas as any).captureStream(FPS) as MediaStream;
+        let srcNode: AudioBufferSourceNode | null = null;
+        if (mixBuf) {
+          exActx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (exActx.state === 'suspended') { try { await exActx.resume(); } catch {} }
+          const dest = exActx.createMediaStreamDestination();
+          srcNode = exActx.createBufferSource(); srcNode.buffer = mixBuf; srcNode.connect(dest);
+          const at = dest.stream.getAudioTracks()[0]; if (at) canvasStream.addTrack(at);
+        }
+        const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
+          .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
+        const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
+          : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
+          : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
+        const isMp4 = !!mp4Mime;
+        const recMime = mp4Mime || webmMime || '';
+        const recorder = recMime ? new MediaRecorder(canvasStream, { mimeType: recMime }) : new MediaRecorder(canvasStream);
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        const stopped = new Promise<Blob>((resolve) => {
+          recorder.onstop = () => resolve(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }));
+        });
+        let elapsedBefore = 0;
+        let audioStarted = false;
+        setExportMsg('Renderizando video… 0%');
+        setExportPct(10);
+        console.info('[export] grabando (MediaRecorder)…', recMime || '(default)', '· pistas de audio:', canvasStream.getAudioTracks().length);
+        recorder.start(100);
+        for (const range of ranges) {
+          if (audioStarted && exActx) { try { await exActx.suspend(); } catch {} }
+          if (exV.src !== range.url) {
+            exV.src = range.url;
+            await new Promise<void>((res) => { const h = () => { exV.removeEventListener('loadeddata', h); res(); }; exV.addEventListener('loadeddata', h); });
+          }
+          exV.currentTime = range.start;
+          await new Promise<void>((res) => { exV.onseeked = () => res(); });
+          await exV.play().catch(() => {});
+          if (exActx && srcNode) {
+            if (!audioStarted) { try { srcNode.start(0); } catch {} audioStarted = true; }
+            try { await exActx.resume(); } catch {}
+          }
+          await new Promise<void>((resolve) => {
+            let lastUi = 0;
+            const step = () => {
+              drawFrame(exV.currentTime, exV);
+              const now = performance.now();
+              if (now - lastUi > 250) {
+                lastUi = now;
+                const done = elapsedBefore + Math.max(0, exV.currentTime - range.start);
+                const pct = Math.min(92, 10 + Math.round((done / totalDur) * 82));
+                setExportPct(pct);
+                setExportMsg(`Renderizando video… ${pct}%`);
+              }
+              if (exV.currentTime >= range.end || exV.ended) { exV.pause(); resolve(); return; }
+              requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+          });
+          elapsedBefore += Math.max(0, range.end - range.start);
+        }
+        if (exActx) { try { await exActx.suspend(); } catch {} }
+        recorder.stop();
+        const recBlob = await stopped;
+        setExportPct(94);
+        if (recBlob.size < 1024) throw new Error('La grabación quedó vacía (el navegador no generó el video).');
+        if (isMp4) {
+          setExportMsg('Finalizando…');
+          mp4Blob = recBlob;
+        } else {
+          setExportMsg('Convirtiendo a MP4… (puede tardar un poco)');
+          const ffmpeg = await loadFFmpeg();
+          await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
+          await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'out.mp4']);
+          const data = await ffmpeg.readFile('out.mp4');
+          mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
+        }
+      }
+
+      if (!mp4Blob) throw new Error('No se generó el archivo de video.');
       const url = URL.createObjectURL(mp4Blob);
       // Verificación: confirma que el MP4 es reproducible y loguea su duración real
       try {
