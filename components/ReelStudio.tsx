@@ -489,7 +489,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const m = ensureMusicEl();
     if (m && musicUrl) { m.volume = musicVolume; const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
     const vo = ensureVoiceEl();
-    if (vo && voiceUrl && pos <= (vo.duration || Infinity)) { vo.volume = voiceVolume; vo.currentTime = pos; vo.play().catch(() => {}); }
+    if (vo && voiceUrl) {
+      vo.volume = voiceVolume;
+      try { if (isFinite(pos) && pos >= 0) vo.currentTime = pos; } catch {}
+      vo.play().catch((e) => console.warn('[voz] no se pudo reproducir en preview:', e));
+    }
   };
   const pauseBeds = () => { musicElRef.current?.pause(); voiceElRef.current?.pause(); };
 
@@ -715,6 +719,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const cache: Record<string, AudioBuffer | null> = {};
       const decode = async (url: string): Promise<AudioBuffer | null> => {
         if (url in cache) return cache[url];
+        // 1) Decodificación directa del navegador: sirve para audios (mp3, m4a, wav, webm/opus, ogg)
+        //    y muchas veces para el audio de mp4. Evita depender de que ffmpeg.wasm traiga el codec (ej. opus).
+        try {
+          const ab = await (await fetch(url)).arrayBuffer();
+          const buf = await decodeCtx.decodeAudioData(ab.slice(0));
+          cache[url] = buf; return buf;
+        } catch {}
+        // 2) Fallback con ffmpeg (contenedores de video como .mov que decodeAudioData no abre)
         try {
           const wav = await extractWav(url, SR, false);
           const buf = await decodeCtx.decodeAudioData(wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer);
@@ -754,6 +766,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       // Voz en off (desde el inicio)
       if (voiceUrl) {
         const vbuf = await decode(voiceUrl);
+        console.info('[export] voz decodificada:', vbuf ? `${vbuf.duration.toFixed(2)}s` : 'NO se pudo decodificar');
         if (vbuf) {
           const src = off.createBufferSource(); src.buffer = vbuf;
           const g = off.createGain(); g.gain.value = voiceVolume;
@@ -1088,7 +1101,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   {clips.map((c, i) => (
                     <div key={c.id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
                       <button onClick={() => setActiveIdx(i)}><i className="fa-solid fa-film mr-1"></i>Clip {i + 1}</button>
-                      {clips.length > 1 && <button onClick={() => removeClip(c.id)} className="text-red-400 hover:text-red-600"><i className="fa-solid fa-xmark"></i></button>}
+                      <button onClick={() => { if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="text-red-400 hover:text-red-600" title="Borrar clip"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                   ))}
                   <label className="rounded-xl border-2 border-dashed border-purple-200 text-purple-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-purple-50 transition-all">
@@ -1270,6 +1283,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <div className="flex items-center justify-end gap-2">
                   <input type="color" value={subColor} onChange={(e) => setSubColor(e.target.value)} className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer" title="Color del texto" />
                   <button onClick={addSubtitle} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all">+ En {fmt(currentTime)}</button>
+                  {subtitles.length > 0 && <button onClick={() => { if (confirm('¿Borrar todos los subtítulos?')) setSubtitles([]); }} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all" title="Borrar todos los subtítulos"><i className="fa-solid fa-trash mr-1"></i>Borrar</button>}
                 </div>
 
                 {/* Auto-subtítulos con IA */}
