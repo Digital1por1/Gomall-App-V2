@@ -740,15 +740,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const combined = canvasStream;
       if (hasAudio) { const at = dest.stream.getAudioTracks()[0]; if (at) combined.addTrack(at); }
 
-      // Grabamos WebM (Opus) que captura el audio de forma confiable, y convertimos a MP4 con ffmpeg.
-      // El MP4 nativo de MediaRecorder a veces descarta el audio, por eso solo se usa si no hay WebM (Safari).
+      // Preferimos MP4 nativo: NO requiere conversión con ffmpeg (que re-codifica 1080x1920 en WASM
+      // y se clava). Con addTrack el audio entra bien en el MP4. WebM+ffmpeg solo si no hay MP4 nativo.
+      const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
+        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
       const webmMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
         : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
         : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
-      const mp4Mime = ['video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
-        .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } });
-      const isMp4 = !webmMime && !!mp4Mime;
-      const recMime = webmMime || mp4Mime || '';
+      const isMp4 = !!mp4Mime;
+      const recMime = mp4Mime || webmMime || '';
       const recorder = recMime ? new MediaRecorder(combined, { mimeType: recMime }) : new MediaRecorder(combined);
       console.log('[export] mime:', recMime || '(default)', '· audio tracks:', combined.getAudioTracks().length);
       const chunks: Blob[] = [];
@@ -824,8 +824,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         setExportMsg('Cargando conversor de video…');
         const ffmpeg = await loadFFmpeg();
         await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
-        setExportMsg('Convirtiendo a MP4…');
-        // preset ultrafast: la conversión en WASM es mucho más rápida (el cuello de botella anterior).
+        // El WebM de MediaRecorder no trae duración en la cabecera, así que ffmpeg no reporta
+        // progreso fiable: avisamos que puede tardar para que no parezca clavado.
+        setExportMsg('Convirtiendo a MP4… (puede tardar un poco, no cierres la pestaña)');
         await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', 'out.mp4']);
         const data = await ffmpeg.readFile('out.mp4');
         mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
