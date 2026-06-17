@@ -165,6 +165,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [subStyle, setSubStyle] = useState<string>('capcut');
   const [subColor, setSubColor] = useState('#FFFFFF');
   const [subScale, setSubScale] = useState(1); // multiplicador de tamaño de subtítulos
+  const [subAnim, setSubAnim] = useState<'none' | 'reveal' | 'highlight'>('none'); // animación de subtítulos
+  const [subAccent, setSubAccent] = useState('#FFE600'); // color de resalte de la palabra activa
   const [openSec, setOpenSec] = useState<Record<string, boolean>>({ subtitulos: true }); // secciones desplegables
   const toggleSec = (k: string) => setOpenSec(p => ({ ...p, [k]: !p[k] }));
   const [transcribing, setTranscribing] = useState(false);
@@ -383,47 +385,60 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       const maxWidth = CANVAS_W * 0.86;
       const raw = st.upper ? active.text.toUpperCase() : active.text;
-      const words = raw.split(/\s+/);
-      const lines: string[] = [];
-      let line = '';
-      for (const w of words) {
-        const test = line ? `${line} ${w}` : w;
-        if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; }
-        else line = test;
-      }
-      if (line) lines.push(line);
+      const allWords = raw.split(/\s+/).filter(Boolean);
+      // Agrupa palabras en líneas guardando el índice global de cada palabra (para animar)
+      const lineObjs: { w: string; gi: number }[][] = [];
+      let curLine: { w: string; gi: number }[] = []; let curText = '';
+      allWords.forEach((w, gi) => {
+        const test = curText ? `${curText} ${w}` : w;
+        if (ctx.measureText(test).width > maxWidth && curLine.length) { lineObjs.push(curLine); curLine = [{ w, gi }]; curText = w; }
+        else { curLine.push({ w, gi }); curText = test; }
+      });
+      if (curLine.length) lineObjs.push(curLine);
 
       const lineH = fontSize * 1.25;
-      const blockH = lines.length * lineH;
+      const blockH = lineObjs.length * lineH;
       const baseY = CANVAS_H * st.y - blockH / 2;
 
-      // Caja de fondo
-      if (st.box) {
-        lines.forEach((ln, i) => {
-          const y = baseY + i * lineH + lineH / 2;
-          const w = ctx.measureText(ln).width;
-          ctx.fillStyle = 'rgba(0,0,0,0.62)';
-          ctx.fillRect((CANVAS_W - w) / 2 - 28, y - lineH / 2, w + 56, lineH);
-        });
-      }
-      // Sombra (estilo clásico/minimal)
-      if (st.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3; }
-      else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; }
+      // Animación: palabra "actual" según el avance dentro del subtítulo
+      const N = allWords.length;
+      const dur = Math.max(0.001, active.end - active.start);
+      const prog = Math.max(0, Math.min(1, (t - active.start) / dur));
+      const curWord = Math.min(N - 1, Math.floor(prog * N));
+      const spaceW = ctx.measureText(' ').width;
 
-      lines.forEach((ln, i) => {
+      lineObjs.forEach((lw, i) => {
         const y = baseY + i * lineH + lineH / 2;
-        if (st.outline > 0) {
-          ctx.lineJoin = 'round';
-          ctx.lineWidth = st.outline;
-          ctx.strokeStyle = st.outlineColor;
-          ctx.strokeText(ln, CANVAS_W / 2, y);
+        // Para "reveal", solo se dibujan las palabras ya mencionadas
+        const visible = subAnim === 'reveal' ? lw.filter(x => x.gi <= curWord) : lw;
+        if (!visible.length) return;
+        const widths = visible.map(x => ctx.measureText(x.w).width);
+        const totalW = widths.reduce((a, b) => a + b, 0) + spaceW * (visible.length - 1);
+        // Caja de fondo
+        if (st.box) {
+          ctx.fillStyle = 'rgba(0,0,0,0.62)';
+          ctx.fillRect((CANVAS_W - totalW) / 2 - 28, y - lineH / 2, totalW + 56, lineH);
         }
-        ctx.fillStyle = subColor;
-        ctx.fillText(ln, CANVAS_W / 2, y);
+        // Dibuja palabra por palabra (alineado a la izquierda dentro de la línea centrada)
+        ctx.textAlign = 'left';
+        let x = (CANVAS_W - totalW) / 2;
+        visible.forEach((word, k) => {
+          const isCur = subAnim !== 'none' && word.gi === curWord;
+          const ww = widths[k];
+          ctx.save();
+          if (isCur && subAnim === 'highlight') { ctx.translate(x + ww / 2, y); ctx.scale(1.12, 1.12); ctx.translate(-(x + ww / 2), -y); }
+          if (st.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3; }
+          if (st.outline > 0) { ctx.lineJoin = 'round'; ctx.lineWidth = st.outline; ctx.strokeStyle = st.outlineColor; ctx.strokeText(word.w, x, y); }
+          ctx.fillStyle = isCur ? subAccent : subColor;
+          ctx.fillText(word.w, x, y);
+          ctx.restore();
+          x += ww + spaceW;
+        });
       });
+      ctx.textAlign = 'center';
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     }
-  }, [logoEnabled, subtitles, subColor, subFont, subStyle, subScale]);
+  }, [logoEnabled, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent]);
 
   // Loop de previsualización
   const tick = useCallback(() => {
@@ -1274,6 +1289,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <span className="text-[9px] font-black text-purple-600 tabular-nums">{Math.round(subScale * 100)}%</span>
                   </div>
                   <input type="range" min={0.6} max={1.6} step={0.05} value={subScale} onChange={(e) => setSubScale(Number(e.target.value))} className="w-full h-1.5 accent-purple-600 bg-slate-200 rounded-full appearance-none cursor-pointer" />
+                </div>
+
+                {/* Animación */}
+                <div className="space-y-1.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Animación</span>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {([['none', 'Ninguna'], ['reveal', 'Aparecen'], ['highlight', 'Resaltar palabra']] as const).map(([id, label]) => (
+                      <button key={id} onClick={() => setSubAnim(id)} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${subAnim === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{label}</button>
+                    ))}
+                    {subAnim !== 'none' && (
+                      <label className="flex items-center gap-1 text-[9px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                        Resalte
+                        <input type="color" value={subAccent} onChange={(e) => setSubAccent(e.target.value)} className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer" title="Color de la palabra activa" />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-slate-300 font-bold">"Aparecen": las palabras se muestran a medida que se dicen. "Resaltar": pinta la palabra que se está diciendo.</p>
                 </div>
 
                 <div className="space-y-2">
