@@ -313,6 +313,24 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     return () => { cancelled = true; };
   }, [clipIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Mide la duración de CADA clip (no solo el activo) para que la timeline muestre su largo real
+  useEffect(() => {
+    let cancelled = false;
+    clips.forEach(c => {
+      if (c.duration > 0) return;
+      const el = document.createElement('video');
+      el.preload = 'metadata'; el.src = c.url;
+      el.onloadedmetadata = () => {
+        if (cancelled) return;
+        const d = el.duration;
+        if (!isFinite(d) || d <= 0) return;
+        setClips(prev => prev.map(x => (x.id === c.id && x.duration === 0) ? { ...x, duration: d, trimStart: 0, trimEnd: d } : x));
+        el.removeAttribute('src'); try { el.load(); } catch {}
+      };
+    });
+    return () => { cancelled = true; };
+  }, [clipIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const splitActive = () => {
     const clip = clips[activeIdx];
     if (!clip) return;
@@ -588,8 +606,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     return voiceElRef.current;
   };
   // Reproduce música/voz sincronizadas con el video (preview, audio nativo)
-  const playBeds = () => {
-    const pos = globalOffsetActive() + Math.max(0, (videoRef.current?.currentTime || 0) - trimStart);
+  const playBeds = (globalPos?: number) => {
+    const pos = globalPos != null ? globalPos : (globalOffsetActive() + Math.max(0, (videoRef.current?.currentTime || 0) - trimStart));
     const m = ensureMusicEl();
     if (m && musicUrl) { m.volume = musicVolume; const d = m.duration || 0; m.currentTime = d ? pos % d : 0; m.play().catch(() => {}); }
     const vo = ensureVoiceEl();
@@ -620,16 +638,23 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) { v.pause(); pauseBeds(); setPlaying(false); }
-    else {
-      // Frena el preview de audio aislado si estaba sonando
-      try { previewAudioRef.current?.pause(); } catch {} setPreviewing(null);
-      // Preview con audio NATIVO. El export corre aislado, con sus propios elementos.
+    if (playing) { v.pause(); pauseBeds(); setPlaying(false); return; }
+    // Iniciar: reproduce TODO el reel desde el primer clip (en cadena)
+    try { previewAudioRef.current?.pause(); } catch {} setPreviewing(null);
+    const first = clips[0];
+    if (!first) return;
+    setPlaying(true);
+    playBeds(0); // música/voz desde el inicio del reel
+    if (activeIdx === 0) {
       v.muted = videoVolume === 0; v.volume = videoVolume;
-      if (v.currentTime < trimStart || v.currentTime >= trimEnd) v.currentTime = trimStart;
-      v.play();
-      playBeds();
-      setPlaying(true);
+      v.currentTime = first.trimStart; v.play().catch(() => {});
+    } else if (clips[activeIdx]?.url === first.url) {
+      // mismo source que el clip 0 (split): salto sin recargar
+      v.muted = videoVolume === 0; v.volume = videoVolume;
+      setActiveIdx(0); v.currentTime = first.trimStart; v.play().catch(() => {});
+    } else {
+      // otro video: recargar el clip 0 y arrancar (la cadena sigue sola)
+      continuePlayRef.current = true; pendingSeekRef.current = first.trimStart; setActiveIdx(0);
     }
   };
 
@@ -1156,10 +1181,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             </label>
           </div>
         ) : (
-          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 flex flex-col gap-5">
-            {/* Player + línea de tiempo (a todo el ancho, estilo CapCut) */}
-            <div className="space-y-4">
-              <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '48vh' }}>
+          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 flex flex-col gap-5 lg:grid lg:gap-5 lg:items-start lg:[grid-template-columns:minmax(0,1fr)_360px]">
+            {/* Player (arriba-izquierda) */}
+            <div className="space-y-4 min-w-0 lg:[grid-column:1] lg:[grid-row:1]">
+              <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
                 <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${logoEnabled ? 'cursor-move' : ''}`} />
                 <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
@@ -1170,7 +1195,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <input type="range" min={0} max={duration || 0} step={0.05} value={currentTime} onChange={(e) => seek(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
                 <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">{fmt(currentTime)} / {fmt(duration)}</span>
               </div>
+            </div>
 
+            {/* Línea de tiempo (a todo el ancho, abajo) */}
+            <div className="space-y-2 min-w-0 lg:[grid-column:1/3] lg:[grid-row:2]">
               {/* Clips */}
               <div className="space-y-2">
                 <span className={labelClass}>Clips ({clips.length})</span>
@@ -1310,8 +1338,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               </div>
             </div>
 
-            {/* Controles (desplegables) — en grilla para aprovechar el ancho */}
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+            {/* Opciones (a la derecha del video) */}
+            <div className="space-y-3 lg:[grid-column:2] lg:[grid-row:1]">
               {/* Audio del video */}
               <Accordion title="Audio del video" icon="fa-volume-high" open={!!openSec.audiovideo} onToggle={() => toggleSec('audiovideo')} badge={videoVolume === 0 ? 'Silenciado' : undefined}>
                 <div className="flex items-center justify-end">
@@ -1482,7 +1510,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               </Accordion>
 
               {/* Export */}
-              <div className="space-y-3 pt-2 sm:col-span-2 xl:col-span-3">
+              <div className="space-y-3 pt-2">
                 {exportedUrl ? (
                   <a href={exportedUrl} download="reel-gomall.mp4" className="w-full h-14 bg-green-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
                     <i className="fa-solid fa-download"></i> Descargar reel MP4
