@@ -368,7 +368,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       v.currentTime = t;
       setCurrentTime(t);
       drawFrame(t);
-      if (resume) v.play().catch(() => {}); // reproducción continua: seguir con el próximo clip
+      if (resume) {
+        // Esperar a que el seek esté listo, reproducir y recién ahí soltar el candado
+        const go = () => { v.onseeked = null; v.play().catch(() => {}); advancingRef.current = false; };
+        v.onseeked = go;
+        setTimeout(go, 400); // fallback por si 'seeked' no dispara
+      } else {
+        advancingRef.current = false;
+      }
+    } else {
+      advancingRef.current = false;
     }
   };
 
@@ -510,6 +519,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const clipsRef = useRef(clips); clipsRef.current = clips;
   const activeIdxRef = useRef(activeIdx); activeIdxRef.current = activeIdx;
   const continuePlayRef = useRef(false); // reproducir el próximo clip al terminar el actual
+  const advancingRef = useRef(false);    // true mientras carga el próximo clip (otro video)
 
   // Opacidad del velo de transición según cercanía a un borde con clip adyacente
   const fadeAt = (hasPrev: boolean, hasNext: boolean, fromStart: number, toEnd: number) => {
@@ -525,6 +535,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const tick = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
+    // Mientras carga el próximo clip, no chequear el borde (evita saltar de largo por el tiempo viejo)
+    if (advancingRef.current) { rafRef.current = requestAnimationFrame(tick); return; }
     setCurrentTime(v.currentTime);
     const ci = activeIdxRef.current; const cc = clipsRef.current[ci];
     const fade = cc ? fadeAt(ci > 0, ci < clipsRef.current.length - 1, v.currentTime - cc.trimStart, cc.trimEnd - v.currentTime) : 0;
@@ -542,6 +554,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         }
         // Otro video: recargar src, buscar su inicio y seguir (música/voz no se frenan)
         v.pause();
+        advancingRef.current = true; // candado hasta que el nuevo clip esté listo
         continuePlayRef.current = true;
         pendingSeekRef.current = next.trimStart;
         setActiveIdx(idx + 1);
@@ -551,6 +564,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       v.pause();
       musicElRef.current?.pause();
       voiceElRef.current?.pause();
+      advancingRef.current = false;
       setPlaying(false);
       return;
     }
@@ -655,7 +669,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) { v.pause(); pauseBeds(); setPlaying(false); return; }
+    if (playing) { v.pause(); pauseBeds(); advancingRef.current = false; setPlaying(false); return; }
     // Iniciar: reproduce TODO el reel desde el primer clip (en cadena)
     try { previewAudioRef.current?.pause(); } catch {} setPreviewing(null);
     const first = clips[0];
@@ -671,6 +685,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       setActiveIdx(0); v.currentTime = first.trimStart; v.play().catch(() => {});
     } else {
       // otro video: recargar el clip 0 y arrancar (la cadena sigue sola)
+      advancingRef.current = true;
       continuePlayRef.current = true; pendingSeekRef.current = first.trimStart; setActiveIdx(0);
     }
   };
