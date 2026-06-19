@@ -365,9 +365,10 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
             return (
               <div 
                 onPointerDown={(e) => handlePointerDown(e, 'resource')} 
-                className={`absolute cursor-move touch-none transition-all duration-300 ${isLongPressing === 'resource' ? 'scale-110' : ''} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2 rounded-sm z-[110]' : 'z-[100]'}`} 
-                style={{ 
-                  zIndex: isSelected ? 110 : (state.layersOrder.indexOf('resource') > -1 ? state.layersOrder.indexOf('resource') + 10 : 50),
+                className={`absolute cursor-move touch-none transition-all duration-300 ${isLongPressing === 'resource' ? 'scale-110' : ''} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2 rounded-sm z-[110]' : ''}`}
+                style={{
+                  // El recurso queda DEBAJO de los textos (salvo cuando se está editando)
+                  zIndex: isSelected ? 110 : (state.layersOrder.indexOf('resource') > -1 ? state.layersOrder.indexOf('resource') : 1),
                   left: `${safeX}%`, 
                   top: `${safeY}%`, 
                   width: `${state.resource.size}%`, 
