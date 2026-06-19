@@ -1240,6 +1240,10 @@ const SidebarModules: React.FC<SidebarProps> = ({
         </div>
       </Accordion>
 
+      <Accordion title="TEXTOS" icon="fa-font" isOpen={openSection === 'TEXTOS'} onToggle={() => setOpenSection(openSection === 'TEXTOS' ? null : 'TEXTOS')}>
+        <div className="space-y-2">{renderTextEditor('headline', 'Título')}{renderTextEditor('description', 'Descripción')}{renderTextEditor('additional', 'Texto Adicional')}{renderTextEditor('cta', 'Botón')}</div>
+      </Accordion>
+
       {onApplyTemplate && (
         <Accordion title="PLANTILLAS" icon="fa-wand-magic-sparkles" isOpen={openSection === 'TEMPLATES'} onToggle={() => setOpenSection(openSection === 'TEMPLATES' ? null : 'TEMPLATES')}>
           <div className="space-y-3">
@@ -1261,10 +1265,6 @@ const SidebarModules: React.FC<SidebarProps> = ({
           </div>
         </Accordion>
       )}
-
-      <Accordion title="TEXTOS" icon="fa-font" isOpen={openSection === 'TEXTOS'} onToggle={() => setOpenSection(openSection === 'TEXTOS' ? null : 'TEXTOS')}>
-        <div className="space-y-2">{renderTextEditor('headline', 'Título')}{renderTextEditor('description', 'Descripción')}{renderTextEditor('additional', 'Texto Adicional')}{renderTextEditor('cta', 'Botón')}</div>
-      </Accordion>
 
 
       <Accordion title="REDACTOR IA" icon="fa-quote-right" isOpen={openSection === 'COPY'} onToggle={() => setOpenSection(openSection === 'COPY' ? null : 'COPY')}>
