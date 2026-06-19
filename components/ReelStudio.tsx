@@ -409,7 +409,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas.
   // srcEl permite dibujar desde otro elemento de video (el del export aislado).
-  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement, fadeAlpha = 0) => {
+  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement, fadeAlpha = 0, subTime?: number) => {
     const canvas = canvasRef.current;
     const v = srcEl || videoRef.current;
     if (!canvas || !v) return;
@@ -442,8 +442,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       logoRectRef.current = null;
     }
 
-    // Subtítulo activo (con estilo elegido)
-    const active = subtitles.find(s => t >= s.start && t <= s.end);
+    // Subtítulo activo — se compara con el tiempo GLOBAL del reel (subTime), no el del clip
+    const stT = subTime != null ? subTime : t;
+    const active = subtitles.find(s => stT >= s.start && stT <= s.end);
     if (active && active.text.trim()) {
       const st = SUB_STYLES[subStyle] || SUB_STYLES.capcut;
       const fontSize = Math.round(st.size * subScale);
@@ -473,7 +474,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       // Animación: palabra "actual" según el avance dentro del subtítulo
       const N = allWords.length;
       const dur = Math.max(0.001, active.end - active.start);
-      const prog = Math.max(0, Math.min(1, (t - active.start) / dur));
+      const prog = Math.max(0, Math.min(1, (stT - active.start) / dur));
       const curWord = Math.min(N - 1, Math.floor(prog * N));
       const spaceW = ctx.measureText(' ').width;
 
@@ -592,6 +593,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setPlaying(true);
     v.muted = videoVolume === 0; v.volume = videoVolume;
     playBeds(0); // música/voz desde el inicio del reel
+    let gOff = 0; // tiempo global acumulado de los clips ya reproducidos
+    for (let i = 0; i < startIdx; i++) gOff += Math.max(0, clipsRef.current[i].trimEnd - clipsRef.current[i].trimStart);
     for (let i = startIdx; i < clipsRef.current.length; i++) {
       if (stopRef.current) break;
       const c = clipsRef.current[i];
@@ -608,12 +611,13 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           if (stopRef.current || !videoRef.current) { try { v.pause(); } catch {} return resolve(); }
           setCurrentTime(v.currentTime);
           const fade = fadeAt(i > 0, i < clipsRef.current.length - 1, v.currentTime - c.trimStart, c.trimEnd - v.currentTime);
-          drawFrame(v.currentTime, undefined, fade);
+          drawFrame(v.currentTime, undefined, fade, gOff + Math.max(0, v.currentTime - c.trimStart)); // subTime = tiempo global del reel
           if (v.currentTime >= c.trimEnd - 0.02 || v.ended) { try { v.pause(); } catch {} return resolve(); }
           rafRef.current = requestAnimationFrame(step);
         };
         rafRef.current = requestAnimationFrame(step);
       });
+      gOff += Math.max(0, c.trimEnd - c.trimStart);
     }
     pauseBeds();
     stopRef.current = false;
@@ -627,7 +631,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (playing || !videoUrl) return;
     const c = activeClip;
     const fade = c ? fadeAt(activeIdx > 0, activeIdx < clips.length - 1, currentTime - c.trimStart, c.trimEnd - currentTime) : 0;
-    drawFrame(currentTime, undefined, fade);
+    drawFrame(currentTime, undefined, fade, globalTime()); // subTime global para que el subtítulo coincida
   }, [drawFrame, playing, videoUrl, currentTime, transition, transDur]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Carga la fuente elegida (sino el canvas la ignora) y redibuja al estar lista
@@ -1002,7 +1006,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         const srcT = Math.min(r.start + f / FPS, Math.max(r.start, r.end - 0.001));
         await seekTo(srcT);
         const fade = fadeAt(ri > 0, ri < ranges.length - 1, srcT - r.start, r.end - srcT);
-        drawFrame(exV.currentTime, exV, fade);
+        drawFrame(exV.currentTime, exV, fade, outBase + (srcT - r.start)); // subTime global para subtítulos
         const vf = new VF(canvas, { timestamp: Math.round(frameIndex * frameDurUs), duration: Math.round(frameDurUs) });
         venc.encode(vf, { keyFrame: frameIndex % (FPS * 2) === 0 });
         vf.close();
@@ -1154,7 +1158,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           await new Promise<void>((resolve) => {
             let lastUi = 0;
             const step = () => {
-              drawFrame(exV.currentTime, exV, fadeAt(ri > 0, ri < ranges.length - 1, exV.currentTime - range.start, range.end - exV.currentTime));
+              drawFrame(exV.currentTime, exV, fadeAt(ri > 0, ri < ranges.length - 1, exV.currentTime - range.start, range.end - exV.currentTime), elapsedBefore + Math.max(0, exV.currentTime - range.start));
               const now = performance.now();
               if (now - lastUi > 250) {
                 lastUi = now;
@@ -1243,9 +1247,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             </label>
           </div>
         ) : (
-          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 flex flex-col gap-5 lg:grid lg:gap-5 lg:items-start lg:[grid-template-columns:minmax(0,1fr)_360px]">
-            {/* Player (arriba-izquierda) */}
-            <div className="space-y-4 min-w-0 lg:[grid-column:1] lg:[grid-row:1]">
+          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 flex flex-col lg:flex-row gap-5 lg:items-start">
+            {/* Columna izquierda: player + timeline (juntos, sin huecos) */}
+            <div className="flex-1 min-w-0 space-y-5">
+            {/* Player */}
+            <div className="space-y-4 min-w-0">
               <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
                 <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${(logoEnabled || subtitles.length) ? 'cursor-move' : ''}`} />
                 <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
@@ -1260,7 +1266,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             </div>
 
             {/* Línea de tiempo (debajo del video) */}
-            <div className="space-y-2 min-w-0 lg:[grid-column:1] lg:[grid-row:2]">
+            <div className="space-y-2 min-w-0">
               {/* Clips */}
               <div className="space-y-2">
                 <span className={labelClass}>Clips ({clips.length})</span>
@@ -1407,9 +1413,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 )}
               </div>
             </div>
+            </div>
 
-            {/* Opciones (a la derecha, alto completo) */}
-            <div className="space-y-3 lg:[grid-column:2] lg:[grid-row:1/3]">
+            {/* Opciones (a la derecha) — scrollean solas, no empujan la timeline */}
+            <div className="space-y-3 lg:w-[360px] shrink-0 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1">
               {/* Audio del video */}
               <Accordion title="Audio del video" icon="fa-volume-high" open={!!openSec.audiovideo} onToggle={() => toggleSec('audiovideo')} badge={videoVolume === 0 ? 'Silenciado' : undefined}>
                 <div className="flex items-center justify-end">
