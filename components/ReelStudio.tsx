@@ -409,7 +409,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
   // Dibuja un frame (video + logo + subtítulo activo) en el canvas.
   // srcEl permite dibujar desde otro elemento de video (el del export aislado).
-  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement, fadeAlpha = 0, subTime?: number) => {
+  const drawFrame = useCallback((t: number, srcEl?: HTMLVideoElement, fadeAlpha = 0, subTime?: number, editPreview = false) => {
     const canvas = canvasRef.current;
     const v = srcEl || videoRef.current;
     if (!canvas || !v) return;
@@ -444,7 +444,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
     // Subtítulo activo — se compara con el tiempo GLOBAL del reel (subTime), no el del clip
     const stT = subTime != null ? subTime : t;
-    const active = subtitles.find(s => stT >= s.start && stT <= s.end);
+    let active = subtitles.find(s => stT >= s.start && stT <= s.end);
+    // Editando (pausado): si no hay ninguno en ese instante, mostrar el más cercano para poder verlo/moverlo
+    if (!active && editPreview && subtitles.length) {
+      active = [...subtitles].sort((a, b) => Math.abs(stT - (a.start + a.end) / 2) - Math.abs(stT - (b.start + b.end) / 2))[0];
+    }
     if (active && active.text.trim()) {
       const st = SUB_STYLES[subStyle] || SUB_STYLES.capcut;
       const fontSize = Math.round(st.size * subScale);
@@ -631,7 +635,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (playing || !videoUrl) return;
     const c = activeClip;
     const fade = c ? fadeAt(activeIdx > 0, activeIdx < clips.length - 1, currentTime - c.trimStart, c.trimEnd - currentTime) : 0;
-    drawFrame(currentTime, undefined, fade, globalTime()); // subTime global para que el subtítulo coincida
+    drawFrame(currentTime, undefined, fade, globalTime(), true); // pausado/editando: muestra el subtítulo más cercano
   }, [drawFrame, playing, videoUrl, currentTime, transition, transDur]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Carga la fuente elegida (sino el canvas la ignora) y redibuja al estar lista
