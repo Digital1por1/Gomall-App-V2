@@ -189,6 +189,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   const logoRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null); // bounds del logo en el canvas
   const logoDragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [subPos, setSubPos] = useState<{ x: number; y: number } | null>(null); // posición manual de los subtítulos (% del canvas); null = la del estilo
+  const subRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const subDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const rafRef = useRef<number | null>(null);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   // Elementos de audio del PREVIEW (siempre nativos, nunca pasan por WebAudio).
@@ -463,7 +466,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
       const lineH = fontSize * 1.25;
       const blockH = lineObjs.length * lineH;
-      const baseY = CANVAS_H * st.y - blockH / 2;
+      const cx = CANVAS_W * ((subPos?.x ?? 50) / 100);            // centro horizontal (arrastrable)
+      const baseY = CANVAS_H * (subPos?.y ?? st.y) - blockH / 2;   // posición vertical (arrastrable o del estilo)
+      let maxLineW = 0;
 
       // Animación: palabra "actual" según el avance dentro del subtítulo
       const N = allWords.length;
@@ -479,14 +484,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         if (!visible.length) return;
         const widths = visible.map(x => ctx.measureText(x.w).width);
         const totalW = widths.reduce((a, b) => a + b, 0) + spaceW * (visible.length - 1);
+        if (totalW > maxLineW) maxLineW = totalW;
         // Caja de fondo
         if (st.box) {
           ctx.fillStyle = 'rgba(0,0,0,0.62)';
-          ctx.fillRect((CANVAS_W - totalW) / 2 - 28, y - lineH / 2, totalW + 56, lineH);
+          ctx.fillRect(cx - totalW / 2 - 28, y - lineH / 2, totalW + 56, lineH);
         }
-        // Dibuja palabra por palabra (alineado a la izquierda dentro de la línea centrada)
+        // Dibuja palabra por palabra (alineado a la izquierda dentro de la línea centrada en cx)
         ctx.textAlign = 'left';
-        let x = (CANVAS_W - totalW) / 2;
+        let x = cx - totalW / 2;
         visible.forEach((word, k) => {
           const isCur = subAnim !== 'none' && word.gi === curWord;
           const ww = widths[k];
@@ -502,6 +508,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       });
       ctx.textAlign = 'center';
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      // Bounds del bloque de subtítulos (para poder arrastrarlo)
+      subRectRef.current = { x: cx - maxLineW / 2 - 28, y: baseY - lineH * 0.5, w: maxLineW + 56, h: blockH + lineH };
+    } else {
+      subRectRef.current = null;
     }
 
     // Transición entre clips: velo (negro o blanco) sobre todo el frame
@@ -510,28 +520,40 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       ctx.fillStyle = `rgba(${rgb},${Math.min(1, fadeAlpha)})`;
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
     }
-  }, [logoEnabled, logoPos, logoSize, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent, transition]);
+  }, [logoEnabled, logoPos, logoSize, subPos, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent, transition]);
 
-  // Arrastrar el logo sobre el preview
+  // Arrastrar logo o subtítulos sobre el preview
   const canvasPt = (e: React.PointerEvent) => {
     const c = canvasRef.current!; const r = c.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width * CANVAS_W, y: (e.clientY - r.top) / r.height * CANVAS_H };
   };
+  const inRect = (p: { x: number; y: number }, rc: { x: number; y: number; w: number; h: number } | null) => !!rc && p.x >= rc.x && p.x <= rc.x + rc.w && p.y >= rc.y && p.y <= rc.y + rc.h;
   const onCanvasPointerDown = (e: React.PointerEvent) => {
-    if (!logoEnabled || !logoRectRef.current) return;
-    const p = canvasPt(e); const lr = logoRectRef.current;
-    if (p.x >= lr.x && p.x <= lr.x + lr.w && p.y >= lr.y && p.y <= lr.y + lr.h) {
+    const p = canvasPt(e);
+    // Logo primero (suele estar arriba); luego subtítulos
+    if (logoEnabled && inRect(p, logoRectRef.current)) {
+      const lr = logoRectRef.current!;
       logoDragRef.current = { dx: p.x - (lr.x + lr.w / 2), dy: p.y - (lr.y + lr.h / 2) };
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+      return;
+    }
+    if (inRect(p, subRectRef.current)) {
+      const sr = subRectRef.current!;
+      subDragRef.current = { dx: p.x - (sr.x + sr.w / 2), dy: p.y - (sr.y + sr.h / 2) };
       try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     }
   };
   const onCanvasPointerMove = (e: React.PointerEvent) => {
-    if (!logoDragRef.current) return;
     const p = canvasPt(e);
-    const cx = p.x - logoDragRef.current.dx, cy = p.y - logoDragRef.current.dy;
-    setLogoPos({ x: Math.max(0, Math.min(100, cx / CANVAS_W * 100)), y: Math.max(0, Math.min(100, cy / CANVAS_H * 100)) });
+    if (logoDragRef.current) {
+      const cx = p.x - logoDragRef.current.dx, cy = p.y - logoDragRef.current.dy;
+      setLogoPos({ x: Math.max(0, Math.min(100, cx / CANVAS_W * 100)), y: Math.max(0, Math.min(100, cy / CANVAS_H * 100)) });
+    } else if (subDragRef.current) {
+      const cx = p.x - subDragRef.current.dx, cy = p.y - subDragRef.current.dy;
+      setSubPos({ x: Math.max(2, Math.min(98, cx / CANVAS_W * 100)), y: Math.max(4, Math.min(96, cy / CANVAS_H * 100)) });
+    }
   };
-  const onCanvasPointerUp = () => { logoDragRef.current = null; };
+  const onCanvasPointerUp = () => { logoDragRef.current = null; subDragRef.current = null; };
 
   // Ref espejo para que el loop lea los clips actuales sin recrearse
   const clipsRef = useRef(clips); clipsRef.current = clips;
@@ -1225,7 +1247,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             {/* Player (arriba-izquierda) */}
             <div className="space-y-4 min-w-0 lg:[grid-column:1] lg:[grid-row:1]">
               <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
-                <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${logoEnabled ? 'cursor-move' : ''}`} />
+                <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${(logoEnabled || subtitles.length) ? 'cursor-move' : ''}`} />
                 <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
               <div className="flex items-center gap-3">
@@ -1486,6 +1508,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <button onClick={addSubtitle} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all">+ En {fmt(currentTime)}</button>
                   {subtitles.length > 0 && <button onClick={() => { if (confirm('¿Borrar todos los subtítulos?')) setSubtitles([]); }} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all" title="Borrar todos los subtítulos"><i className="fa-solid fa-trash mr-1"></i>Borrar</button>}
                 </div>
+                {subtitles.length > 0 && (
+                  <p className="text-[9px] text-slate-300 font-bold">Arrastrá el subtítulo en el preview para reubicarlo.{subPos && <button onClick={() => setSubPos(null)} className="ml-1 text-purple-500 hover:underline">Volver a la posición del estilo</button>}</p>
+                )}
 
                 {/* Auto-subtítulos con IA */}
                 <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 disabled:opacity-50 transition-all">
