@@ -127,8 +127,9 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
       await updateUsage(4000);
       recordUsage('campana', data.usage);
       setActiveCampaign(campaign);
-      setIsSaved(false);
       setView('result');
+      // Auto-guardar: la campaña queda en la lista aunque vayas directo al editor
+      persistCampaign(campaign).then((saved) => { setActiveCampaign(saved); setIsSaved(true); }).catch(() => setIsSaved(false));
     } catch (e: any) {
       alert(e?.message || 'No se pudo generar la campaña. Intenta de nuevo.');
     } finally {
@@ -136,19 +137,24 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
     }
   };
 
+  // Persiste una campaña (sube la foto del producto a Storage y hace upsert en Firestore)
+  const persistCampaign = async (camp: Campaign): Promise<Campaign> => {
+    let toSave = camp;
+    if (camp.productImage && camp.productImage.startsWith('data:')) {
+      const url = await persistImage(camp.productImage, 'campanas');
+      toSave = { ...camp, productImage: url || undefined };
+    }
+    const updated = [toSave, ...savedCampaigns.filter(c => c.id !== toSave.id)];
+    await firebase.firestore().collection('profiles').doc(userId).update({ campaigns: updated });
+    return toSave;
+  };
+
   const handleSaveCampaign = async () => {
     if (!activeCampaign) return;
     setSaving(true);
     try {
-      // Sube la foto del producto a Storage (no guardar base64 pesado en Firestore)
-      let toSave = activeCampaign;
-      if (activeCampaign.productImage && activeCampaign.productImage.startsWith('data:')) {
-        const url = await persistImage(activeCampaign.productImage, 'campanas');
-        toSave = { ...activeCampaign, productImage: url || undefined };
-        setActiveCampaign(toSave);
-      }
-      const updated = [toSave, ...savedCampaigns.filter(c => c.id !== toSave.id)];
-      await firebase.firestore().collection('profiles').doc(userId).update({ campaigns: updated });
+      const saved = await persistCampaign(activeCampaign);
+      setActiveCampaign(saved);
       setIsSaved(true);
     } catch {
       alert('No se pudo guardar la campaña.');
@@ -183,7 +189,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   const labelClass = "text-[10px] font-black text-slate-400 uppercase tracking-widest px-1";
 
   return (
-    <div className="fixed inset-0 z-[90] bg-[#F8F9FA] flex flex-col animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[100] bg-[#F8F9FA] flex flex-col animate-in fade-in duration-300">
       {/* Header */}
       <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
