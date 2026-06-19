@@ -27,9 +27,10 @@ interface CampaignStudioProps {
   userId: string;
   onClose: () => void;
   updateUsage: (tokens: number) => Promise<void>;
-  onUsePiece: (piece: CampaignPiece, campaignId?: string, productImage?: string) => void;
+  onUsePiece: (piece: CampaignPiece, campaignId?: string, productImage?: string, campaign?: Campaign) => void;
   initialBrief?: { keyMessage?: string; dates?: string } | null;
   openCampaignId?: string | null;
+  restoreCampaign?: Campaign | null; // borrador en memoria para reabrir al volver del editor (sin guardar)
 }
 
 const OBJECTIVES = ['Vender', 'Lanzar producto', 'Dar a conocer la marca', 'Promoción u oferta', 'Evento', 'Fidelizar clientes'];
@@ -37,7 +38,7 @@ const PLATFORMS = ['Feed / Stories', 'Reels'];
 
 type View = 'list' | 'brief' | 'result';
 
-const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece, initialBrief, openCampaignId }) => {
+const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClose, updateUsage, onUsePiece, initialBrief, openCampaignId, restoreCampaign }) => {
   const [view, setView] = useState<View>(initialBrief ? 'brief' : 'list');
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,14 +57,19 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
 
   const savedCampaigns = profile?.campaigns || [];
 
-  // Si llega un id de campaña (volver desde el editor), saltar directo a su resultado
+  // Al abrir/volver: si hay una campaña guardada por id, abrirla; si no, restaurar el borrador en memoria
   useEffect(() => {
     if (openCampaignId) {
       const c = savedCampaigns.find(x => x.id === openCampaignId);
-      if (c) { setActiveCampaign(c); setIsSaved(true); setView('result'); }
+      if (c) { setActiveCampaign(c); setIsSaved(true); setView('result'); return; }
+    }
+    if (restoreCampaign) {
+      setActiveCampaign(restoreCampaign);
+      setIsSaved(savedCampaigns.some(x => x.id === restoreCampaign.id));
+      setView('result');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openCampaignId]);
+  }, [openCampaignId, restoreCampaign]);
 
   const resetBrief = () => {
     setObjective(''); setProduct(''); setBriefImages([]); setAudience(''); setDates('');
@@ -127,9 +133,8 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
       await updateUsage(4000);
       recordUsage('campana', data.usage);
       setActiveCampaign(campaign);
+      setIsSaved(false);
       setView('result');
-      // Auto-guardar: la campaña queda en la lista aunque vayas directo al editor
-      persistCampaign(campaign).then((saved) => { setActiveCampaign(saved); setIsSaved(true); }).catch(() => setIsSaved(false));
     } catch (e: any) {
       alert(e?.message || 'No se pudo generar la campaña. Intenta de nuevo.');
     } finally {
@@ -362,7 +367,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => { navigator.clipboard?.writeText(piece.copy); }} className="flex-1 py-2.5 bg-slate-50 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100"><i className="fa-solid fa-copy mr-1.5"></i>Copiar texto</button>
                         {(piece.type === 'imagen' || piece.type === 'reel') && (
-                          <button onClick={() => onUsePiece(piece, activeCampaign.id, activeCampaign.productImage)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
+                          <button onClick={() => onUsePiece(piece, activeCampaign.id, activeCampaign.productImage, activeCampaign)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
                         )}
                       </div>
                     </div>

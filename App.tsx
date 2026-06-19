@@ -15,7 +15,7 @@ import Home from './components/Home';
 import Landing from './components/Landing';
 import { persistImage } from './components/storage';
 import * as htmlToImage from 'html-to-image';
-import { CampaignPiece } from './types';
+import { CampaignPiece, Campaign } from './types';
 
 const ADMIN_EMAILS = ['digital@1por1.com.ar'];
 
@@ -140,6 +140,8 @@ const App: React.FC = () => {
   const [returnCampaignId, setReturnCampaignId] = useState<string | null>(null);
   const [showCampaigns, setShowCampaigns] = useState(false);
   const [openCampaignId, setOpenCampaignId] = useState<string | null>(null);
+  const [campaignDraft, setCampaignDraft] = useState<Campaign | null>(null); // campaña en memoria (sin guardar) para reabrir al volver del editor
+  const [resumeDraft, setResumeDraft] = useState(false); // true solo al "Volver a la campaña" desde el editor
   const [campaignInitial, setCampaignInitial] = useState<{ keyMessage?: string; dates?: string } | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showBrand, setShowBrand] = useState(false);
@@ -610,7 +612,10 @@ const App: React.FC = () => {
     return await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(blob); });
   };
 
-  const handleUsePiece = async (piece: CampaignPiece, campaignId?: string, productImage?: string) => {
+  const handleUsePiece = async (piece: CampaignPiece, campaignId?: string, productImage?: string, campaign?: Campaign) => {
+    // Recordar la campaña en memoria para poder volver a ella (sin guardarla)
+    if (campaign) setCampaignDraft(campaign);
+    setReturnCampaignId(campaignId || null);
     // Las piezas de reel van al editor de video
     if (piece.type === 'reel') {
       setReelCopy(piece.copy || null);
@@ -1117,11 +1122,12 @@ const App: React.FC = () => {
         <CampaignStudio
           profile={profile}
           userId={user.uid}
-          onClose={() => { setShowCampaigns(false); setCampaignInitial(null); setOpenCampaignId(null); }}
+          onClose={() => { setShowCampaigns(false); setCampaignInitial(null); setOpenCampaignId(null); setResumeDraft(false); }}
           updateUsage={updateUsage}
           onUsePiece={handleUsePiece}
           initialBrief={campaignInitial}
           openCampaignId={openCampaignId}
+          restoreCampaign={resumeDraft ? campaignDraft : null}
         />
       )}
       {showCalendar && user && (
@@ -1214,7 +1220,7 @@ const App: React.FC = () => {
             <i className="fa-solid fa-house text-base"></i>
           </button>
           {returnCampaignId && (
-            <button onClick={() => { setOpenCampaignId(returnCampaignId); setCampaignInitial(null); setShowCampaigns(true); }} title="Volver a la campaña" className="h-10 px-3 flex items-center gap-2 bg-orange-50 text-[#EA5B25] rounded-xl border border-orange-100 hover:bg-orange-100 transition-all active:scale-95 shrink-0 text-[10px] font-black uppercase tracking-widest">
+            <button onClick={() => { setOpenCampaignId(null); setCampaignInitial(null); setResumeDraft(true); setShowCampaigns(true); }} title="Volver a la campaña" className="h-10 px-3 flex items-center gap-2 bg-orange-50 text-[#EA5B25] rounded-xl border border-orange-100 hover:bg-orange-100 transition-all active:scale-95 shrink-0 text-[10px] font-black uppercase tracking-widest">
               <i className="fa-solid fa-arrow-left"></i><span className="hidden sm:inline">Campaña</span>
             </button>
           )}
