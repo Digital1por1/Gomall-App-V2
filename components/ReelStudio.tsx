@@ -281,6 +281,16 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const clipW = (c: Clip) => Math.max(12, ((c.trimEnd || 0) - (c.trimStart || 0)) * TL_PX);
   const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + clipW(c), 0);
   const timelineW = () => Math.max(40, clips.reduce((a, c) => a + clipW(c), 0));
+  // Ajusta el zoom para que TODOS los clips entren en el ancho visible de la timeline
+  const fitTimelineZoom = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const total = clips.reduce((a, c) => a + Math.max(0, (c.trimEnd || 0) - (c.trimStart || 0)), 0);
+    const avail = el.clientWidth - 24; // descuenta el padding (p-3)
+    if (total <= 0 || avail <= 0) return;
+    const z = Math.max(0.12, Math.min(2, (avail / total) / 60));
+    setTlZoom(+z.toFixed(3));
+  }, [clips]);
   const onTrackPointerMove = (e: React.PointerEvent) => {
     const d = draggingRef.current;
     if (!d) return;
@@ -672,6 +682,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   // Cancela el loop al desmontar
   useEffect(() => () => { stopRef.current = true; if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  // Auto-ajusta el zoom de la timeline para que entren todos los clips (al abrirla o cambiar los clips)
+  useEffect(() => {
+    if (!showAdvanced) return;
+    const id = requestAnimationFrame(fitTimelineZoom);
+    window.addEventListener('resize', fitTimelineZoom);
+    return () => { cancelAnimationFrame(id); window.removeEventListener('resize', fitTimelineZoom); };
+  }, [showAdvanced, fitTimelineZoom]);
 
   // Redibuja al cambiar overlays mientras está pausado
   useEffect(() => {
@@ -1407,7 +1425,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     {/* Zoom de la timeline */}
                     <div className="flex items-center bg-slate-100 rounded-lg">
                       <button onClick={() => setTlZoom(z => Math.max(0.25, +(z - 0.25).toFixed(2)))} className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800" title="Alejar"><i className="fa-solid fa-magnifying-glass-minus text-xs"></i></button>
-                      <button onClick={() => setTlZoom(1)} className="px-1.5 text-[9px] font-black text-slate-500 tabular-nums" title="Zoom 100%">{Math.round(tlZoom * 100)}%</button>
+                      <button onClick={fitTimelineZoom} className="px-1.5 text-[9px] font-black text-slate-500 tabular-nums hover:text-purple-600" title="Ajustar todos los clips a la pantalla">{Math.round(tlZoom * 100)}%</button>
                       <button onClick={() => setTlZoom(z => Math.min(4, +(z + 0.25).toFixed(2)))} className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800" title="Acercar"><i className="fa-solid fa-magnifying-glass-plus text-xs"></i></button>
                     </div>
                     <button onClick={splitActive} className="px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all"><i className="fa-solid fa-scissors mr-1.5"></i>Dividir acá</button>
