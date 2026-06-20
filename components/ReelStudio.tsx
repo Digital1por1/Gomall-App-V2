@@ -182,6 +182,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [beatSync, setBeatSync] = useState(false); // cortar al ritmo de la música
   const [beats, setBeats] = useState<number[]>([]); // tiempos (s) de los beats detectados en la música
   const [showAdvanced, setShowAdvanced] = useState(false); // mostrar la timeline manual (ajuste avanzado)
+  const [showAuto, setShowAuto] = useState(true); // card de compaginado automático abierta/colapsada
   const [transDur, setTransDur] = useState(0.5); // duración total de la transición (s)
 
   const [exporting, setExporting] = useState(false);
@@ -807,6 +808,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     window.addEventListener('resize', fitTimelineZoom);
     return () => { cancelAnimationFrame(id); window.removeEventListener('resize', fitTimelineZoom); };
   }, [showAdvanced, fitTimelineZoom]);
+
+  // Al cambiar de clip (o montar con clips): espera a que el video tenga frame y lo pinta (evita el negro inicial)
+  useEffect(() => {
+    if (playing || !videoUrl) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const draw = () => { if (!playing && v.videoWidth) drawFrame(v.currentTime, undefined, 0, globalTime(), true); };
+    if (v.readyState >= 2 && v.videoWidth) { draw(); return; }
+    v.addEventListener('loadeddata', draw); v.addEventListener('canplay', draw);
+    return () => { v.removeEventListener('loadeddata', draw); v.removeEventListener('canplay', draw); };
+  }, [videoUrl, activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redibuja al cambiar overlays mientras está pausado
   useEffect(() => {
@@ -1442,7 +1454,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             <div className="space-y-4 min-w-0">
               <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
                 <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${(logoEnabled || subtitles.length) ? 'cursor-move' : ''}`} />
-                <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} onLoadedData={onVideoReady} onSeeked={onVideoReady} className="hidden" playsInline crossOrigin="anonymous" />
+                <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} onLoadedData={onVideoReady} onCanPlay={onVideoReady} onSeeked={onVideoReady} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={togglePlay} className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-all shrink-0">
@@ -1501,10 +1513,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
               {/* Compaginado automático */}
               <div className="rounded-2xl border border-purple-100 bg-purple-50/40 p-3.5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <i className="fa-solid fa-wand-magic-sparkles text-purple-500"></i>
-                  <span className="text-[11px] font-black text-slate-700 uppercase tracking-widest">Compaginar automático</span>
-                </div>
+                <button onClick={() => setShowAuto(v => !v)} className="flex items-center justify-between w-full">
+                  <span className="flex items-center gap-2">
+                    <i className="fa-solid fa-wand-magic-sparkles text-purple-500"></i>
+                    <span className="text-[11px] font-black text-slate-700 uppercase tracking-widest">Compaginar automático</span>
+                  </span>
+                  <i className={`fa-solid fa-chevron-${showAuto ? 'up' : 'down'} text-[10px] text-slate-400`}></i>
+                </button>
+                {showAuto && (<>
                 <div className="space-y-1.5">
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Duración del reel</span>
                   <div className="flex flex-wrap gap-1.5">
@@ -1546,6 +1562,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 )}
                 <button onClick={autoCompaginate} className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 transition-all"><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Compaginar automático</button>
                 <p className="text-[9px] text-slate-400 font-bold leading-relaxed">Une tus clips en orden y los ajusta a la duración elegida. Después agregale música, voz y subtítulos.</p>
+                </>)}
               </div>
 
               {/* Ajuste avanzado: timeline manual (colapsada) */}
