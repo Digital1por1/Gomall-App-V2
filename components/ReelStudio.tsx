@@ -204,6 +204,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<{ clipId: string; edge: 'start' | 'end'; startX: number; origStart: number; origEnd: number } | null>(null);
   const [clipPeaks, setClipPeaks] = useState<Record<string, number[]>>({}); // onda de audio por clip
+  const [clipThumbs, setClipThumbs] = useState<Record<string, string>>({}); // miniatura (dataURL) por clip
   const peaksBusyRef = useRef<Set<string>>(new Set());
   const scrubRef = useRef(false);              // true mientras se arrastra el cabezal
   const pendingSeekRef = useRef<number | null>(null); // seek a aplicar tras cambiar de clip
@@ -402,6 +403,35 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         setClips(prev => prev.map(x => (x.id === c.id && x.duration === 0) ? { ...x, duration: d, trimStart: 0, trimEnd: d } : x));
         el.removeAttribute('src'); try { el.load(); } catch {}
       };
+    });
+    return () => { cancelled = true; };
+  }, [clipIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Genera una miniatura (frame representativo) de cada clip para la timeline
+  useEffect(() => {
+    let cancelled = false;
+    clips.forEach(c => {
+      if (clipThumbs[c.id] !== undefined) return;
+      const el = document.createElement('video');
+      el.preload = 'metadata'; el.muted = true; (el as any).playsInline = true; el.crossOrigin = 'anonymous'; el.src = c.url;
+      const grab = () => {
+        if (cancelled) return;
+        try {
+          const vw = el.videoWidth || 90, vh = el.videoHeight || 160;
+          const cv = document.createElement('canvas');
+          cv.width = 96; cv.height = Math.max(1, Math.round(96 * vh / vw));
+          const ctx = cv.getContext('2d');
+          if (ctx) { ctx.drawImage(el, 0, 0, cv.width, cv.height); setClipThumbs(prev => ({ ...prev, [c.id]: cv.toDataURL('image/jpeg', 0.6) })); }
+        } catch { setClipThumbs(prev => ({ ...prev, [c.id]: '' })); } // CORS u otro → sin miniatura
+        el.removeAttribute('src'); try { el.load(); } catch {}
+      };
+      el.onloadeddata = () => {
+        const onSeeked = () => { el.removeEventListener('seeked', onSeeked); grab(); };
+        el.addEventListener('seeked', onSeeked);
+        const target = Math.max(0.05, Math.min((el.duration || 1) * 0.5, (el.duration || 1) - 0.1));
+        try { el.currentTime = target; } catch { el.removeEventListener('seeked', onSeeked); grab(); }
+      };
+      el.onerror = () => { if (!cancelled) setClipThumbs(prev => ({ ...prev, [c.id]: '' })); };
     });
     return () => { cancelled = true; };
   }, [clipIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1441,8 +1471,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                         const width = clipW(c);
                         return (
                           <div key={c.id} onClick={() => setActiveIdx(idx)} className={`absolute top-0 h-20 rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-yellow-300 ring-2 ring-yellow-300/60' : 'border-slate-700'}`} style={{ left: left + 2, width: Math.max(10, width - 4) }}>
-                            <div className="absolute inset-0 bg-purple-600/55" />
-                            <span className="absolute left-2.5 top-1.5 text-[9px] text-white font-black uppercase truncate max-w-[70%] pointer-events-none">Clip {idx + 1}</span>
+                            {clipThumbs[c.id] ? (
+                              <>
+                                <img src={clipThumbs[c.id]} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+                                <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/20" />
+                              </>
+                            ) : (
+                              <div className="absolute inset-0 bg-purple-600/55" />
+                            )}
+                            <span className="absolute left-2.5 top-1.5 text-[9px] text-white font-black uppercase truncate max-w-[70%] pointer-events-none drop-shadow">Clip {idx + 1}</span>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'start', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 left-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
                             <div onPointerDown={(e) => { e.stopPropagation(); draggingRef.current = { clipId: c.id, edge: 'end', startX: e.clientX, origStart: c.trimStart, origEnd: c.trimEnd }; setActiveIdx(idx); }} className="absolute top-0 bottom-0 right-0 w-2.5 bg-white cursor-ew-resize flex items-center justify-center z-10"><div className="w-0.5 h-5 bg-purple-600" /></div>
                             {idx === activeIdx && (
