@@ -177,6 +177,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [logoSize, setLogoSize] = useState(28); // % del ancho del canvas
   const [tlZoom, setTlZoom] = useState(1); // zoom de la línea de tiempo
   const [transition, setTransition] = useState<'none' | 'fade' | 'white'>('none'); // transición entre clips
+  const [reelDur, setReelDur] = useState<'auto' | 15 | 30 | 60>('auto'); // duración objetivo del compaginado
+  const [showAdvanced, setShowAdvanced] = useState(false); // mostrar la timeline manual (ajuste avanzado)
   const [transDur, setTransDur] = useState(0.5); // duración total de la transición (s)
 
   const [exporting, setExporting] = useState(false);
@@ -227,6 +229,34 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setExportedUrl(null);
   };
   const addClip = (file: File) => addClips([file]);
+
+  // Compaginado automático: une los clips en orden y los ajusta a la duración objetivo (recortando colas)
+  const autoCompaginate = () => {
+    setClips(prev => {
+      const ok = prev.filter(c => (c.duration || 0) > 0);
+      if (ok.length !== prev.length) { alert('Esperá un segundo a que se midan los videos y volvé a intentar.'); return prev; }
+      if (reelDur === 'auto') {
+        return prev.map(c => ({ ...c, trimStart: 0, trimEnd: c.duration }));
+      }
+      const T = reelDur as number;
+      const N = prev.length;
+      const share = T / N;
+      const targets = prev.map(c => Math.min(c.duration, share));
+      // Reparte el sobrante entre los clips que todavía tienen material
+      for (let iter = 0; iter < 4; iter++) {
+        const used = targets.reduce((a, b) => a + b, 0);
+        let leftover = T - used;
+        if (leftover < 0.05) break;
+        const expandable = prev.map((c, i) => (c.duration - targets[i] > 0.02 ? i : -1)).filter(i => i >= 0);
+        if (!expandable.length) break;
+        const add = leftover / expandable.length;
+        expandable.forEach(i => { const room = prev[i].duration - targets[i]; targets[i] += Math.min(add, room); });
+      }
+      return prev.map((c, i) => ({ ...c, trimStart: 0, trimEnd: Math.max(0.5, Math.min(c.duration, targets[i])) }));
+    });
+    setActiveIdx(0); setCurrentTime(0); setExportedUrl(null);
+  };
+
   const removeClip = (id: string) => {
     setClips(prev => {
       const next = prev.filter(c => c.id !== id);
@@ -1304,7 +1334,42 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 {clips.length > 1 && <p className="text-[9px] text-slate-300 font-bold">Arrastrá un clip de su ⠿ y soltalo sobre otro para cambiar el orden. Se exportan en ese orden.</p>}
               </div>
 
+              {/* Compaginado automático */}
+              <div className="rounded-2xl border border-purple-100 bg-purple-50/40 p-3.5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-wand-magic-sparkles text-purple-500"></i>
+                  <span className="text-[11px] font-black text-slate-700 uppercase tracking-widest">Compaginar automático</span>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Duración del reel</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([['auto', 'Auto'], [15, '15s'], [30, '30s'], [60, '60s']] as const).map(([v, l]) => (
+                      <button key={String(v)} onClick={() => setReelDur(v as any)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${reelDur === v ? 'bg-purple-600 text-white shadow-sm' : 'bg-white text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Transición entre clips</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {([['none', 'Corte'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco']] as const).map(([id, label]) => (
+                      <button key={id} onClick={() => setTransition(id)} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${transition === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-white text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{label}</button>
+                    ))}
+                    {transition !== 'none' && (
+                      <span className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 ml-1">{transDur.toFixed(1)}s<input type="range" min={0.2} max={1.2} step={0.1} value={transDur} onChange={(e) => setTransDur(Number(e.target.value))} className="w-16 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" /></span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={autoCompaginate} className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 transition-all"><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Compaginar automático</button>
+                <p className="text-[9px] text-slate-400 font-bold leading-relaxed">Une tus clips en orden y los ajusta a la duración elegida. Después agregale música, voz y subtítulos.</p>
+              </div>
+
+              {/* Ajuste avanzado: timeline manual (colapsada) */}
+              <button onClick={() => setShowAdvanced(a => !a)} className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors pt-1">
+                <i className={`fa-solid fa-chevron-${showAdvanced ? 'down' : 'right'} text-[8px]`}></i> Ajuste avanzado (línea de tiempo)
+              </button>
+
               {/* Línea de tiempo */}
+              {showAdvanced && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className={labelClass}>Línea de tiempo</span>
@@ -1416,6 +1481,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   </div>
                 )}
               </div>
+              )}
             </div>
             </div>
 
