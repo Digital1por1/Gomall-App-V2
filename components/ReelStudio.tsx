@@ -179,6 +179,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [transition, setTransition] = useState<'none' | 'fade' | 'white' | 'zoom' | 'slide'>('none'); // transición entre clips
   const [reelDur, setReelDur] = useState<'auto' | 15 | 30 | 60>('auto'); // duración objetivo del compaginado
   const [trimDead, setTrimDead] = useState(false); // quitar silencios (inicio/fin) al compaginar
+  const [beatSync, setBeatSync] = useState(false); // cortar al ritmo de la música
+  const [beats, setBeats] = useState<number[]>([]); // tiempos (s) de los beats detectados en la música
   const [showAdvanced, setShowAdvanced] = useState(false); // mostrar la timeline manual (ajuste avanzado)
   const [transDur, setTransDur] = useState(0.5); // duración total de la transición (s)
 
@@ -253,13 +255,34 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setClips(prev => {
       if (prev.some(c => (c.duration || 0) <= 0)) { alert('Esperá un segundo a que se midan los videos y volvé a intentar.'); return prev; }
       const bounds = prev.map(contentBounds);
+      const N = prev.length;
+      const avail = bounds.map(([s, e]) => e - s); // material disponible por clip (ya sin silencios)
+
+      // Beat-sync: cada corte (fin de clip) cae sobre un beat de la música
+      if (beatSync && musicUrl && beats.length) {
+        const T = reelDur === 'auto' ? avail.reduce((a, b) => a + b, 0) : (reelDur as number);
+        const share = T / N;
+        let cur = 0;
+        return prev.map((c, i) => {
+          let dur: number;
+          if (i === N - 1) dur = Math.max(0.5, Math.min(avail[i], T - cur));
+          else {
+            const ideal = cur + share;
+            const cand = beats.filter(b => b > cur + 0.4 && b <= cur + avail[i] + 0.01);
+            const snap = cand.length ? cand.reduce((bst, b) => Math.abs(b - ideal) < Math.abs(bst - ideal) ? b : bst, cand[0]) : ideal;
+            dur = Math.max(0.5, Math.min(avail[i], snap - cur));
+          }
+          const out = { ...c, trimStart: bounds[i][0], trimEnd: bounds[i][0] + dur };
+          cur += dur;
+          return out;
+        });
+      }
+
       if (reelDur === 'auto') {
         return prev.map((c, i) => ({ ...c, trimStart: bounds[i][0], trimEnd: bounds[i][1] }));
       }
       const T = reelDur as number;
-      const N = prev.length;
       const share = T / N;
-      const avail = bounds.map(([s, e]) => e - s); // material disponible por clip (ya sin silencios)
       const targets = avail.map(a => Math.min(a, share));
       // Reparte el sobrante entre los clips que todavía tienen material
       for (let iter = 0; iter < 4; iter++) {
@@ -467,12 +490,44 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setClips(prev => { const next = [...prev]; next.splice(activeIdx, 1, a, b); return next; });
   };
 
+  // Detecta los beats (onsets de energía) de una pista para poder cortar al ritmo
+  const detectBeats = async (url: string): Promise<number[]> => {
+    try {
+      const actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ab = await fetch(url).then(r => r.arrayBuffer());
+      const buf = await actx.decodeAudioData(ab.slice(0));
+      try { actx.close(); } catch {}
+      const data = buf.getChannelData(0);
+      const sr = buf.sampleRate;
+      const hop = 512;
+      const nF = Math.floor(data.length / hop);
+      const energy = new Float32Array(nF);
+      for (let i = 0; i < nF; i++) { let s = 0; for (let j = 0; j < hop; j++) { const x = data[i * hop + j]; s += x * x; } energy[i] = Math.sqrt(s / hop); }
+      const flux = new Float32Array(nF);
+      for (let i = 1; i < nF; i++) flux[i] = Math.max(0, energy[i] - energy[i - 1]);
+      const win = 20, minGap = 0.28;
+      const out: number[] = []; let lastT = -Infinity;
+      for (let i = 1; i < nF - 1; i++) {
+        let sum = 0, cnt = 0;
+        for (let k = Math.max(0, i - win); k <= Math.min(nF - 1, i + win); k++) { sum += flux[k]; cnt++; }
+        const thr = (sum / cnt) * 1.5 + 1e-4;
+        if (flux[i] > thr && flux[i] >= flux[i - 1] && flux[i] >= flux[i + 1]) {
+          const t = (i * hop) / sr;
+          if (t - lastT >= minGap) { out.push(t); lastT = t; }
+        }
+      }
+      return out;
+    } catch { return []; }
+  };
+
   const handleMusicFile = (file: File) => {
     const url = URL.createObjectURL(file);
     musicElRef.current?.pause();
     musicElRef.current = null; // se recrea con la pista nueva
     setMusicUrl(url);
     setMusicName(file.name);
+    setBeats([]);
+    detectBeats(url).then(b => setBeats(b)); // calcula los beats en segundo plano
   };
 
   const onLoadedMetadata = () => {
@@ -1478,6 +1533,17 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <span className="text-[9px] text-slate-400 font-bold">Recorta el silencio del inicio y fin de cada clip</span>
                   </span>
                 </button>
+                {musicUrl && (
+                  <button onClick={() => setBeatSync(v => !v)} disabled={beats.length === 0} className={`flex items-center gap-2.5 w-full text-left ${beats.length === 0 ? 'opacity-50' : ''}`}>
+                    <span className={`relative w-9 h-5 rounded-full transition-all shrink-0 ${beatSync && beats.length ? 'bg-purple-600' : 'bg-slate-200'}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${beatSync && beats.length ? 'translate-x-4' : ''}`} />
+                    </span>
+                    <span className="flex flex-col">
+                      <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Cortar al ritmo de la música</span>
+                      <span className="text-[9px] text-slate-400 font-bold">{beats.length === 0 ? 'Analizando la música…' : `Los cortes caen en el beat (${beats.length} detectados)`}</span>
+                    </span>
+                  </button>
+                )}
                 <button onClick={autoCompaginate} className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 transition-all"><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Compaginar automático</button>
                 <p className="text-[9px] text-slate-400 font-bold leading-relaxed">Une tus clips en orden y los ajusta a la duración elegida. Después agregale música, voz y subtítulos.</p>
               </div>
@@ -1635,7 +1701,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
                       <button onClick={() => togglePreview('music', musicUrl)} className="w-7 h-7 shrink-0 rounded-full bg-purple-600 text-white flex items-center justify-center active:scale-95 transition-all" title="Escuchar"><i className={`fa-solid ${previewing === 'music' ? 'fa-pause' : 'fa-play'} text-[10px]`}></i></button>
                       <span className="flex-1 text-xs font-bold text-slate-600 truncate"><i className="fa-solid fa-music text-purple-500 mr-2"></i>{musicName}</span>
-                      <button onClick={() => { togglePreview('music', null); previewAudioRef.current?.pause(); musicElRef.current?.pause(); setMusicUrl(null); setMusicName(''); musicElRef.current = null; }} className="text-red-400 hover:text-red-600 text-xs shrink-0"><i className="fa-solid fa-xmark"></i></button>
+                      <button onClick={() => { togglePreview('music', null); previewAudioRef.current?.pause(); musicElRef.current?.pause(); setMusicUrl(null); setMusicName(''); musicElRef.current = null; setBeats([]); setBeatSync(false); }} className="text-red-400 hover:text-red-600 text-xs shrink-0"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <div className="flex items-center gap-2">
                       <i className="fa-solid fa-volume-low text-slate-300 text-xs"></i>
