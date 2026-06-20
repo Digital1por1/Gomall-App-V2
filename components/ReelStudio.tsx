@@ -276,6 +276,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     });
     setActiveIdx(to);
   };
+  const [dragIdx, setDragIdx] = useState<number | null>(null); // clip que se está arrastrando (chips)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null); // chip destino bajo el cursor
   const clipW = (c: Clip) => Math.max(12, ((c.trimEnd || 0) - (c.trimStart || 0)) * TL_PX);
   const clipLeftPx = (idx: number) => clips.slice(0, idx).reduce((a, c) => a + clipW(c), 0);
   const timelineW = () => Math.max(40, clips.reduce((a, c) => a + clipW(c), 0));
@@ -429,7 +431,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       v.currentTime = t;
       setCurrentTime(t);
       drawFrame(t);
+    } else if (!playing) {
+      // Primera carga del clip: posiciónate al inicio del tramo y pintá el frame (sino el visor queda en negro)
+      const want = activeClip?.trimStart || 0;
+      if (Math.abs((v.currentTime || 0) - want) > 0.05) v.currentTime = want; // dispara onSeeked → dibuja
+      else drawFrame(want, undefined, 0, globalTime(), true);
     }
+  };
+  // Cuando el frame del clip ya está decodificado / tras un seek: pintarlo (evita el negro inicial)
+  const onVideoReady = () => {
+    const v = videoRef.current;
+    if (!v || playing || pendingSeekRef.current != null) return;
+    drawFrame(v.currentTime, undefined, 0, globalTime(), true);
   };
 
   // Volúmenes del preview (nativos). El export aplica el volumen aparte, en su propio grafo.
@@ -695,6 +708,12 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   // Duración total del reel (suma de los tramos recortados) y posición global del cabezal
   const reelTotal = () => clips.reduce((a, c) => a + Math.max(0, (c.trimEnd || 0) - (c.trimStart || 0)), 0);
+  // Posiciones (en segundos del reel) donde hay un corte entre clips — para marcar la barra
+  const clipBoundaries = () => {
+    const out: number[] = []; let acc = 0;
+    for (let i = 0; i < clips.length - 1; i++) { acc += Math.max(0, (clips[i].trimEnd || 0) - (clips[i].trimStart || 0)); out.push(acc); }
+    return out;
+  };
   const globalTime = () => globalOffsetActive() + Math.max(0, currentTime - (activeClip?.trimStart || 0));
   // Mover el cabezal por tiempo GLOBAL del reel (la barra del reproductor)
   const seekGlobal = (t: number) => {
@@ -1288,13 +1307,18 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             <div className="space-y-4 min-w-0">
               <div className="relative bg-black rounded-3xl overflow-hidden mx-auto" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
                 <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp} className={`w-full h-full object-contain ${(logoEnabled || subtitles.length) ? 'cursor-move' : ''}`} />
-                <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} className="hidden" playsInline crossOrigin="anonymous" />
+                <video ref={videoRef} src={videoUrl} onLoadedMetadata={onLoadedMetadata} onLoadedData={onVideoReady} onSeeked={onVideoReady} className="hidden" playsInline crossOrigin="anonymous" />
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={togglePlay} className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-all shrink-0">
                   <i className={`fa-solid ${playing ? 'fa-pause' : 'fa-play'}`}></i>
                 </button>
-                <input type="range" min={0} max={reelTotal() || 0} step={0.05} value={globalTime()} onChange={(e) => seekGlobal(Number(e.target.value))} className="flex-1 h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                <div className="relative flex-1">
+                  <input type="range" min={0} max={reelTotal() || 0} step={0.05} value={globalTime()} onChange={(e) => seekGlobal(Number(e.target.value))} className="w-full h-1.5 accent-purple-600 bg-slate-100 rounded-full appearance-none cursor-pointer" />
+                  {reelTotal() > 0 && clipBoundaries().map((b, i) => (
+                    <div key={i} title={`Corte ${i + 1}`} className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-3.5 bg-white border border-purple-400 rounded-sm pointer-events-none shadow-sm" style={{ left: `${(b / reelTotal()) * 100}%` }} />
+                  ))}
+                </div>
                 <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">{fmt(globalTime())} / {fmt(reelTotal())}</span>
               </div>
             </div>
@@ -1306,8 +1330,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <span className={labelClass}>Clips ({clips.length})</span>
                 <div
                   className="flex gap-2 flex-wrap items-center"
+                  onPointerMove={(e) => {
+                    if (dragFromRef.current == null) return;
+                    const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('[data-clip-idx]') as HTMLElement | null;
+                    setDragOverIdx(el ? Number(el.dataset.clipIdx) : null);
+                  }}
                   onPointerUp={(e) => {
                     const from = dragFromRef.current; dragFromRef.current = null;
+                    setDragIdx(null); setDragOverIdx(null);
                     document.body.style.cursor = '';
                     if (from == null) return;
                     const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('[data-clip-idx]') as HTMLElement | null;
@@ -1319,9 +1349,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     <div
                       key={c.id}
                       data-clip-idx={i}
-                      className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}
+                      className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${i === dragIdx ? 'opacity-50 scale-95 border-purple-400 ring-2 ring-purple-300' : dragIdx != null && i === dragOverIdx ? 'border-purple-500 bg-purple-100 text-purple-700 scale-105' : i === activeIdx ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-100 bg-slate-50 text-slate-500'}`}
                     >
-                      <i className="fa-solid fa-grip-vertical text-slate-400 cursor-grab active:cursor-grabbing touch-none" title="Arrastrá para reordenar" onPointerDown={(e) => { e.preventDefault(); dragFromRef.current = i; document.body.style.cursor = 'grabbing'; }}></i>
+                      <i className="fa-solid fa-grip-vertical text-slate-400 cursor-grab active:cursor-grabbing touch-none" title="Arrastrá para reordenar" onPointerDown={(e) => { e.preventDefault(); dragFromRef.current = i; setDragIdx(i); document.body.style.cursor = 'grabbing'; }}></i>
                       <button onClick={() => setActiveIdx(i)}><i className="fa-solid fa-film mr-1"></i>Clip {i + 1}</button>
                       <button onClick={() => { if (clips.length === 1) { if (!confirm('¿Borrar el clip y empezar de nuevo?')) return; } removeClip(c.id); }} className="text-red-400 hover:text-red-600" title="Borrar clip"><i className="fa-solid fa-xmark"></i></button>
                     </div>
