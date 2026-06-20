@@ -176,7 +176,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [logoPos, setLogoPos] = useState({ x: 50, y: 10 }); // % del canvas (centro del logo)
   const [logoSize, setLogoSize] = useState(28); // % del ancho del canvas
   const [tlZoom, setTlZoom] = useState(1); // zoom de la línea de tiempo
-  const [transition, setTransition] = useState<'none' | 'fade' | 'white'>('none'); // transición entre clips
+  const [transition, setTransition] = useState<'none' | 'fade' | 'white' | 'zoom' | 'slide'>('none'); // transición entre clips
   const [reelDur, setReelDur] = useState<'auto' | 15 | 30 | 60>('auto'); // duración objetivo del compaginado
   const [trimDead, setTrimDead] = useState(false); // quitar silencios (inicio/fin) al compaginar
   const [showAdvanced, setShowAdvanced] = useState(false); // mostrar la timeline manual (ajuste avanzado)
@@ -528,7 +528,21 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     const dh = vh * scale;
     const dx = (CANVAS_W - dw) / 2;
     const dy = (CANVAS_H - dh) / 2;
+    // Transiciones con movimiento (zoom / slide): transforman el frame según el progreso (signo = dirección)
+    const tp = Math.abs(fadeAlpha);
+    const outgoing = fadeAlpha > 0;
+    const moveTrans = (transition === 'zoom' || transition === 'slide') && tp > 0.001;
+    ctx.save();
+    if (moveTrans) {
+      if (transition === 'zoom') {
+        const s = 1 + 0.25 * tp; // sale agrandándose y el siguiente entra desde grande hacia normal
+        ctx.translate(CANVAS_W / 2, CANVAS_H / 2); ctx.scale(s, s); ctx.translate(-CANVAS_W / 2, -CANVAS_H / 2);
+      } else {
+        ctx.translate(outgoing ? -CANVAS_W * tp : CANVAS_W * tp, 0); // sale a la izquierda / entra desde la derecha
+      }
+    }
     try { ctx.drawImage(v, dx, dy, dw, dh); } catch { /* frame no listo */ }
+    ctx.restore();
 
     // Logo de marca (posición y tamaño configurables, arrastrable)
     if (logoEnabled && logoImgRef.current) {
@@ -620,10 +634,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       subRectRef.current = null;
     }
 
-    // Transición entre clips: velo (negro o blanco) sobre todo el frame
-    if (fadeAlpha > 0) {
+    // Transición entre clips por velo (negro o blanco) sobre todo el frame
+    if ((transition === 'fade' || transition === 'white') && Math.abs(fadeAlpha) > 0) {
       const rgb = transition === 'white' ? '255,255,255' : '0,0,0';
-      ctx.fillStyle = `rgba(${rgb},${Math.min(1, fadeAlpha)})`;
+      ctx.fillStyle = `rgba(${rgb},${Math.min(1, Math.abs(fadeAlpha))})`;
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
     }
   }, [logoEnabled, logoPos, logoSize, subPos, subtitles, subColor, subFont, subStyle, subScale, subAnim, subAccent, transition]);
@@ -664,14 +678,14 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   // Ref espejo para que el loop lea los clips actuales sin recrearse
   const clipsRef = useRef(clips); clipsRef.current = clips;
 
-  // Opacidad del velo de transición según cercanía a un borde con clip adyacente
+  // Progreso de transición (0..1) según cercanía a un borde. Con SIGNO: +saliendo (cerca del final), -entrando (cerca del inicio).
   const fadeAt = (hasPrev: boolean, hasNext: boolean, fromStart: number, toEnd: number) => {
     if (transition === 'none' || transDur <= 0) return 0;
     const fl = transDur / 2;
-    let a = 0;
-    if (hasNext && toEnd < fl) a = Math.max(a, 1 - toEnd / fl);
-    if (hasPrev && fromStart < fl) a = Math.max(a, 1 - fromStart / fl);
-    return Math.max(0, Math.min(1, a));
+    const out = (hasNext && toEnd < fl) ? 1 - toEnd / fl : 0;
+    const inn = (hasPrev && fromStart < fl) ? 1 - fromStart / fl : 0;
+    if (out >= inn) return Math.max(0, Math.min(1, out));   // saliendo
+    return -Math.max(0, Math.min(1, inn));                  // entrando
   };
 
   // --- Reproducción en cadena SECUENCIAL (mismo enfoque robusto que el export) ---
@@ -1447,7 +1461,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                 <div className="space-y-1.5">
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Transición entre clips</span>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {([['none', 'Corte'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco']] as const).map(([id, label]) => (
+                    {([['none', 'Corte'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco'], ['zoom', 'Zoom'], ['slide', 'Deslizar']] as const).map(([id, label]) => (
                       <button key={id} onClick={() => setTransition(id)} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${transition === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-white text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{label}</button>
                     ))}
                     {transition !== 'none' && (
@@ -1580,7 +1594,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   <div className="space-y-1.5 pt-1">
                     <span className={labelClass}>Transición entre clips</span>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {([['none', 'Ninguna'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco']] as const).map(([id, label]) => (
+                      {([['none', 'Ninguna'], ['fade', 'Fundido negro'], ['white', 'Fundido blanco'], ['zoom', 'Zoom'], ['slide', 'Deslizar']] as const).map(([id, label]) => (
                         <button key={id} onClick={() => setTransition(id)} className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${transition === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:border-slate-200'}`}>{label}</button>
                       ))}
                       {transition !== 'none' && (
