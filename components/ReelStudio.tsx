@@ -178,6 +178,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [tlZoom, setTlZoom] = useState(1); // zoom de la línea de tiempo
   const [transition, setTransition] = useState<'none' | 'fade' | 'white'>('none'); // transición entre clips
   const [reelDur, setReelDur] = useState<'auto' | 15 | 30 | 60>('auto'); // duración objetivo del compaginado
+  const [trimDead, setTrimDead] = useState(false); // quitar silencios (inicio/fin) al compaginar
   const [showAdvanced, setShowAdvanced] = useState(false); // mostrar la timeline manual (ajuste avanzado)
   const [transDur, setTransDur] = useState(0.5); // duración total de la transición (s)
 
@@ -231,29 +232,46 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const addClip = (file: File) => addClips([file]);
 
-  // Compaginado automático: une los clips en orden y los ajusta a la duración objetivo (recortando colas)
+  // Detecta el tramo "con contenido" de un clip (recorta el silencio del inicio y del fin) usando su onda de audio
+  const contentBounds = (c: Clip): [number, number] => {
+    const D = c.duration || 0;
+    const peaks = clipPeaks[c.id];
+    if (!trimDead || !peaks || !peaks.length || D <= 0) return [0, D];
+    const thr = 0.07; // umbral de silencio (relativo)
+    let first = peaks.findIndex(p => p >= thr);
+    let last = -1;
+    for (let i = peaks.length - 1; i >= 0; i--) { if (peaks[i] >= thr) { last = i; break; } }
+    if (first < 0 || last < 0) return [0, D]; // todo en silencio → no tocar
+    const pad = 0.15; // deja un respiro para no cortar la primera/última sílaba
+    const s = Math.max(0, (first / peaks.length) * D - pad);
+    const e = Math.min(D, ((last + 1) / peaks.length) * D + pad);
+    return (e - s) > 0.4 ? [s, e] : [0, D];
+  };
+
+  // Compaginado automático: une los clips en orden, (opcional) quita silencios y los ajusta a la duración objetivo
   const autoCompaginate = () => {
     setClips(prev => {
-      const ok = prev.filter(c => (c.duration || 0) > 0);
-      if (ok.length !== prev.length) { alert('Esperá un segundo a que se midan los videos y volvé a intentar.'); return prev; }
+      if (prev.some(c => (c.duration || 0) <= 0)) { alert('Esperá un segundo a que se midan los videos y volvé a intentar.'); return prev; }
+      const bounds = prev.map(contentBounds);
       if (reelDur === 'auto') {
-        return prev.map(c => ({ ...c, trimStart: 0, trimEnd: c.duration }));
+        return prev.map((c, i) => ({ ...c, trimStart: bounds[i][0], trimEnd: bounds[i][1] }));
       }
       const T = reelDur as number;
       const N = prev.length;
       const share = T / N;
-      const targets = prev.map(c => Math.min(c.duration, share));
+      const avail = bounds.map(([s, e]) => e - s); // material disponible por clip (ya sin silencios)
+      const targets = avail.map(a => Math.min(a, share));
       // Reparte el sobrante entre los clips que todavía tienen material
       for (let iter = 0; iter < 4; iter++) {
         const used = targets.reduce((a, b) => a + b, 0);
         let leftover = T - used;
         if (leftover < 0.05) break;
-        const expandable = prev.map((c, i) => (c.duration - targets[i] > 0.02 ? i : -1)).filter(i => i >= 0);
+        const expandable = avail.map((a, i) => (a - targets[i] > 0.02 ? i : -1)).filter(i => i >= 0);
         if (!expandable.length) break;
         const add = leftover / expandable.length;
-        expandable.forEach(i => { const room = prev[i].duration - targets[i]; targets[i] += Math.min(add, room); });
+        expandable.forEach(i => { targets[i] += Math.min(add, avail[i] - targets[i]); });
       }
-      return prev.map((c, i) => ({ ...c, trimStart: 0, trimEnd: Math.max(0.5, Math.min(c.duration, targets[i])) }));
+      return prev.map((c, i) => ({ ...c, trimStart: bounds[i][0], trimEnd: bounds[i][0] + Math.max(0.5, Math.min(avail[i], targets[i])) }));
     });
     setActiveIdx(0); setCurrentTime(0); setExportedUrl(null);
   };
@@ -1437,6 +1455,15 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                     )}
                   </div>
                 </div>
+                <button onClick={() => setTrimDead(v => !v)} className="flex items-center gap-2.5 w-full text-left group">
+                  <span className={`relative w-9 h-5 rounded-full transition-all shrink-0 ${trimDead ? 'bg-purple-600' : 'bg-slate-200'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${trimDead ? 'translate-x-4' : ''}`} />
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Quitar tiempos muertos</span>
+                    <span className="text-[9px] text-slate-400 font-bold">Recorta el silencio del inicio y fin de cada clip</span>
+                  </span>
+                </button>
                 <button onClick={autoCompaginate} className="w-full py-2.5 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 transition-all"><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Compaginar automático</button>
                 <p className="text-[9px] text-slate-400 font-bold leading-relaxed">Une tus clips en orden y los ajusta a la duración elegida. Después agregale música, voz y subtítulos.</p>
               </div>
