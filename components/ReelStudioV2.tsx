@@ -748,14 +748,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
 
         {/* preview */}
         <section className="bg-[#0c0a0b] flex flex-col min-h-0">
-          <div className="flex-1 grid place-items-center p-5 min-h-0 overflow-hidden">
-            {/* Contenedor con el aspecto del formato: la altura manda (el reel es más alto que ancho). */}
-            <div className="relative" style={{ aspectRatio: `${CW} / ${CH}`, height: '100%', maxHeight: '100%', maxWidth: '100%' }}>
-              <canvas ref={canvasRef}
-                onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
-                className="absolute inset-0 w-full h-full rounded-xl shadow-2xl block"
-                style={{ background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
-            </div>
+          <div className="flex-1 flex items-center justify-center p-5 min-h-0 overflow-hidden">
+            {/* Flexbox: el alto del canvas = alto disponible; el ancho sale del aspecto 9:16 → siempre vertical. */}
+            <canvas ref={canvasRef}
+              onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
+              className="rounded-xl shadow-2xl block"
+              style={{ height: '100%', aspectRatio: `${CW} / ${CH}`, maxWidth: '100%', background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
           </div>
           <div className="flex items-center gap-3 px-5 py-3 border-t border-white/10">
             <span className="text-xs tabular-nums text-white/60"><b style={{ color: BRAND }}>{fmtTime(currentTime)}</b> / {fmtTime(totalDur)}</span>
