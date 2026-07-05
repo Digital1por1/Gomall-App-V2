@@ -9,7 +9,7 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, updateElement, removeElement, moveElement, setTrackFlag,
+  addElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
@@ -307,6 +307,15 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     patchSel({ style: { ...(selected as TextElement).style, ...s } } as any);
   };
   const deleteSel = () => { if (selectedId) { commit(removeElement(project, selectedId)); setSelectedId(null); } };
+  // Corta el elemento seleccionado (o el que esté bajo el cabezal) en el instante actual.
+  const splitAtPlayhead = () => {
+    let id = selectedId;
+    if (!id) {
+      for (const t of project.tracks) for (const el of t.elements) { if (currentTime > el.start + 0.05 && currentTime < el.start + el.duration - 0.05) { id = el.id; break; } }
+    }
+    if (!id) return;
+    commit(splitElement(project, id, currentTime));
+  };
 
   // ---------- drag en la timeline ----------
   const onBlockPointerDown = (e: React.PointerEvent, id: string, mode: 'move' | 'trimL' | 'trimR') => {
@@ -414,6 +423,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable) return;
       if (e.key === 'Escape') { setSelectedId(null); return; }
+      if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); splitAtPlayhead(); return; }
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
@@ -609,10 +619,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
 
         {/* preview */}
         <section className="bg-[#0c0a0b] flex flex-col min-h-0">
-          <div className="flex-1 grid place-items-center p-5 min-h-0">
+          <div className="flex-1 grid place-items-center p-5 min-h-0 overflow-hidden">
             <canvas ref={canvasRef}
               onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
-              className="rounded-xl shadow-2xl max-h-full" style={{ aspectRatio: `${CW}/${CH}`, maxWidth: '100%', objectFit: 'contain', background: '#000', height: '100%', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+              className="rounded-xl shadow-2xl block"
+              style={{ aspectRatio: `${CW} / ${CH}`, maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
           </div>
           <div className="flex items-center gap-3 px-5 py-3 border-t border-white/10">
             <span className="text-xs tabular-nums text-white/60"><b style={{ color: BRAND }}>{fmtTime(currentTime)}</b> / {fmtTime(totalDur)}</span>
@@ -638,7 +649,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} />
             )}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
-              <VisualProps el={selected as VideoElement | ImageElement} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} />
+              <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} />
             )}
             {selected && selected.type === 'audio' && (
               <AudioProps el={selected as AudioElement} onVolume={(v) => patchSel({ volume: v } as any)} onLoop={(l) => patchSel({ loop: l } as any)} />
@@ -662,6 +673,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       {/* Timeline */}
       <div className="h-[240px] bg-[#1b1719] border-t border-white/10 flex flex-col min-h-0">
         <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
+          <button onClick={splitAtPlayhead} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10" title="Cortar en el cabezal (S)"><i className="fa-solid fa-scissors text-xs" /></button>
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
           <button onClick={() => setSnap(s => !s)} title="Imán (snapping)" className="w-8 h-8 grid place-items-center rounded-lg text-xs"
             style={snap ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff' } : { color: 'rgba(255,255,255,.5)' }}><i className="fa-solid fa-magnet" /></button>
@@ -753,8 +765,16 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
   </div>
 );
 
-const VisualProps: React.FC<{ el: VideoElement | ImageElement; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void }> = ({ el, onTransform, onVolume }) => (
+const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void; onFit: (f: 'cover' | 'contain') => void }> = ({ el, isBase, onTransform, onVolume, onFit }) => (
   <div className="space-y-4">
+    {isBase && (
+      <Row label="Encuadre">
+        <div className="flex gap-2">
+          <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'cover') === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Rellenar</button>
+          <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'contain' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Ver completo</button>
+        </div>
+      </Row>
+    )}
     <Row label={`Tamaño: ${Math.round(el.transform.scale)}%`}><Slider min={10} max={200} value={el.transform.scale} onChange={(v) => onTransform({ scale: v })} /></Row>
     <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
     <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>

@@ -44,8 +44,8 @@ interface BaseElement {
   fadeIn?: number;      // transición de aparición (s)
   fadeOut?: number;     // transición de salida (s)
 }
-export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean }
-export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform }
+export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean; fit?: 'cover' | 'contain' }
+export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain' }
 export interface TextElement extends BaseElement { type: 'text'; text: string; transform: Transform; style: TextStyle }
 export interface AudioElement extends BaseElement { type: 'audio'; mediaId?: string; url: string; volume: number; loop: boolean }
 export type ReelElement = VideoElement | ImageElement | TextElement | AudioElement;
@@ -167,6 +167,24 @@ export function moveElement(p: ReelProject, id: string, newStart: number, newTra
 
 export function setTrackFlag(p: ReelProject, trackId: string, flag: 'muted' | 'hidden' | 'locked', value: boolean): ReelProject {
   return mapTracks(p, t => t.id === trackId ? { ...t, [flag]: value } : t);
+}
+
+// Corta un elemento en dos en el instante atTime (de la timeline). Respeta el recorte de la fuente.
+export function splitElement(p: ReelProject, id: string, atTime: number): ReelProject {
+  const found = findElement(p, id);
+  if (!found) return p;
+  const el = found.el;
+  if (atTime <= el.start + 0.05 || atTime >= el.start + el.duration - 0.05) return p;
+  const leftDur = atTime - el.start;
+  const rightDur = el.duration - leftDur;
+  const anyEl = el as any;
+  const hasTrim = anyEl.trimStart != null && anyEl.trimEnd != null;
+  const cut = hasTrim ? anyEl.trimStart + leftDur : 0;
+  const left = { ...el, duration: leftDur, ...(hasTrim ? { trimEnd: cut } : {}) } as ReelElement;
+  const right = { ...el, id: genId('el'), start: atTime, duration: rightDur, ...(hasTrim ? { trimStart: cut } : {}) } as ReelElement;
+  return mapTracks(p, t => t.id === found.track.id
+    ? { ...t, elements: t.elements.flatMap(e => e.id === id ? [left, right] : [e]).sort((a, b) => a.start - b.start) }
+    : t);
 }
 
 // ---------- constructores de elementos ----------

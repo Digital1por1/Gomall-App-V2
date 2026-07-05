@@ -55,6 +55,17 @@ function drawCover(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sw: nu
   ctx.restore();
 }
 
+// "Ajustar": el video/imagen entra completo dentro del canvas (con bandas si hace falta), sin recortar.
+function drawContain(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sw: number, sh: number, W: number, H: number, opacity: number, scale: number) {
+  if (!sw || !sh) return;
+  const base = Math.min(W / sw, H / sh) * (scale / 100);
+  const dw = sw * base, dh = sh * base;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, opacity / 100));
+  ctx.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  ctx.restore();
+}
+
 // Elemento de overlay (PiP): se dibuja como una caja de ancho = scale% del canvas, centrada en (x,y)%, manteniendo aspecto.
 function drawOverlayMedia(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sw: number, sh: number, W: number, H: number, t: { x: number; y: number; scale: number; rotation: number; opacity: number }) {
   if (!sw || !sh) return;
@@ -198,8 +209,9 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     const sh = media.type === 'video' ? (src as HTMLVideoElement).videoHeight : (src as HTMLImageElement).naturalHeight;
     if (!sw || !sh) continue;
     if (track.kind === 'video') {
-      // Pista base: cubre todo el canvas.
-      drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
+      // Pista base: cubre todo el canvas ("Rellenar") o entra completo ("Ajustar").
+      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
+      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
     } else {
       // Overlay: caja PiP posicionada.
       drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, opacity: media.transform.opacity * fa });
