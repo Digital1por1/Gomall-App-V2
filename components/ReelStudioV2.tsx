@@ -704,10 +704,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} />
             )}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
-              <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} />
+              <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} />
             )}
             {selected && selected.type === 'audio' && (
-              <AudioProps el={selected as AudioElement} onVolume={(v) => patchSel({ volume: v } as any)} onLoop={(l) => patchSel({ loop: l } as any)} />
+              <AudioProps el={selected as AudioElement} onVolume={(v) => patchSel({ volume: v } as any)} onLoop={(l) => patchSel({ loop: l } as any)} onAudioFade={(p) => patchSel(p as any)} />
             )}
             {selected && selected.type !== 'audio' && (
               <div className="space-y-3 pt-2 border-t border-white/5">
@@ -722,10 +722,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                   </select>
                 </Row>
                 {(selected as any).transition && (selected as any).transition !== 'none' && (
-                  <Row label={`Duración: ${((selected as any).transitionDur || 0.5).toFixed(1)}s`}><Slider min={0.1} max={2} step={0.1} value={(selected as any).transitionDur || 0.5} onChange={(v) => patchSel({ transitionDur: v } as any)} /></Row>
+                  <Row label={`Duración entrada: ${((selected as any).transitionDur || 0.5).toFixed(1)}s`}><Slider min={0.1} max={2} step={0.1} value={(selected as any).transitionDur || 0.5} onChange={(v) => patchSel({ transitionDur: v } as any)} /></Row>
                 )}
-                <Row label={`Aparición (fade): ${(selected.fadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeIn || 0} onChange={(v) => patchSel({ fadeIn: v } as any)} /></Row>
-                <Row label={`Salida (fade): ${(selected.fadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeOut || 0} onChange={(v) => patchSel({ fadeOut: v } as any)} /></Row>
+                <Row label="Transición de salida">
+                  <select value={(selected as any).transitionOut || 'none'} onChange={(e) => patchSel({ transitionOut: e.target.value as TransitionKind, transitionOutDur: (selected as any).transitionOutDur || 0.5 } as any)} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+                    <option value="none">Ninguna</option>
+                    <option value="fade">Fundido (negro)</option>
+                    <option value="white">Flash blanco</option>
+                    <option value="zoom">Zoom</option>
+                    <option value="slide">Deslizar</option>
+                  </select>
+                </Row>
+                {(selected as any).transitionOut && (selected as any).transitionOut !== 'none' && (
+                  <Row label={`Duración salida: ${((selected as any).transitionOutDur || 0.5).toFixed(1)}s`}><Slider min={0.1} max={2} step={0.1} value={(selected as any).transitionOutDur || 0.5} onChange={(v) => patchSel({ transitionOutDur: v } as any)} /></Row>
+                )}
               </div>
             )}
             {selected && (
@@ -750,13 +760,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         </div>
         <div ref={timelineRef} className="flex-1 overflow-auto relative"
           onPointerMove={onTimelinePointerMove} onPointerUp={onTimelinePointerUp} onPointerLeave={onTimelinePointerUp}>
-          <div style={{ width: Math.max(600, (totalDur + 4) * pxPerSec), minWidth: '100%' }}>
-            {/* Regla */}
-            <div className="h-6 relative border-b border-white/10 cursor-pointer"
-              onPointerDown={(e) => { if (playing) pause(); dragRef.current = { mode: 'playhead' }; scrubTo(e); }}>
+          <div style={{ width: Math.max(600, (totalDur + 4) * pxPerSec), minWidth: '100%' }} className="cursor-pointer"
+            onPointerDown={(e) => { if (playing) pause(); dragRef.current = { mode: 'playhead' }; scrubTo(e); }}>
+            {/* Regla (clic/arrastre en cualquier lado mueve el cabezal) */}
+            <div className="h-8 relative border-b border-white/10">
               {Array.from({ length: Math.ceil((totalDur + 4)) + 1 }).map((_, s) => (
                 <div key={s} className="absolute top-0 bottom-0 border-l border-white/10" style={{ left: s * pxPerSec }}>
-                  <span className="absolute top-1 left-1 text-[9px] text-white/40 tabular-nums">{s}s</span>
+                  <span className="absolute top-1.5 left-1 text-[9px] text-white/40 tabular-nums">{s}s</span>
                 </div>
               ))}
             </div>
@@ -788,8 +798,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                 })}
               </div>
             ))}
-            {/* Playhead */}
-            <div className="absolute top-0 bottom-0 w-0.5 pointer-events-none z-20" style={{ left: currentTime * pxPerSec, background: BRAND }} />
+            {/* Cabezal (playhead) con manija */}
+            <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{ left: currentTime * pxPerSec }}>
+              <div className="absolute top-0 bottom-0" style={{ left: -1, width: 2, background: BRAND }} />
+              <div className="absolute -top-0.5" style={{ left: -7, width: 0, height: 0, borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderTop: `9px solid ${BRAND}` }} />
+            </div>
           </div>
         </div>
       </div>
@@ -839,7 +852,7 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
   </div>
 );
 
-const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void; onFit: (f: 'cover' | 'contain') => void }> = ({ el, isBase, onTransform, onVolume, onFit }) => (
+const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void; onFit: (f: 'cover' | 'contain') => void; onAudioFade: (p: { audioFadeIn?: number; audioFadeOut?: number }) => void }> = ({ el, isBase, onTransform, onVolume, onFit, onAudioFade }) => (
   <div className="space-y-4">
     {isBase && (
       <Row label="Encuadre">
@@ -853,13 +866,19 @@ const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; 
     <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
     <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>
     <Row label={`Opacidad: ${Math.round(el.transform.opacity)}%`}><Slider min={0} max={100} value={el.transform.opacity} onChange={(v) => onTransform({ opacity: v })} /></Row>
-    {el.type === 'video' && <Row label={`Volumen: ${Math.round((el as VideoElement).volume * 100)}%`}><Slider min={0} max={100} value={(el as VideoElement).volume * 100} onChange={(v) => onVolume(v / 100)} /></Row>}
+    {el.type === 'video' && <>
+      <Row label={`Volumen: ${Math.round((el as VideoElement).volume * 100)}%`}><Slider min={0} max={100} value={(el as VideoElement).volume * 100} onChange={(v) => onVolume(v / 100)} /></Row>
+      <Row label={`Fade volumen in: ${(el.audioFadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={el.audioFadeIn || 0} onChange={(v) => onAudioFade({ audioFadeIn: v })} /></Row>
+      <Row label={`Fade volumen out: ${(el.audioFadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={el.audioFadeOut || 0} onChange={(v) => onAudioFade({ audioFadeOut: v })} /></Row>
+    </>}
   </div>
 );
 
-const AudioProps: React.FC<{ el: AudioElement; onVolume: (v: number) => void; onLoop: (l: boolean) => void }> = ({ el, onVolume, onLoop }) => (
+const AudioProps: React.FC<{ el: AudioElement; onVolume: (v: number) => void; onLoop: (l: boolean) => void; onAudioFade: (p: { audioFadeIn?: number; audioFadeOut?: number }) => void }> = ({ el, onVolume, onLoop, onAudioFade }) => (
   <div className="space-y-4">
     <Row label={`Volumen: ${Math.round(el.volume * 100)}%`}><Slider min={0} max={100} value={el.volume * 100} onChange={(v) => onVolume(v / 100)} /></Row>
+    <Row label={`Fade in: ${(el.audioFadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={el.audioFadeIn || 0} onChange={(v) => onAudioFade({ audioFadeIn: v })} /></Row>
+    <Row label={`Fade out: ${(el.audioFadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={el.audioFadeOut || 0} onChange={(v) => onAudioFade({ audioFadeOut: v })} /></Row>
     <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={el.loop} onChange={(e) => onLoop(e.target.checked)} /> Repetir en bucle</label>
   </div>
 );

@@ -64,11 +64,26 @@ export async function buildMixedAudio(project: ReelProject): Promise<AudioBuffer
         if (!buf) continue;
         const src = off.createBufferSource(); src.buffer = buf;
         if (el.type === 'audio' && (el as AudioElement).loop) src.loop = true;
-        const g = off.createGain(); g.gain.value = vol;
-        src.connect(g).connect(off.destination);
         const when = Math.max(0, el.start);
         const offset = Math.max(0, ae.trimStart || 0);
         const dur = Math.max(0, el.duration);
+        // Volumen con fade de entrada/salida opcional (envolvente de ganancia).
+        const g = off.createGain();
+        const fi = Math.max(0, (el as any).audioFadeIn || 0);
+        const fo = Math.max(0, (el as any).audioFadeOut || 0);
+        if (fi > 0 || fo > 0) {
+          const inDur = Math.min(fi, dur);
+          g.gain.setValueAtTime(fi > 0 ? 0.0001 : vol, when);
+          if (fi > 0) g.gain.linearRampToValueAtTime(vol, when + inDur);
+          if (fo > 0) {
+            const foStart = when + Math.max(inDur, dur - fo);
+            g.gain.setValueAtTime(vol, foStart);
+            g.gain.linearRampToValueAtTime(0.0001, when + dur);
+          }
+        } else {
+          g.gain.value = vol;
+        }
+        src.connect(g).connect(off.destination);
         try { src.start(when, offset, dur); any = true; } catch { /* rango inválido */ }
       }
     }

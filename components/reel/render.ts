@@ -206,6 +206,16 @@ function transitionState(el: ReelElement, t: number): { type: string; p: number 
   return { type, p: 1 - local / dur };
 }
 
+// Estado de la transición de SALIDA en t: progreso p (0 al empezar la salida → 1 al final del clip).
+function exitTransitionState(el: ReelElement, t: number): { type: string; p: number } | null {
+  const type = (el as any).transitionOut as string | undefined;
+  const dur = (el as any).transitionOutDur as number | undefined;
+  if (!type || type === 'none' || !dur || dur <= 0) return null;
+  const remaining = (el.start + el.duration) - t;
+  if (remaining < 0 || remaining > dur) return null;
+  return { type, p: 1 - remaining / dur };
+}
+
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
 export function sourceTime(el: VideoElement | ImageElement, t: number): number {
   const local = t - el.start;
@@ -225,13 +235,20 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
   for (const { el, track } of visuals) {
     const fa = fadeAlpha(el, t);
     const tr = transitionState(el, t);
-    // Efectos de la transición de entrada.
+    const ex = exitTransitionState(el, t);
+    // Efectos de las transiciones de entrada y salida.
     let alpha = fa, extraScale = 1, slideX = 0, whiteA = 0;
     if (tr) {
       if (tr.type === 'fade') alpha *= (1 - tr.p);
       else if (tr.type === 'zoom') extraScale = 1 + 0.25 * tr.p;
       else if (tr.type === 'slide') slideX = tr.p * W;
       else if (tr.type === 'white') whiteA = tr.p;
+    }
+    if (ex) {
+      if (ex.type === 'fade') alpha *= (1 - ex.p);
+      else if (ex.type === 'zoom') extraScale *= (1 + 0.25 * ex.p);
+      else if (ex.type === 'slide') slideX -= ex.p * W;
+      else if (ex.type === 'white') whiteA = Math.max(whiteA, ex.p);
     }
     if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, t, alpha); continue; }
     const media = el as VideoElement | ImageElement;

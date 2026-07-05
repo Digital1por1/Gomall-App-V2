@@ -45,8 +45,12 @@ interface BaseElement {
   sourceDuration?: number;
   fadeIn?: number;      // transición de aparición (s)
   fadeOut?: number;     // transición de salida (s)
-  transition?: TransitionKind;  // transición de entrada del clip (fade/white/zoom/slide)
-  transitionDur?: number;       // duración de la transición (s)
+  transition?: TransitionKind;     // transición de ENTRADA del clip (fade/white/zoom/slide)
+  transitionDur?: number;          // duración de la transición de entrada (s)
+  transitionOut?: TransitionKind;  // transición de SALIDA del clip
+  transitionOutDur?: number;       // duración de la transición de salida (s)
+  audioFadeIn?: number;   // fade de volumen al inicio (s)
+  audioFadeOut?: number;  // fade de volumen al final (s)
 }
 export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean; fit?: 'cover' | 'contain' }
 export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain' }
