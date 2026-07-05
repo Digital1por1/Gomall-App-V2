@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+// Motor de video 100% client-side vía WebCodecs (sin ffmpeg/libx264 → sin dependencias GPL).
+import {
+  Output, Mp4OutputFormat, BufferTarget, CanvasSource, AudioBufferSource,
+  Input, BlobSource, AudioBufferSink, ALL_FORMATS,
+} from 'mediabunny';
 import { UserProfile } from '../types';
 import { recordUsage } from './usageTracker';
 
@@ -33,22 +35,21 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-// Convierte un WAV PCM 16-bit mono (de ffmpeg) en una serie de picos normalizados (0-1) para dibujar la onda.
-function wavToPeaks(bytes: Uint8Array, buckets: number): number[] {
-  const HEADER = 44;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const total = Math.floor((bytes.byteLength - HEADER) / 2);
+// Convierte un AudioBuffer decodificado en una serie de picos normalizados (0-1) para dibujar la onda.
+function bufferToPeaks(buffer: AudioBuffer, buckets: number): number[] {
+  const data = buffer.getChannelData(0);
+  const total = data.length;
   if (total <= 0) return [];
   const per = Math.max(1, Math.floor(total / buckets));
   const peaks: number[] = [];
-  let max = 1;
+  let max = 1e-6;
   for (let b = 0; b < buckets; b++) {
     let peak = 0;
-    const base = HEADER + b * per * 2;
+    const base = b * per;
     for (let i = 0; i < per; i++) {
-      const idx = base + i * 2;
-      if (idx + 1 >= bytes.byteLength) break;
-      const s = Math.abs(dv.getInt16(idx, true));
+      const idx = base + i;
+      if (idx >= total) break;
+      const s = Math.abs(data[idx]);
       if (s > peak) peak = s;
     }
     peaks.push(peak);
@@ -57,7 +58,7 @@ function wavToPeaks(bytes: Uint8Array, buckets: number): number[] {
   return peaks.map(p => Math.pow(p / max, 0.7)); // realza picos chicos para que la onda se vea
 }
 
-// AudioBuffer (mezcla offline) → bytes WAV PCM 16-bit, para que ffmpeg lo muxee como AAC.
+// AudioBuffer → bytes WAV PCM 16-bit (usado para enviar el audio a transcribir).
 function audioBufferToWav(buffer: AudioBuffer): Uint8Array {
   const numCh = buffer.numberOfChannels, sr = buffer.sampleRate, len = buffer.length;
   const blockAlign = numCh * 2;
@@ -120,11 +121,8 @@ interface Clip {
 const CANVAS_W = 1080;
 const CANVAS_H = 1920;
 const FPS = 30;
-// El worker de @ffmpeg/ffmpeg es type:"module": no puede usar importScripts, así que
-// importa el core dinámicamente con import(). Por eso el core debe ser ESM y por URL
-// directa (no blob), para que el import() dinámico resuelva correctamente.
-const CORE_VERSION = '0.12.6';
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
+const VIDEO_BITRATE = 8_000_000; // 8 Mbps H.264
+const AUDIO_BITRATE = 192_000;   // 192 kbps AAC
 
 const fmt = (s: number) => {
   if (!isFinite(s) || s < 0) s = 0;
@@ -189,6 +187,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [exportMsg, setExportMsg] = useState('');
   const [exportPct, setExportPct] = useState(0); // 0-100, progreso real de exportación
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
+  const [exportedName, setExportedName] = useState('reel-gomall.mp4');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -199,7 +198,6 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const subRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const subDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const rafRef = useRef<number | null>(null);
-  const ffmpegRef = useRef<FFmpeg | null>(null);
   // Elementos de audio del PREVIEW (siempre nativos, nunca pasan por WebAudio).
   const musicElRef = useRef<HTMLAudioElement | null>(null);
   const voiceElRef = useRef<HTMLAudioElement | null>(null);
@@ -411,7 +409,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     if (scrubRef.current) scrubTo(e.clientX);
   };
 
-  // Calcula la onda de audio de cada clip (lazy, con ffmpeg). No bloquea la edición; si no hay audio queda plano.
+  // Calcula la onda de audio de cada clip (lazy, decodificando en el navegador). No bloquea la edición; si no hay audio queda plano.
   const clipIdsKey = clips.map(c => c.id).join('|');
   useEffect(() => {
     let cancelled = false;
@@ -420,8 +418,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         if (clipPeaks[c.id] !== undefined || peaksBusyRef.current.has(c.id)) continue;
         peaksBusyRef.current.add(c.id);
         try {
-          const bytes = await getAudioBytes(c.url);
-          const peaks = wavToPeaks(bytes, 220);
+          const buf = await decodeForPeaks(c.url);
+          const peaks = buf ? bufferToPeaks(buf, 220) : [];
           // Siempre guardamos (aunque sea []): así la pista deja de mostrar "cargando".
           if (!cancelled) setClipPeaks(prev => ({ ...prev, [c.id]: peaks }));
         } catch { if (!cancelled) setClipPeaks(prev => ({ ...prev, [c.id]: [] })); } // sin pista de audio → vacío
@@ -963,7 +961,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
       }));
     } catch (e: any) {
-      console.error('Subtítulos:', e, ffmpegLogRef.current);
+      console.error('Subtítulos:', e);
       const motivo = e?.message || (typeof e === 'string' ? e : '') || (e?.name ? e.name : '') || (e ? JSON.stringify(e) : '') || 'error desconocido';
       alert('No se pudieron generar los subtítulos.\n\nMotivo: ' + motivo);
     } finally {
@@ -1008,76 +1006,53 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const stopRecording = () => { micRecorderRef.current?.stop(); setRecording(false); };
   const removeVoice = () => { voiceElRef.current?.pause(); setVoiceUrl(null); setVoiceName(''); voiceElRef.current = null; };
 
-  const ffmpegLogRef = useRef<string>('');
-  const loadFFmpeg = async () => {
-    if (ffmpegRef.current) return ffmpegRef.current;
-    const ffmpeg = new FFmpeg();
-    ffmpeg.on('progress', ({ progress }) => {
-      const p = Math.max(0, Math.min(1, progress));
-      // La conversión a MP4 ocupa el tramo 70→100% de la barra de exportación
-      const pct = Math.round(70 + p * 30);
-      setExportPct(pct);
-      setExportMsg(`Convirtiendo a MP4… ${pct}%`);
-    });
-    ffmpeg.on('log', ({ message }) => { ffmpegLogRef.current += message + '\n'; });
+  // Decodifica audio de cualquier fuente a AudioBuffer. Prueba primero el navegador (mp3/m4a/wav/opus/ogg
+  // y muchos mp4); si falla (ej. contenedores .mov), cae a mediabunny (WebCodecs), que abre casi cualquier
+  // formato sin ffmpeg. `ctx` sirve para asignar los buffers al mismo sample-rate del pipeline.
+  const decodeAudioUniversal = async (url: string, ctx: BaseAudioContext): Promise<AudioBuffer | null> => {
+    let ab: ArrayBuffer;
+    try { ab = await (await fetch(url)).arrayBuffer(); } catch { return null; }
+    // 1) Decodificación nativa del navegador
+    try { return await ctx.decodeAudioData(ab.slice(0)); } catch {}
+    // 2) Fallback con mediabunny (sin ffmpeg)
     try {
-      await ffmpeg.load({
-        coreURL: `${CORE_BASE}/ffmpeg-core.js`,
-        wasmURL: `${CORE_BASE}/ffmpeg-core.wasm`,
-      });
-    } catch (e: any) {
-      throw new Error('No se pudo cargar el motor de video (ffmpeg). Revisá tu conexión y reintentá. ' + (e?.message || String(e)));
-    }
-    ffmpegRef.current = ffmpeg;
-    return ffmpeg;
+      const input = new Input({ source: new BlobSource(new Blob([ab])), formats: ALL_FORMATS });
+      const track = await input.getPrimaryAudioTrack();
+      if (!track) return null;
+      const sink = new AudioBufferSink(track);
+      const chunks: AudioBuffer[] = [];
+      let totalLen = 0;
+      for await (const { buffer } of sink.buffers(0)) { chunks.push(buffer); totalLen += buffer.length; }
+      if (!chunks.length || totalLen === 0) return null;
+      if (chunks.length === 1) return chunks[0];
+      const sr = chunks[0].sampleRate;
+      const numCh = chunks[0].numberOfChannels;
+      const out = ctx.createBuffer(numCh, totalLen, sr);
+      let offset = 0;
+      for (const ch of chunks) {
+        for (let c = 0; c < numCh; c++) {
+          out.getChannelData(c).set(ch.getChannelData(Math.min(c, ch.numberOfChannels - 1)), offset);
+        }
+        offset += ch.length;
+      }
+      return out;
+    } catch { return null; }
   };
 
-  // Extrae el audio del video con ffmpeg (WAV PCM mono 16kHz). Robusto para mp4/mov/webm.
-  // Extrae el audio de cualquier fuente (video/audio) a WAV PCM con ffmpeg. Robusto para mp4/mov/webm.
-  const extractWav = async (url: string, rate = 16000, mono = true): Promise<Uint8Array> => {
-    const ffmpeg = await loadFFmpeg();
-    const blob = await (await fetch(url)).blob();
-    const t = (blob.type || '').toLowerCase();
-    const ext = t.includes('quicktime') || t.includes('mov') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('matroska') ? 'mkv' : t.includes('mp3') || t.includes('mpeg') ? 'mp3' : t.includes('wav') ? 'wav' : t.includes('aac') ? 'aac' : t.includes('ogg') ? 'ogg' : t.startsWith('audio') ? 'm4a' : 'mp4';
-    const inName = `aud_src.${ext}`;
-    await ffmpeg.writeFile(inName, await fetchFile(blob));
-    ffmpegLogRef.current = '';
-    const code = await ffmpeg.exec(['-i', inName, '-vn', '-ac', mono ? '1' : '2', '-ar', String(rate), '-f', 'wav', 'aud_out.wav']);
-    if (typeof code === 'number' && code !== 0) {
-      const log = ffmpegLogRef.current.toLowerCase();
-      if (log.includes('does not contain any stream') || log.includes('output file does not contain') || log.includes('no audio')) {
-        throw new Error('Sin pista de audio.');
-      }
-      throw new Error('ffmpeg no pudo procesar el audio (código ' + code + ').');
-    }
-    let data: any;
-    try {
-      data = await ffmpeg.readFile('aud_out.wav');
-    } catch {
-      throw new Error('Sin pista de audio.');
-    }
-    const bytes = (data instanceof Uint8Array) ? data : new Uint8Array(data as any);
-    if (!bytes || bytes.byteLength < 200) throw new Error('Sin pista de audio (o silencio).');
-    return bytes;
+  // Decodifica un clip (con context descartable) para calcular la onda de audio de la timeline.
+  const decodeForPeaks = async (url: string): Promise<AudioBuffer | null> => {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    try { return await decodeAudioUniversal(url, ctx); } finally { try { await ctx.close(); } catch {} }
   };
-  const getAudioBytes = (url: string) => extractWav(url, 16000, true); // 16k mono: onda / transcripción
-  // Solo para transcripción: agrega el base64 (caro), por eso no se usa para la onda.
-  const getAudioWav = async (url: string): Promise<{ base64: string; bytes: Uint8Array }> => {
-    const bytes = await getAudioBytes(url);
-    return { base64: bytesToBase64(bytes), bytes };
-  };
-  // WAV en base64 para transcribir. Decodifica con el navegador (mp3/m4a/wav/opus) y cae a ffmpeg si hace falta.
+
+  // WAV en base64 para transcribir. Decodifica en el navegador y cae a mediabunny si hace falta.
   const getWavBase64 = async (url: string): Promise<string> => {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     try {
-      const ab = await (await fetch(url)).arrayBuffer();
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const buf = await ctx.decodeAudioData(ab.slice(0));
-      try { await ctx.close(); } catch {}
+      const buf = await decodeAudioUniversal(url, ctx);
+      if (!buf) throw new Error('Sin pista de audio.');
       return bytesToBase64(audioBufferToWav(buf));
-    } catch {
-      const { base64 } = await getAudioWav(url);
-      return base64;
-    }
+    } finally { try { await ctx.close(); } catch {} }
   };
 
   // === Mezcla de audio offline (modelo CapCut/Canva): video + música + voz → un AudioBuffer ===
@@ -1089,19 +1064,10 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const cache: Record<string, AudioBuffer | null> = {};
       const decode = async (url: string): Promise<AudioBuffer | null> => {
         if (url in cache) return cache[url];
-        // 1) Decodificación directa del navegador: sirve para audios (mp3, m4a, wav, webm/opus, ogg)
-        //    y muchas veces para el audio de mp4. Evita depender de que ffmpeg.wasm traiga el codec (ej. opus).
-        try {
-          const ab = await (await fetch(url)).arrayBuffer();
-          const buf = await decodeCtx.decodeAudioData(ab.slice(0));
-          cache[url] = buf; return buf;
-        } catch {}
-        // 2) Fallback con ffmpeg (contenedores de video como .mov que decodeAudioData no abre)
-        try {
-          const wav = await extractWav(url, SR, false);
-          const buf = await decodeCtx.decodeAudioData(wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer);
-          cache[url] = buf; return buf;
-        } catch { cache[url] = null; return null; }
+        // Navegador primero (mp3/m4a/wav/opus/ogg y muchos mp4); mediabunny como fallback (ej. .mov).
+        const buf = await decodeAudioUniversal(url, decodeCtx);
+        cache[url] = buf;
+        return buf;
       };
 
       const off = new OfflineAudioContext(2, Math.max(1, Math.ceil(totalDur * SR)), SR);
@@ -1151,39 +1117,39 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
-  // === Render de VIDEO con WebCodecs (modelo Canva web) — SOLO video ===
-  // Codifica frame por frame (timestamps exactos → duración/velocidad correctas). El audio NO se mete acá:
-  // se muxea después con ffmpeg (que codifica AAC de forma 100% confiable). Así separamos lo que cada cosa
-  // hace bien: WebCodecs = video perfecto, ffmpeg = audio AAC + mux.
-  const renderVideoWebCodecs = async (
+  // === Render del reel a MP4 con mediabunny (WebCodecs nativo, sin ffmpeg/libx264 → sin GPL) ===
+  // Codifica el video frame por frame desde el canvas (timestamps exactos → duración/velocidad correctas)
+  // y multiplexa el audio ya mezclado (AAC) en el MISMO archivo. Un solo pipeline: video perfecto + audio.
+  const renderReelWithMediabunny = async (
     ranges: { url: string; start: number; end: number }[],
     totalDur: number,
+    mixBuf: AudioBuffer | null,
     exV: HTMLVideoElement,
     onProgress: (done: number, total: number) => void,
   ): Promise<Blob> => {
-    const VE: any = (window as any).VideoEncoder;
-    const VF: any = (window as any).VideoFrame;
-    if (!VE || !VF) throw new Error('WebCodecs no disponible');
-
-    const candidates = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'avc1.640020', 'avc1.42001f'];
-    let vcodec = '';
-    for (const c of candidates) {
-      try { const s = await VE.isConfigSupported({ codec: c, width: CANVAS_W, height: CANVAS_H, bitrate: 8_000_000, framerate: FPS }); if (s?.supported) { vcodec = c; break; } } catch {}
-    }
-    if (!vcodec) throw new Error('WebCodecs sin soporte H.264');
-
     const canvas = canvasRef.current!;
-    const muxer = new Muxer({
-      target: new ArrayBufferTarget(),
-      video: { codec: 'avc', width: CANVAS_W, height: CANVAS_H },
-      fastStart: 'in-memory',
-    } as any);
+    const output = new Output({
+      format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+      target: new BufferTarget(),
+    });
+    const videoSource = new CanvasSource(canvas, { codec: 'avc', bitrate: VIDEO_BITRATE });
+    output.addVideoTrack(videoSource, { frameRate: FPS });
 
-    let encErr: any = null;
-    const venc = new VE({ output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta), error: (e: any) => { encErr = e; } });
-    venc.configure({ codec: vcodec, width: CANVAS_W, height: CANVAS_H, bitrate: 8_000_000, framerate: FPS });
+    let audioSource: AudioBufferSource | null = null;
+    if (mixBuf) {
+      audioSource = new AudioBufferSource({ codec: 'aac', bitrate: AUDIO_BITRATE });
+      output.addAudioTrack(audioSource);
+    }
 
-    const frameDurUs = 1e6 / FPS;
+    await output.start();
+
+    // El audio va completo de una: se reproduce a partir del timestamp 0 y cubre toda la duración.
+    if (audioSource && mixBuf) {
+      await audioSource.add(mixBuf);
+      audioSource.close();
+    }
+
+    const frameDur = 1 / FPS;
     let frameIndex = 0;
     let outBase = 0;
     const seekTo = (tt: number) => new Promise<void>((res) => {
@@ -1202,26 +1168,22 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       const rdur = Math.max(0, r.end - r.start);
       const nFrames = Math.max(1, Math.round(rdur * FPS));
       for (let f = 0; f < nFrames; f++) {
-        if (encErr) throw encErr;
         const srcT = Math.min(r.start + f / FPS, Math.max(r.start, r.end - 0.001));
         await seekTo(srcT);
         const fade = fadeAt(ri > 0, ri < ranges.length - 1, srcT - r.start, r.end - srcT);
         drawFrame(exV.currentTime, exV, fade, outBase + (srcT - r.start)); // subTime global para subtítulos
-        const vf = new VF(canvas, { timestamp: Math.round(frameIndex * frameDurUs), duration: Math.round(frameDurUs) });
-        venc.encode(vf, { keyFrame: frameIndex % (FPS * 2) === 0 });
-        vf.close();
+        // Captura el estado actual del canvas como frame (mediabunny lo codifica con WebCodecs).
+        await videoSource.add(frameIndex * frameDur, frameDur);
         frameIndex++;
         if (frameIndex % 3 === 0) onProgress(outBase + f / FPS, totalDur);
-        if (venc.encodeQueueSize > 8) await new Promise((r2) => setTimeout(r2, 0));
       }
       outBase += rdur;
     }
-    await venc.flush();
-    venc.close();
-    if (encErr) throw encErr;
 
-    muxer.finalize();
-    const { buffer } = (muxer.target as any);
+    videoSource.close();
+    await output.finalize();
+    const buffer = output.target.buffer;
+    if (!buffer) throw new Error('El motor de video no generó el archivo.');
     return new Blob([buffer], { type: 'video/mp4' });
   };
 
@@ -1270,40 +1232,25 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
       try { mixBuf = await buildMixedAudioBuffer(ranges, totalDur); } catch (err) { console.error('[export] mezcla de audio falló:', err); mixBuf = null; }
       console.info('[export] audio mezclado:', mixBuf ? `${mixBuf.duration.toFixed(2)}s · ${mixBuf.numberOfChannels}ch @ ${mixBuf.sampleRate}Hz` : 'SIN audio');
 
-      // --- 2) Render del video. Vía PRINCIPAL: WebCodecs (determinístico, robusto). ---
+      // --- 2) Render del video + audio a MP4. Vía PRINCIPAL: mediabunny (WebCodecs nativo, sin ffmpeg). ---
       let mp4Blob: Blob | null = null;
+      let outExt = 'mp4';
       let engine = '';
-      const hasWebCodecs = 'VideoEncoder' in window && 'AudioEncoder' in window && 'VideoFrame' in window && 'AudioData' in window;
+      const hasWebCodecs = 'VideoEncoder' in window && 'VideoFrame' in window;
       console.info('[export] WebCodecs disponible:', hasWebCodecs);
       if (hasWebCodecs) {
         try {
-          setExportMsg('Renderizando video (WebCodecs)…');
+          setExportMsg('Renderizando video…');
           setExportPct(12);
-          // 1) WebCodecs hace el VIDEO (perfecto)
-          const videoOnly = await renderVideoWebCodecs(ranges, totalDur, exV, (done, total) => {
-            const pct = Math.min(88, 10 + Math.round((done / total) * 78));
+          // mediabunny hace el VIDEO (WebCodecs) y muxea el AUDIO (AAC) en el mismo MP4 — un solo pipeline.
+          mp4Blob = await renderReelWithMediabunny(ranges, totalDur, mixBuf, exV, (done, total) => {
+            const pct = Math.min(96, 10 + Math.round((done / total) * 86));
             setExportPct(pct); setExportMsg(`Renderizando video… ${pct}%`);
           });
-          console.info('[export] video WebCodecs:', (videoOnly.size / 1048576).toFixed(1) + 'MB');
-          // 2) ffmpeg pone el AUDIO con -c:v copy (no re-codifica el video → no lo rompe; AAC siempre fiable)
-          if (mixBuf) {
-            setExportMsg('Uniendo audio…');
-            setExportPct(92);
-            const wav = audioBufferToWav(mixBuf);
-            const ffmpeg = await loadFFmpeg();
-            await ffmpeg.writeFile('wcv.mp4', await fetchFile(videoOnly));
-            await ffmpeg.writeFile('wmix.wav', wav);
-            await ffmpeg.exec(['-i', 'wcv.mp4', '-i', 'wmix.wav', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', 'wcout.mp4']);
-            const data = await ffmpeg.readFile('wcout.mp4');
-            mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
-            console.info('[export] audio muxeado por ffmpeg');
-          } else {
-            mp4Blob = videoOnly;
-          }
           engine = 'WebCodecs';
-          console.info('[export] vía WebCodecs OK');
+          console.info('[export] vía mediabunny OK:', (mp4Blob.size / 1048576).toFixed(1) + 'MB');
         } catch (err) {
-          console.warn('[export] WebCodecs no se pudo usar, fallback a MediaRecorder:', err);
+          console.warn('[export] mediabunny no se pudo usar, fallback a grabación:', err);
           mp4Blob = null;
         }
       } else {
@@ -1328,6 +1275,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
           : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
           : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
         const isMp4 = !!mp4Mime;
+        outExt = isMp4 ? 'mp4' : 'webm';
         const recMime = mp4Mime || webmMime || '';
         const recorder = recMime ? new MediaRecorder(canvasStream, { mimeType: recMime }) : new MediaRecorder(canvasStream);
         const chunks: Blob[] = [];
@@ -1379,17 +1327,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         const recBlob = await stopped;
         setExportPct(94);
         if (recBlob.size < 1024) throw new Error('La grabación quedó vacía (el navegador no generó el video).');
-        if (isMp4) {
-          setExportMsg('Finalizando…');
-          mp4Blob = recBlob;
-        } else {
-          setExportMsg('Convirtiendo a MP4… (puede tardar un poco)');
-          const ffmpeg = await loadFFmpeg();
-          await ffmpeg.writeFile('in.webm', await fetchFile(recBlob));
-          await ffmpeg.exec(['-i', 'in.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'out.mp4']);
-          const data = await ffmpeg.readFile('out.mp4');
-          mp4Blob = new Blob([data as unknown as BlobPart], { type: 'video/mp4' });
-        }
+        // MP4 nativo si el navegador lo soporta; si no, WebM tal cual (reproducible en redes y editores, sin ffmpeg).
+        setExportMsg('Finalizando…');
+        mp4Blob = recBlob;
       }
 
       if (!mp4Blob) throw new Error('No se generó el archivo de video.');
@@ -1401,8 +1341,9 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         console.info('[export] MP4 listo:', (mp4Blob.size / 1048576).toFixed(1) + 'MB', '· duración:', isFinite(dur) ? dur.toFixed(2) + 's' : 'desconocida', '· esperado:', totalDur.toFixed(2) + 's', '· tiempo total:', ((performance.now() - t0) / 1000).toFixed(1) + 's');
       } catch {}
       setExportedUrl(url);
+      setExportedName(`reel-gomall.${outExt}`);
       setExportPct(100);
-      setExportMsg(`✅ Exportación completa (motor: ${engine}${mixBuf ? '' : ' · sin audio'}). Descargá tu reel MP4.`);
+      setExportMsg(`✅ Exportación completa (motor: ${engine}${mixBuf ? '' : ' · sin audio'}). Descargá tu reel ${outExt.toUpperCase()}.`);
     } catch (e: any) {
       console.error('[export] ERROR:', e);
       setExportMsg('');
@@ -1871,8 +1812,8 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
               {/* Export */}
               <div className="space-y-3 pt-2">
                 {exportedUrl ? (
-                  <a href={exportedUrl} download="reel-gomall.mp4" className="w-full h-14 bg-green-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
-                    <i className="fa-solid fa-download"></i> Descargar reel MP4
+                  <a href={exportedUrl} download={exportedName} className="w-full h-14 bg-green-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i className="fa-solid fa-download"></i> Descargar reel {exportedName.endsWith('.webm') ? 'WebM' : 'MP4'}
                   </a>
                 ) : (
                   <button onClick={exportReel} disabled={exporting} className="w-full h-14 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
