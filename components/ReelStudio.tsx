@@ -84,6 +84,30 @@ function audioBufferToWav(buffer: AudioBuffer): Uint8Array {
   return new Uint8Array(ab);
 }
 
+// === Whisper on-device (transformers.js) — transcripción en el navegador, sin costo de API ===
+// Se carga bajo demanda (import dinámico) la primera vez que se piden subtítulos. El modelo (~q8)
+// se descarga una vez y queda cacheado por el navegador. Corre en WebGPU si está, si no en WASM.
+let whisperPipePromise: Promise<any> | null = null;
+const loadWhisper = (onProgress?: (pct: number) => void): Promise<any> => {
+  if (!whisperPipePromise) {
+    whisperPipePromise = (async () => {
+      const { pipeline } = await import('@huggingface/transformers');
+      const useGpu = typeof navigator !== 'undefined' && !!(navigator as any).gpu;
+      const files: Record<string, number> = {};
+      return await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', {
+        device: useGpu ? 'webgpu' : 'wasm',
+        dtype: useGpu ? 'fp32' : 'q8',
+        progress_callback: (info: any) => {
+          if (!onProgress || info?.status !== 'progress' || !info.file) return;
+          files[info.file] = typeof info.progress === 'number' ? info.progress : 0;
+          const vals = Object.values(files);
+          onProgress(Math.round(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length)));
+        },
+      });
+    })().catch((e) => { whisperPipePromise = null; throw e; });
+  }
+  return whisperPipePromise;
+};
 
 // Sección plegable para el panel de edición
 const Accordion: React.FC<{ title: string; icon: string; open: boolean; onToggle: () => void; badge?: string; children: React.ReactNode }> = ({ title, icon, open, onToggle, badge, children }) => (
@@ -168,6 +192,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [openSec, setOpenSec] = useState<Record<string, boolean>>({ subtitulos: true }); // secciones desplegables
   const toggleSec = (k: string) => setOpenSec(p => ({ ...p, [k]: !p[k] }));
   const [transcribing, setTranscribing] = useState(false);
+  const [subMsg, setSubMsg] = useState(''); // estado del proceso de subtítulos (carga de modelo / transcripción)
   const [subFont, setSubFont] = useState<string>(kit?.headlineFont || 'Inter');
 
   const [logoEnabled, setLogoEnabled] = useState(false);
@@ -935,37 +960,95 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setSubtitles(prev => [...prev, { id: `sub_${Date.now()}`, text: '', start, end: Math.min(start + 3, trimEnd || start + 3) }]);
   };
 
-  // Transcribe el audio (la voz en off si existe, si no el video) y crea los subtítulos cronometrados
+  // Decodifica el audio de una fuente a Float32 mono 16 kHz (formato que espera Whisper).
+  const decodeToMono16k = async (url: string): Promise<Float32Array> => {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    let buf: AudioBuffer | null = null;
+    try { buf = await decodeAudioUniversal(url, ctx); } finally { try { await ctx.close(); } catch {} }
+    if (!buf) throw new Error('Sin pista de audio.');
+    // Resamplea a 16 kHz y mezcla a mono con un OfflineAudioContext (destino de 1 canal).
+    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(buf.duration * 16000)), 16000);
+    const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+    const rendered = await off.startRendering();
+    return rendered.getChannelData(0).slice();
+  };
+
+  type Seg = { text: string; start: number; end: number };
+
+  // Transcripción 100% en el navegador con Whisper (sin costo de API).
+  const transcribeWithWhisper = async (url: string): Promise<Seg[]> => {
+    setSubMsg('Preparando audio…');
+    const audio = await decodeToMono16k(url);
+    setSubMsg('Cargando modelo de subtítulos…');
+    const pipe = await loadWhisper((pct) => setSubMsg(`Descargando modelo… ${pct}%`));
+    setSubMsg('Transcribiendo…');
+    const total = audio.length / 16000;
+    const out: any = await pipe(audio, {
+      return_timestamps: true,
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      language: 'spanish',
+      task: 'transcribe',
+    });
+    const chunks: any[] = out?.chunks || [];
+    return chunks
+      .map((c) => {
+        const text = String(c?.text || '').trim();
+        const start = Math.max(0, Number(c?.timestamp?.[0]) || 0);
+        let end = Number(c?.timestamp?.[1]);
+        if (!isFinite(end)) end = Math.min(total, start + Math.max(1.2, text.length * 0.06));
+        return { text, start, end: Math.max(start + 0.3, end) };
+      })
+      .filter((c) => c.text);
+  };
+
+  // Fallback al servidor (Gemini) por si Whisper no puede correr en el dispositivo.
+  const transcribeWithServer = async (url: string): Promise<Seg[]> => {
+    const base64 = await getWavBase64(url);
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: base64, mime: 'audio/wav' }),
+    });
+    let json;
+    try { json = await res.json(); } catch { throw new Error('El servidor no respondió (puede faltar el deploy con /api/transcribe).'); }
+    if (!res.ok) throw new Error(json?.error || 'No se pudo transcribir el audio.');
+    recordUsage('subtitulos', json.usage);
+    const clean = String(json.text || '').replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    return (parsed.segments || [])
+      .filter((s: any) => s?.text && String(s.text).trim())
+      .map((s: any) => {
+        const start = Math.max(0, Number(s.start) || 0);
+        return { text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
+      });
+  };
+
+  // Transcribe el audio (la voz en off si existe, si no el video) y crea los subtítulos cronometrados.
   const generateSubtitles = async () => {
     // Subtitulamos la NARRACIÓN: si hay voz en off, esa; si no, el audio del video.
     const srcUrl = voiceUrl || videoUrl;
     if (!srcUrl) { alert('Subí un video o una voz en off para generar subtítulos.'); return; }
     setTranscribing(true);
+    setSubMsg('');
     try {
-      const base64 = await getWavBase64(srcUrl);
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio: base64, mime: 'audio/wav' }),
-      });
-      let json;
-      try { json = await res.json(); } catch { throw new Error('El servidor no respondió (puede faltar el deploy con /api/transcribe).'); }
-      if (!res.ok) throw new Error(json?.error || 'No se pudo transcribir el audio.');
-      recordUsage('subtitulos', json.usage);
-      const clean = String(json.text || '').replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
-      const segs = (parsed.segments || []).filter((s: any) => s?.text && String(s.text).trim());
+      let segs: Seg[] = [];
+      try {
+        segs = await transcribeWithWhisper(srcUrl);
+      } catch (werr) {
+        console.warn('[subtitulos] Whisper no disponible, uso servidor:', werr);
+        setSubMsg('Transcribiendo (servidor)…');
+        segs = await transcribeWithServer(srcUrl);
+      }
       if (!segs.length) { alert(voiceUrl ? 'No se detectó voz en la narración.' : 'Este video no tiene voz. Grabá o subí una voz en off y generá los subtítulos de ahí.'); return; }
-      setSubtitles(segs.map((s: any, i: number) => {
-        const start = Math.max(0, Number(s.start) || 0);
-        return { id: `sub_${Date.now()}_${i}`, text: String(s.text).trim(), start, end: Math.max(start + 0.5, Number(s.end) || start + 1.5) };
-      }));
+      setSubtitles(segs.map((s, i) => ({ id: `sub_${Date.now()}_${i}`, text: s.text, start: s.start, end: s.end })));
     } catch (e: any) {
       console.error('Subtítulos:', e);
       const motivo = e?.message || (typeof e === 'string' ? e : '') || (e?.name ? e.name : '') || (e ? JSON.stringify(e) : '') || 'error desconocido';
       alert('No se pudieron generar los subtítulos.\n\nMotivo: ' + motivo);
     } finally {
       setTranscribing(false);
+      setSubMsg('');
     }
   };
 
@@ -1741,7 +1824,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
 
                 {/* Auto-subtítulos con IA */}
                 <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-violet-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md shadow-purple-200/50 active:scale-95 disabled:opacity-50 transition-all">
-                  {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Transcribiendo…</> : <><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>{voiceUrl ? 'Generar subtítulos de la voz en off' : 'Generar subtítulos del audio'}</>}
+                  {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>{subMsg || 'Transcribiendo…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>{voiceUrl ? 'Generar subtítulos de la voz en off' : 'Generar subtítulos del audio'}</>}
                 </button>
 
                 {/* Estilos predeterminados */}

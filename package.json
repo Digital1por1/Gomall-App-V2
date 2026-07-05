@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@vitejs/plugin-react": "^4.2.1",
     "express": "^5.2.1",
