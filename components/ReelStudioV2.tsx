@@ -291,15 +291,14 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     setSelectedId(el.id);
   };
 
-  // ---------- logo de marca ----------
-  const brandLogoUrl = profile?.currentLogoUrl || kit?.logoUrls?.[0] || null;
+  // ---------- logo (subir cualquier logo) ----------
   const addLogoImage = (url: string) => {
     const overlay = project.tracks.find(t => t.kind === 'overlay')!;
     const el = makeImageElement(url, { name: 'Logo', start: 0, duration: Math.max(4, totalDur || 4), transform: { x: 82, y: 12, scale: 18, rotation: 0, opacity: 100 } });
     commit(addElement(project, overlay.id, el));
     setSelectedId(el.id);
   };
-  const addLogo = () => { if (brandLogoUrl) addLogoImage(brandLogoUrl); else fileLogoRef.current?.click(); };
+  const addLogo = () => fileLogoRef.current?.click(); // siempre deja subir un logo propio
 
   // ---------- grabar voz en off (micrófono) ----------
   const startRec = async () => {
@@ -328,10 +327,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const applyTemplate = (tpl: typeof TEMPLATES[number]) => {
     let p: ReelProject = { ...project, aspect: '9:16' };
     const overlay = p.tracks.find(t => t.kind === 'overlay')!;
-    const baseStyle: TextStyle = { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 8, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600' };
+    const baseStyle: TextStyle = { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: '#000000', stroke: false, align: 'center', karaoke: false, accent: '#FFE600' };
     const end = Math.max(4, projectDuration(project));
-    const hook = { ...makeTextElement(tpl.hook, { start: 0.3, duration: 3, transform: { x: 50, y: 16, scale: 100, rotation: 0, opacity: 100 }, style: baseStyle }), transition: 'zoom', transitionDur: 0.4 } as ReelElement;
-    const cta = { ...makeTextElement(tpl.cta, { start: Math.max(2, end - 3), duration: 3, transform: { x: 50, y: 84, scale: 100, rotation: 0, opacity: 100 }, style: { ...baseStyle, size: 7 } }), transition: 'slide', transitionDur: 0.4 } as ReelElement;
+    const hookEnd = Math.min(end, 3.2);
+    const hook = { ...makeTextElement(tpl.hook, { start: 0.3, duration: Math.max(1, hookEnd - 0.3), transform: { x: 50, y: 22, scale: 100, rotation: 0, opacity: 100 }, style: baseStyle }), transition: 'zoom', transitionDur: 0.4 } as ReelElement;
+    const ctaStart = Math.max(hookEnd + 0.2, end - 3);
+    const cta = { ...makeTextElement(tpl.cta, { start: ctaStart, duration: Math.max(1, end - ctaStart), transform: { x: 50, y: 80, scale: 100, rotation: 0, opacity: 100 }, style: { ...baseStyle, bg: null, stroke: true } }), transition: 'slide', transitionDur: 0.4 } as ReelElement;
     p = addElement(p, overlay.id, hook);
     p = addElement(p, overlay.id, cta);
     commit(p);
@@ -690,7 +691,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             {tab === 'media' && (<>
               <button onClick={() => fileVideoRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-video mr-2" />Subir video</button>
               <button onClick={() => fileImageRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-image mr-2" />Subir imagen</button>
-              <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Agregar logo{brandLogoUrl ? ' de marca' : ''}</button>
+              <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Subir logo</button>
               <p className="text-[11px] text-white/40 leading-relaxed">Los videos van en fila en la pista principal; imágenes y logo como overlay que reposicionás arrastrando en el preview.</p>
             </>)}
             {tab === 'plantillas' && (
@@ -947,8 +948,8 @@ const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; 
     {isBase && (
       <Row label="Encuadre">
         <div className="flex gap-2">
-          <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'contain') !== 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Ver completo</button>
-          <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Rellenar</button>
+          <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'cover') === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Llenar formato</button>
+          <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'contain' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Completo (con bordes)</button>
         </div>
       </Row>
     )}

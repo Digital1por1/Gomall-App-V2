@@ -266,14 +266,14 @@ export function makeVideoElement(url: string, sourceDuration: number, opts: Part
     start: opts.start ?? 0, duration: opts.duration ?? sourceDuration, trimStart: opts.trimStart ?? 0,
     trimEnd: opts.trimEnd ?? sourceDuration, sourceDuration,
     transform: opts.transform ?? { ...DEFAULT_TRANSFORM }, volume: opts.volume ?? 1, muted: opts.muted ?? false,
-    fit: opts.fit ?? 'contain',
+    fit: opts.fit ?? 'cover',
   };
 }
 export function makeImageElement(url: string, opts: Partial<ImageElement> = {}): ImageElement {
   return {
     id: genId('el'), type: 'image', name: opts.name || 'Imagen', url, mediaId: opts.mediaId,
     start: opts.start ?? 0, duration: opts.duration ?? 4, trimStart: 0, trimEnd: 0,
-    transform: opts.transform ?? { ...DEFAULT_TRANSFORM }, fit: opts.fit ?? 'contain',
+    transform: opts.transform ?? { ...DEFAULT_TRANSFORM }, fit: opts.fit ?? 'cover',
   };
 }
 export function makeTextElement(text: string, opts: Partial<TextElement> = {}): TextElement {
