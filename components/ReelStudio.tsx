@@ -6,6 +6,7 @@ import {
 } from 'mediabunny';
 import { UserProfile } from '../types';
 import { recordUsage } from './usageTracker';
+import { putMedia, getMedia, putProject, getProject, clearProject, pruneMedia, newMediaId } from './reelStorage';
 
 // Estilos de subtítulo predeterminados (incluye look CapCut)
 interface SubStyle { label: string; y: number; size: number; weight: number; box: boolean; outline: number; outlineColor: string; shadow: boolean; upper: boolean; def: string; }
@@ -233,6 +234,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   const [clipPeaks, setClipPeaks] = useState<Record<string, number[]>>({}); // onda de audio por clip
   const [clipThumbs, setClipThumbs] = useState<Record<string, string>>({}); // miniatura (dataURL) por clip
   const peaksBusyRef = useRef<Set<string>>(new Set());
+  // Persistencia local: mapa objectURL → id de media en IndexedDB; gate de hidratación; indicador de guardado.
+  const mediaIdRef = useRef<Map<string, string>>(new Map());
+  const hydratedRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const scrubRef = useRef(false);              // true mientras se arrastra el cabezal
   const pendingSeekRef = useRef<number | null>(null); // seek a aplicar tras cambiar de clip
 
@@ -1441,6 +1447,158 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     }
   };
 
+  // === Snapshot del estado editable del reel (base para persistencia y para undo/redo) ===
+  type ReelSnapshot = {
+    clips: Clip[]; activeIdx: number; videoVolume: number;
+    musicUrl: string | null; musicName: string; musicVolume: number;
+    voiceUrl: string | null; voiceName: string; voiceVolume: number;
+    subtitles: Subtitle[]; subStyle: string; subColor: string; subScale: number;
+    subAnim: 'none' | 'reveal' | 'highlight'; subAccent: string; subFont: string;
+    subPos: { x: number; y: number } | null;
+    logoEnabled: boolean; logoPos: { x: number; y: number }; logoSize: number;
+    transition: 'none' | 'fade' | 'white' | 'zoom' | 'slide'; transDur: number;
+    reelDur: 'auto' | 15 | 30 | 60; trimDead: boolean; beatSync: boolean; beats: number[];
+  };
+  const captureState = (): ReelSnapshot => ({
+    clips, activeIdx, videoVolume, musicUrl, musicName, musicVolume,
+    voiceUrl, voiceName, voiceVolume, subtitles, subStyle, subColor, subScale,
+    subAnim, subAccent, subFont, subPos, logoEnabled, logoPos, logoSize,
+    transition, transDur, reelDur, trimDead, beatSync, beats,
+  });
+  const applyState = (s: ReelSnapshot) => {
+    setClips(s.clips); setActiveIdx(s.activeIdx); setVideoVolume(s.videoVolume);
+    setMusicUrl(s.musicUrl); setMusicName(s.musicName); setMusicVolume(s.musicVolume);
+    setVoiceUrl(s.voiceUrl); setVoiceName(s.voiceName); setVoiceVolume(s.voiceVolume);
+    setSubtitles(s.subtitles); setSubStyle(s.subStyle); setSubColor(s.subColor); setSubScale(s.subScale);
+    setSubAnim(s.subAnim); setSubAccent(s.subAccent); setSubFont(s.subFont); setSubPos(s.subPos);
+    setLogoEnabled(s.logoEnabled); setLogoPos(s.logoPos); setLogoSize(s.logoSize);
+    setTransition(s.transition); setTransDur(s.transDur);
+    setReelDur(s.reelDur); setTrimDead(s.trimDead); setBeatSync(s.beatSync); setBeats(s.beats);
+  };
+
+  // === Persistencia local (IndexedDB): que el reel no se pierda al cerrar/recargar ===
+  // Convierte un objectURL en un id estable, guardando el blob la primera vez que se lo ve.
+  const persistUrl = async (url: string | null): Promise<string | null> => {
+    if (!url) return null;
+    const existing = mediaIdRef.current.get(url);
+    if (existing) return existing;
+    try {
+      const blob = await (await fetch(url)).blob();
+      const id = newMediaId();
+      await putMedia(id, blob);
+      mediaIdRef.current.set(url, id);
+      return id;
+    } catch { return null; }
+  };
+  const persistNow = async () => {
+    const snap = captureState();
+    if (!snap.clips.length) { try { await clearProject(); await pruneMedia(new Set()); } catch {} setSaveState('idle'); return; }
+    try {
+      const clipIds: (string | null)[] = [];
+      for (const c of snap.clips) clipIds.push(await persistUrl(c.url));
+      const musicId = await persistUrl(snap.musicUrl);
+      const voiceId = await persistUrl(snap.voiceUrl);
+      const project = {
+        v: 1,
+        clips: snap.clips.map((c, i) => ({ id: c.id, mediaId: clipIds[i], duration: c.duration, trimStart: c.trimStart, trimEnd: c.trimEnd })),
+        activeIdx: snap.activeIdx, videoVolume: snap.videoVolume,
+        music: musicId ? { mediaId: musicId, name: snap.musicName, volume: snap.musicVolume } : null,
+        voice: voiceId ? { mediaId: voiceId, name: snap.voiceName, volume: snap.voiceVolume } : null,
+        subtitles: snap.subtitles, subStyle: snap.subStyle, subColor: snap.subColor, subScale: snap.subScale,
+        subAnim: snap.subAnim, subAccent: snap.subAccent, subFont: snap.subFont, subPos: snap.subPos,
+        logoEnabled: snap.logoEnabled, logoPos: snap.logoPos, logoSize: snap.logoSize,
+        transition: snap.transition, transDur: snap.transDur,
+        reelDur: snap.reelDur, trimDead: snap.trimDead, beatSync: snap.beatSync, beats: snap.beats,
+      };
+      await putProject(project);
+      const keep = new Set<string>();
+      clipIds.forEach(id => { if (id) keep.add(id); });
+      if (musicId) keep.add(musicId);
+      if (voiceId) keep.add(voiceId);
+      await pruneMedia(keep);
+      setSaveState('saved');
+    } catch (e) {
+      console.warn('[reel] no se pudo autoguardar:', e);
+      setSaveState('idle');
+    }
+  };
+
+  // Autosave con debounce ante cualquier cambio del proyecto (una vez terminada la hidratación inicial).
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    setSaveState('saving');
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => { persistNow(); }, 800);
+    return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips, activeIdx, videoVolume, musicUrl, musicName, musicVolume, voiceUrl, voiceName, voiceVolume, subtitles, subStyle, subColor, subScale, subAnim, subAccent, subFont, subPos, logoEnabled, logoPos, logoSize, transition, transDur, reelDur, trimDead, beatSync, beats]);
+
+  // Restaura el reel guardado al abrir el editor.
+  useEffect(() => {
+    (async () => {
+      try {
+        const p: any = await getProject();
+        if (p && Array.isArray(p.clips) && p.clips.length) {
+          const urlFor = async (mediaId: string | null | undefined): Promise<string | null> => {
+            if (!mediaId) return null;
+            const blob = await getMedia(mediaId);
+            if (!blob) return null;
+            const url = URL.createObjectURL(blob);
+            mediaIdRef.current.set(url, mediaId);
+            return url;
+          };
+          const restored: Clip[] = [];
+          for (const c of p.clips) {
+            const url = await urlFor(c.mediaId);
+            if (url) restored.push({ id: c.id || `clip_${Date.now()}_${restored.length}`, url, duration: c.duration || 0, trimStart: c.trimStart || 0, trimEnd: c.trimEnd || c.duration || 0 });
+          }
+          if (restored.length) {
+            setClips(restored);
+            setActiveIdx(Math.min(p.activeIdx || 0, restored.length - 1));
+            if (typeof p.videoVolume === 'number') setVideoVolume(p.videoVolume);
+            if (p.music) { const mu = await urlFor(p.music.mediaId); if (mu) { setMusicUrl(mu); setMusicName(p.music.name || ''); setMusicVolume(p.music.volume ?? 0.8); } }
+            if (p.voice) { const vu = await urlFor(p.voice.mediaId); if (vu) { setVoiceUrl(vu); setVoiceName(p.voice.name || ''); setVoiceVolume(p.voice.volume ?? 1); } }
+            if (Array.isArray(p.subtitles)) setSubtitles(p.subtitles);
+            if (p.subStyle) setSubStyle(p.subStyle);
+            if (p.subColor) setSubColor(p.subColor);
+            if (typeof p.subScale === 'number') setSubScale(p.subScale);
+            if (p.subAnim) setSubAnim(p.subAnim);
+            if (p.subAccent) setSubAccent(p.subAccent);
+            if (p.subFont) setSubFont(p.subFont);
+            if (p.subPos !== undefined) setSubPos(p.subPos);
+            if (typeof p.logoEnabled === 'boolean') setLogoEnabled(p.logoEnabled);
+            if (p.logoPos) setLogoPos(p.logoPos);
+            if (typeof p.logoSize === 'number') setLogoSize(p.logoSize);
+            if (p.transition) setTransition(p.transition);
+            if (typeof p.transDur === 'number') setTransDur(p.transDur);
+            if (p.reelDur !== undefined) setReelDur(p.reelDur);
+            if (typeof p.trimDead === 'boolean') setTrimDead(p.trimDead);
+            if (typeof p.beatSync === 'boolean') setBeatSync(p.beatSync);
+            if (Array.isArray(p.beats)) setBeats(p.beats);
+            setSaveState('saved');
+          }
+        }
+      } catch (e) { console.warn('[reel] no se pudo restaurar:', e); }
+      finally { hydratedRef.current = true; }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Empieza un reel nuevo (borra el guardado local).
+  const newReel = async () => {
+    if (clips.length && !confirm('¿Empezar un reel nuevo? Se borrará el reel guardado actual.')) return;
+    try { await clearProject(); await pruneMedia(new Set()); } catch {}
+    mediaIdRef.current.clear();
+    applyState({
+      clips: [], activeIdx: 0, videoVolume: 1, musicUrl: null, musicName: '', musicVolume: 0.8,
+      voiceUrl: null, voiceName: '', voiceVolume: 1, subtitles: [], subStyle: 'capcut', subColor: '#FFFFFF',
+      subScale: 1, subAnim: 'none', subAccent: '#FFE600', subFont: kit?.headlineFont || 'Inter', subPos: null,
+      logoEnabled: false, logoPos: { x: 50, y: 10 }, logoSize: 28, transition: 'none', transDur: 0.5,
+      reelDur: 'auto', trimDead: false, beatSync: false, beats: [],
+    });
+    setSaveState('idle');
+  };
+
   const inputClass = "w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-100 transition-all";
   const labelClass = "text-[10px] font-black text-slate-400 uppercase tracking-widest";
 
@@ -1454,7 +1612,19 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
             <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Video · Música · Subtítulos</span>
           </div>
         </div>
-        <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-arrow-left"></i> Volver</button>
+        <div className="flex items-center gap-2">
+          {clips.length > 0 && (
+            <span className="hidden sm:flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400">
+              {saveState === 'saving'
+                ? <><i className="fa-solid fa-circle-notch fa-spin text-slate-300"></i> Guardando…</>
+                : saveState === 'saved'
+                  ? <><i className="fa-solid fa-cloud-check text-emerald-500"></i> Guardado</>
+                  : null}
+            </span>
+          )}
+          <button onClick={newReel} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-file-circle-plus"></i> Nuevo</button>
+          <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-arrow-left"></i> Volver</button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto">
