@@ -9,7 +9,7 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
+  addElement, addAudioElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
@@ -267,9 +267,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     for (const f of Array.from(files)) {
       const url = URL.createObjectURL(f);
       const dur = await probeDuration(url, 'audio');
-      const audio = p.tracks.find(t => t.kind === 'audio')!;
       const el = makeAudioElement(url, dur, { start: 0, name: f.name.replace(/\.[^.]+$/, ''), volume: 0.8 });
-      p = addElement(p, audio.id, el);
+      p = addAudioElement(p, el); // pista de audio libre o una nueva → no se pisan
     }
     commit(p);
   };
@@ -315,8 +314,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         if (blob.size < 512) { alert('La grabación quedó vacía. Revisá el micrófono.'); return; }
         const url = URL.createObjectURL(blob);
         const dur = await probeDuration(url, 'audio');
-        const audio = project.tracks.find(t => t.kind === 'audio')!;
-        commit(addElement(project, audio.id, makeAudioElement(url, dur, { name: 'Voz en off', start: 0, volume: 1 })));
+        commit(addAudioElement(project, makeAudioElement(url, dur, { name: 'Voz en off', start: 0, volume: 1 })));
       };
       micRef.current = rec; rec.start(); setRecording(true);
     } catch { alert('No se pudo acceder al micrófono. Revisá los permisos del navegador.'); }

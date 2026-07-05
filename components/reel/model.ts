@@ -146,6 +146,16 @@ export function addElement(p: ReelProject, trackId: string, el: ReelElement): Re
   return mapTracks(p, t => t.id === trackId ? { ...t, elements: [...t.elements, el].sort((a, b) => a.start - b.start) } : t);
 }
 
+// Agrega un audio en una pista de audio SIN solapamiento; si todas se solapan, crea una pista nueva
+// (así música y voz quedan en pistas separadas, una debajo de la otra).
+export function addAudioElement(p: ReelProject, el: AudioElement): ReelProject {
+  const overlaps = (t: Track) => t.elements.some(e => !(el.start + el.duration <= e.start || el.start >= e.start + e.duration));
+  const free = p.tracks.find(t => t.kind === 'audio' && !overlaps(t));
+  if (free) return addElement(p, free.id, el);
+  const track: Track = { id: genId('trk'), kind: 'audio', name: 'Audio', elements: [el], muted: false, hidden: false, locked: false };
+  return { ...p, tracks: [...p.tracks, track] };
+}
+
 export function updateElement(p: ReelProject, id: string, patch: Partial<ReelElement>): ReelProject {
   return mapTracks(p, t => {
     if (!t.elements.some(e => e.id === id)) return t;
