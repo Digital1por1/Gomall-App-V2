@@ -54,6 +54,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
+  const [snap, setSnap] = useState(true);
   const [tab, setTab] = useState<'media' | 'texto' | 'audio' | 'ajustes'>('media');
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -306,12 +307,30 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     else if (mode === 'trimL') dragRef.current = { mode, id, startX: e.clientX, origStart: el.start, origTrimStart: (el as any).trimStart || 0, origDur: el.duration };
     else dragRef.current = { mode, id, startX: e.clientX, origDur: el.duration, origTrimEnd: (el as any).trimEnd || el.duration };
   };
+  // Imanta un valor (s) a los bordes de otros elementos, al playhead y al 0 si está cerca (umbral en px).
+  const snapValue = (p: ReelProject, excludeId: string, raw: number, elDuration: number): number => {
+    if (!snap) return Math.max(0, raw);
+    const thr = 9 / pxPerSec;
+    const points = [0, currentTime];
+    for (const t of p.tracks) for (const el of t.elements) { if (el.id === excludeId) continue; points.push(el.start, el.start + el.duration); }
+    let best = raw, bestD = thr;
+    for (const pt of points) {
+      if (Math.abs(raw - pt) < bestD) { bestD = Math.abs(raw - pt); best = pt; }
+      const trail = raw + elDuration;
+      if (Math.abs(trail - pt) < bestD) { bestD = Math.abs(trail - pt); best = pt - elDuration; }
+    }
+    return Math.max(0, best);
+  };
   const onTimelinePointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current; if (!d) return;
     if (d.mode === 'playhead') { scrubTo(e); return; }
     const dx = (e.clientX - d.startX) / pxPerSec;
     if (d.mode === 'move') {
-      setProject(p => moveElement(p, d.id, Math.max(0, d.origStart + dx)));
+      setProject(p => {
+        const f = findElement(p, d.id); if (!f) return p;
+        const raw = Math.max(0, d.origStart + dx);
+        return moveElement(p, d.id, snapValue(p, d.id, raw, f.el.duration));
+      });
     } else if (d.mode === 'trimL') {
       setProject(p => {
         const f = findElement(p, d.id); if (!f) return p;
@@ -579,6 +598,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       <div className="h-[240px] bg-[#1b1719] border-t border-white/10 flex flex-col min-h-0">
         <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
+          <button onClick={() => setSnap(s => !s)} title="Imán (snapping)" className="w-8 h-8 grid place-items-center rounded-lg text-xs"
+            style={snap ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff' } : { color: 'rgba(255,255,255,.5)' }}><i className="fa-solid fa-magnet" /></button>
           <div className="flex-1" />
           <span className="text-xs text-white/40">Zoom</span>
           <input type="range" min={20} max={160} value={pxPerSec} onChange={(e) => setPxPerSec(Number(e.target.value))} className="w-28 accent-[color:var(--b)]" style={{ ['--b' as any]: BRAND }} />
