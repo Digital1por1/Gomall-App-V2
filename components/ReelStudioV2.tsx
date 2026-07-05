@@ -13,7 +13,10 @@ import {
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
-import { exportProject } from './reel/exporter';
+import { exportProject, buildMixedAudio } from './reel/exporter';
+import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
+
+const V2_KEY = 'reel_v2';
 
 const BRAND = '#EA5B25';
 
@@ -54,11 +57,22 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Persistencia V2: mapa url→mediaId (prefijo v2_ para no chocar con la media del editor V1); gate de hidratación.
+  const mediaIdRef = useRef<Map<string, string>>(new Map());
+  const hydratedRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
   const poolRef = useRef<MediaPool>(new MediaPool());
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ base: number } | null>(null);
+  // Audio del preview: se reproduce la mezcla completa (buildMixedAudio) sincronizada al reloj.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const mixBufRef = useRef<AudioBuffer | null>(null);
+  const mixSrcRef = useRef<AudioBufferSourceNode | null>(null);
+  const mixDirtyRef = useRef(true);
+  const playingRef = useRef(false);
   const dragRef = useRef<DragState>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const fileVideoRef = useRef<HTMLInputElement>(null);
@@ -108,8 +122,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, currentTime, playing]);
 
-  // Limpia el pool al desmontar.
-  useEffect(() => () => { poolRef.current.dispose(); if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+  // Limpia el pool y el audio al desmontar.
+  useEffect(() => () => {
+    poolRef.current.dispose();
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (mixSrcRef.current) { try { mixSrcRef.current.stop(); } catch { /* noop */ } }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch { /* noop */ } }
+  }, []);
 
   // Dibuja un frame estático: hace seek de los videos activos y compone.
   async function renderStatic(t: number) {
@@ -119,12 +138,36 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     drawReelFrame(ctx, project, t, poolRef.current);
   }
 
+  // Marca la mezcla de audio como desactualizada ante cualquier cambio del proyecto (se reconstruye al reproducir).
+  useEffect(() => { mixDirtyRef.current = true; }, [project]);
+
+  const stopAudio = () => {
+    if (mixSrcRef.current) { try { mixSrcRef.current.stop(); } catch { /* noop */ } mixSrcRef.current = null; }
+  };
+  const startAudio = async (at: number) => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* noop */ } }
+      if (mixDirtyRef.current || !mixBufRef.current) { mixBufRef.current = await buildMixedAudio(project); mixDirtyRef.current = false; }
+      stopAudio();
+      const buf = mixBufRef.current;
+      if (!buf || !playingRef.current) return; // se pausó mientras se construía la mezcla
+      const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+      src.start(0, Math.max(0, Math.min(at, buf.duration)));
+      mixSrcRef.current = src;
+    } catch (e) { console.warn('[preview] audio no disponible:', e); }
+  };
+
   // Reproducción: reloj por rAF; reproduce/pausa los videos activos y compone cada frame.
   const play = () => {
     if (playing) return;
+    const startAt = currentTime >= totalDur ? 0 : currentTime;
     if (currentTime >= totalDur) setCurrentTime(0);
     setPlaying(true);
-    clockRef.current = { base: performance.now() - (currentTime >= totalDur ? 0 : currentTime) * 1000 };
+    playingRef.current = true;
+    clockRef.current = { base: performance.now() - startAt * 1000 };
+    startAudio(startAt);
     const loop = () => {
       const c = canvasRef.current; if (!c) { setPlaying(false); return; }
       const ctx = c.getContext('2d'); if (!ctx) { setPlaying(false); return; }
@@ -151,6 +194,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   };
   const pause = () => {
     setPlaying(false);
+    playingRef.current = false;
+    stopAudio();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     for (const track of project.tracks) for (const el of track.elements) if (el.type === 'video') { try { poolRef.current.getVideo((el as VideoElement).url).pause(); } catch { /* noop */ } }
   };
@@ -299,6 +344,81 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
 
   const changeAspect = (aspect: AspectId) => commit({ ...project, aspect });
 
+  // ---------- persistencia local (IndexedDB) ----------
+  const persistV2 = async () => {
+    if (projectDuration(project) <= 0) { try { await clearProjectAt(V2_KEY); } catch { /* noop */ } setSaveState('idle'); return; }
+    try {
+      const tracks: any[] = [];
+      for (const track of project.tracks) {
+        const els: any[] = [];
+        for (const el of track.elements) {
+          const anyEl = el as any;
+          const url: string | undefined = anyEl.url;
+          let mediaId: string | undefined = anyEl.mediaId;
+          if (url) {
+            mediaId = mediaIdRef.current.get(url);
+            if (!mediaId) {
+              try { const blob = await (await fetch(url)).blob(); mediaId = 'v2_' + newMediaId(); await putMedia(mediaId, blob); mediaIdRef.current.set(url, mediaId); }
+              catch { mediaId = undefined; }
+            }
+          }
+          els.push({ ...el, mediaId, url: url ? '' : undefined });
+        }
+        tracks.push({ ...track, elements: els });
+      }
+      await putProjectAt(V2_KEY, { ...project, tracks });
+      setSaveState('saved');
+    } catch (e) { console.warn('[reel v2] autosave falló', e); setSaveState('idle'); }
+  };
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    setSaveState('saving');
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => persistV2(), 900);
+    return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved: any = await getProjectAt(V2_KEY);
+        if (saved && Array.isArray(saved.tracks)) {
+          const tracks: any[] = [];
+          for (const track of saved.tracks) {
+            const els: any[] = [];
+            for (const el of track.elements || []) {
+              if (el.mediaId) {
+                const blob = await getMedia(el.mediaId);
+                if (!blob) continue; // media faltante → se omite el elemento
+                const url = URL.createObjectURL(blob);
+                mediaIdRef.current.set(url, el.mediaId);
+                els.push({ ...el, url });
+              } else {
+                els.push({ ...el });
+              }
+            }
+            tracks.push({ ...track, elements: els });
+          }
+          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks }); setSaveState('saved'); }
+        }
+      } catch (e) { console.warn('[reel v2] no se pudo restaurar', e); }
+      finally { hydratedRef.current = true; }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const newProjectV2 = async () => {
+    if (totalDur > 0 && !confirm('¿Empezar un reel nuevo? Se borrará el reel guardado.')) return;
+    try { await clearProjectAt(V2_KEY); } catch { /* noop */ }
+    mediaIdRef.current.clear();
+    histRef.current = { past: [], future: [] }; setCanUndo(false); setCanRedo(false);
+    pause();
+    setProject(createProject(project.aspect));
+    setSelectedId(null); setCurrentTime(0); setSaveState('idle');
+  };
+
   // ---------- UI ----------
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
@@ -316,6 +436,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         <span className="text-sm text-white/50 tracking-widest font-semibold">Creator Studio</span>
         <span className="ml-3 text-xs text-white/40">Reel sin título</span>
         <div className="flex-1" />
+        {saveState !== 'idle' && (
+          <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-white/40 mr-1">
+            {saveState === 'saving' ? <><i className="fa-solid fa-circle-notch fa-spin" /> Guardando</> : <><i className="fa-solid fa-cloud text-emerald-400" /> Guardado</>}
+          </span>
+        )}
+        <button onClick={newProjectV2} title="Nuevo reel" className="h-9 px-3 rounded-lg bg-white/10 text-white/70 text-xs font-bold hover:bg-white/20"><i className="fa-solid fa-file-circle-plus" /></button>
         <div className="flex items-center rounded-xl overflow-hidden border border-white/10">
           <button onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className="w-9 h-9 grid place-items-center text-white/60 hover:bg-white/10 disabled:opacity-30"><i className="fa-solid fa-rotate-left" /></button>
           <button onClick={redo} disabled={!canRedo} title="Rehacer" className="w-9 h-9 grid place-items-center text-white/60 hover:bg-white/10 disabled:opacity-30"><i className="fa-solid fa-rotate-right" /></button>
@@ -425,7 +551,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
           <div style={{ width: Math.max(600, (totalDur + 4) * pxPerSec), minWidth: '100%' }}>
             {/* Regla */}
             <div className="h-6 relative border-b border-white/10 cursor-pointer"
-              onPointerDown={(e) => { dragRef.current = { mode: 'playhead' }; scrubTo(e); }}>
+              onPointerDown={(e) => { if (playing) pause(); dragRef.current = { mode: 'playhead' }; scrubTo(e); }}>
               {Array.from({ length: Math.ceil((totalDur + 4)) + 1 }).map((_, s) => (
                 <div key={s} className="absolute top-0 bottom-0 border-l border-white/10" style={{ left: s * pxPerSec }}>
                   <span className="absolute top-1 left-1 text-[9px] text-white/40 tabular-nums">{s}s</span>

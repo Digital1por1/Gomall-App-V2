@@ -42,6 +42,11 @@ export const putProject = (p: unknown) => run<void>(STORE_PROJ, 'readwrite', s =
 export const getProject = <T = unknown>() => run<T | undefined>(STORE_PROJ, 'readonly', s => s.get(PROJECT_KEY));
 export const clearProject = () => run<void>(STORE_PROJ, 'readwrite', s => s.delete(PROJECT_KEY));
 
+// Variantes por-clave (para proyectos con distinto esquema, ej. el editor V2).
+export const putProjectAt = (key: string, p: unknown) => run<void>(STORE_PROJ, 'readwrite', s => s.put(p, key));
+export const getProjectAt = <T = unknown>(key: string) => run<T | undefined>(STORE_PROJ, 'readonly', s => s.get(key));
+export const clearProjectAt = (key: string) => run<void>(STORE_PROJ, 'readwrite', s => s.delete(key));
+
 // Borra los blobs de media que ya no referencia ningún proyecto (evita que la base crezca sin control).
 export async function pruneMedia(keepIds: Set<string>): Promise<void> {
   try {
