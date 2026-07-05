@@ -26,9 +26,11 @@ export interface TextStyle {
   bg: string | null;       // color de caja (o null)
   stroke: boolean;
   align: 'center' | 'left' | 'right';
+  karaoke?: boolean;       // resaltado palabra por palabra según el tiempo
+  accent?: string;         // color del resaltado karaoke
 }
 export const DEFAULT_TEXT_STYLE: TextStyle = {
-  font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center',
+  font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600',
 };
 
 interface BaseElement {

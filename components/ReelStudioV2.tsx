@@ -20,6 +20,7 @@ import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMedi
 const V2_KEY = 'reel_v2';
 
 const BRAND = '#EA5B25';
+const STICKERS = ['🔥', '⭐', '❤️', '👍', '🎉', '💯', '😍', '🛒', '✅', '⚡', '🎁', '📢', '👀', '💥', '🤑', '🏷️', '👇', '🚀'];
 
 interface Props { profile: UserProfile | null; onClose: () => void; initialCopy?: string | null }
 
@@ -55,7 +56,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
-  const [tab, setTab] = useState<'media' | 'texto' | 'audio' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
@@ -78,6 +79,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const mixDirtyRef = useRef(true);
   const playingRef = useRef(false);
   const dragRef = useRef<DragState>(null);
+  const canvasDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const fileVideoRef = useRef<HTMLInputElement>(null);
   const fileImageRef = useRef<HTMLInputElement>(null);
@@ -252,6 +254,16 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     setSelectedId(el.id);
     setTab('texto');
   };
+  const addSticker = (emoji: string) => {
+    const overlay = project.tracks.find(t => t.kind === 'overlay')!;
+    const el = makeTextElement(emoji, {
+      start: currentTime, duration: 3, name: 'Sticker',
+      transform: { x: 50, y: 40, scale: 100, rotation: 0, opacity: 100 },
+      style: { font: 'Inter', color: '#FFFFFF', size: 16, weight: 400, bg: null, stroke: false, align: 'center', karaoke: false, accent: '#FFE600' },
+    });
+    commit(addElement(project, overlay.id, el));
+    setSelectedId(el.id);
+  };
 
   // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
   const generateSubtitles = async () => {
@@ -273,7 +285,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
           start: s.start, duration: Math.max(0.4, s.end - s.start),
           name: 'Subtítulo',
           transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
-          style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center' },
+          style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600' },
         });
         p = addElement(p, overlay.id, el);
       }
@@ -360,11 +372,48 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     setCurrentTime(t);
   };
 
+  // ---------- arrastrar el elemento seleccionado directo en el canvas (posición) ----------
+  // Solo aplica a elementos que usan transform x/y: overlays (PiP) y textos. La pista base usa "cover".
+  const canDragOnCanvas = (): boolean => {
+    if (!selectedId) return false;
+    const f = findElement(project, selectedId); if (!f) return false;
+    const el = f.el;
+    const usesXY = el.type === 'text' || ((el.type === 'image' || el.type === 'video') && f.track.kind !== 'video');
+    const active = currentTime >= el.start && currentTime < el.start + el.duration;
+    return usesXY && active;
+  };
+  const onCanvasPointerDown = (e: React.PointerEvent) => {
+    if (!selectedId || !canDragOnCanvas()) return;
+    const f = findElement(project, selectedId); if (!f) return;
+    const tr = (f.el as any).transform;
+    canvasDragRef.current = { id: selectedId, startX: e.clientX, startY: e.clientY, origX: tr.x, origY: tr.y };
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+  const onCanvasPointerMove = (e: React.PointerEvent) => {
+    const d = canvasDragRef.current; if (!d) return;
+    const c = canvasRef.current; if (!c) return;
+    const rect = c.getBoundingClientRect();
+    const dxPct = ((e.clientX - d.startX) / rect.width) * 100;
+    const dyPct = ((e.clientY - d.startY) / rect.height) * 100;
+    setProject(p => {
+      const f = findElement(p, d.id); if (!f) return p;
+      const tr = (f.el as any).transform;
+      return updateElement(p, d.id, { transform: { ...tr, x: Math.max(0, Math.min(100, d.origX + dxPct)), y: Math.max(0, Math.min(100, d.origY + dyPct)) } } as any);
+    });
+  };
+  const onCanvasPointerUp = () => {
+    if (canvasDragRef.current) {
+      setProject(p => { histRef.current.past.push(p); if (histRef.current.past.length > 60) histRef.current.past.shift(); histRef.current.future = []; setCanUndo(true); setCanRedo(false); return p; });
+    }
+    canvasDragRef.current = null;
+  };
+
   // Atajos de teclado.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable) return;
+      if (e.key === 'Escape') { setSelectedId(null); return; }
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
@@ -476,6 +525,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
     { id: 'texto', icon: 'fa-font', label: 'Texto' },
+    { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
     { id: 'audio', icon: 'fa-music', label: 'Audio' },
     { id: 'ajustes', icon: 'fa-sliders', label: 'Ajustes' },
   ];
@@ -534,6 +584,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               </button>
               <p className="text-[11px] text-white/40 leading-relaxed">"Agregar texto" crea un texto en el cabezal. "Subtítulos automáticos" transcribe la voz del audio/video y crea un texto por frase (la 1ª vez baja el modelo).</p>
             </>)}
+            {tab === 'stickers' && (
+              <div className="grid grid-cols-5 gap-2">
+                {STICKERS.map(s => (
+                  <button key={s} onClick={() => addSticker(s)} className="aspect-square rounded-lg bg-white/5 hover:bg-white/15 text-2xl grid place-items-center">{s}</button>
+                ))}
+              </div>
+            )}
             {tab === 'audio' && (<>
               <button onClick={() => fileAudioRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-music mr-2" />Subir música / audio</button>
               <p className="text-[11px] text-white/40 leading-relaxed">El audio se agrega en la pista de audio, desde el inicio.</p>
@@ -553,8 +610,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         {/* preview */}
         <section className="bg-[#0c0a0b] flex flex-col min-h-0">
           <div className="flex-1 grid place-items-center p-5 min-h-0">
-            <canvas ref={canvasRef} onClick={() => setSelectedId(null)}
-              className="rounded-xl shadow-2xl max-h-full" style={{ aspectRatio: `${CW}/${CH}`, maxWidth: '100%', objectFit: 'contain', background: '#000', height: '100%' }} />
+            <canvas ref={canvasRef}
+              onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
+              className="rounded-xl shadow-2xl max-h-full" style={{ aspectRatio: `${CW}/${CH}`, maxWidth: '100%', objectFit: 'contain', background: '#000', height: '100%', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
           </div>
           <div className="flex items-center gap-3 px-5 py-3 border-t border-white/10">
             <span className="text-xs tabular-nums text-white/60"><b style={{ color: BRAND }}>{fmtTime(currentTime)}</b> / {fmtTime(totalDur)}</span>
@@ -686,6 +744,12 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
     </Row>
     <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>
     <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
+    <div className="pt-2 border-t border-white/5 space-y-3">
+      <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={!!el.style.karaoke} onChange={(e) => onStyle({ karaoke: e.target.checked })} /> Animación karaoke (palabra por palabra)</label>
+      {el.style.karaoke && (
+        <Row label="Color de resalte"><input type="color" value={el.style.accent || '#FFE600'} onChange={(e) => onStyle({ accent: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
+      )}
+    </div>
   </div>
 );
 

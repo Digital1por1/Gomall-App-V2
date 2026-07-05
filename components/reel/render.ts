@@ -83,13 +83,12 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
-function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H: number, alphaMul = 1) {
+function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H: number, t: number, alphaMul = 1) {
   const s = el.style;
   const fontPx = Math.max(8, (s.size / 100) * H);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, (el.transform.opacity / 100) * alphaMul));
   ctx.font = `${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
-  ctx.textAlign = s.align;
   ctx.textBaseline = 'middle';
   const maxW = W * 0.88;
   const lines = wrapText(ctx, el.text || '', maxW);
@@ -98,29 +97,56 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const cy = (el.transform.y / 100) * H;
   const totalH = lines.length * lineH;
   let y = cy - totalH / 2 + lineH / 2;
-  const anchorX = s.align === 'left' ? cx - maxW / 2 : s.align === 'right' ? cx + maxW / 2 : cx;
-  for (const ln of lines) {
-    if (s.bg) {
-      const m = ctx.measureText(ln);
-      const padX = fontPx * 0.28, padY = fontPx * 0.16;
-      const boxW = m.width + padX * 2;
-      const bx = s.align === 'left' ? anchorX - padX : s.align === 'right' ? anchorX - boxW + padX : cx - boxW / 2;
-      ctx.save();
-      ctx.globalAlpha = ctx.globalAlpha;
-      ctx.fillStyle = s.bg;
-      const r = fontPx * 0.14;
-      roundRect(ctx, bx, y - lineH / 2 + padY * 0.5, boxW, lineH - padY, r);
-      ctx.fill();
-      ctx.restore();
-    }
+
+  // Cuántas palabras están "habladas" hasta el instante t (para karaoke).
+  const totalWords = (el.text || '').split(/\s+/).filter(Boolean).length;
+  const progress = el.duration > 0 ? Math.max(0, Math.min(1, (t - el.start) / el.duration)) : 1;
+  const activeWords = Math.floor(progress * totalWords + 1e-6);
+  const accent = s.accent || '#FFE600';
+  let wordCounter = 0;
+
+  const drawStroke = (text: string, x: number, yy: number, align: CanvasTextAlign) => {
     if (s.stroke && !s.bg) {
       ctx.lineWidth = Math.max(2, fontPx * 0.11);
       ctx.strokeStyle = 'rgba(0,0,0,0.75)';
       ctx.lineJoin = 'round';
-      ctx.strokeText(ln, anchorX, y);
+      ctx.textAlign = align;
+      ctx.strokeText(text, x, yy);
     }
-    ctx.fillStyle = s.color;
-    ctx.fillText(ln, anchorX, y);
+  };
+
+  for (const ln of lines) {
+    const m = ctx.measureText(ln);
+    // Caja de fondo (si corresponde).
+    if (s.bg) {
+      const padX = fontPx * 0.28, padY = fontPx * 0.16;
+      const boxW = m.width + padX * 2;
+      const bx = s.align === 'left' ? cx - maxW / 2 - padX : s.align === 'right' ? cx + maxW / 2 - boxW + padX : cx - boxW / 2;
+      ctx.fillStyle = s.bg;
+      roundRect(ctx, bx, y - lineH / 2 + padY * 0.5, boxW, lineH - padY, fontPx * 0.14);
+      ctx.fill();
+    }
+    if (s.karaoke && totalWords > 0) {
+      // Dibuja palabra por palabra desde el inicio de la línea (alineación calculada a mano).
+      const words = ln.split(' ');
+      const lineStart = s.align === 'left' ? cx - maxW / 2 : s.align === 'right' ? cx + maxW / 2 - m.width : cx - m.width / 2;
+      ctx.textAlign = 'left';
+      let x = lineStart;
+      for (const w of words) {
+        const wSpace = w + ' ';
+        drawStroke(w, x, y, 'left');
+        ctx.fillStyle = wordCounter < activeWords ? accent : s.color;
+        ctx.fillText(w, x, y);
+        x += ctx.measureText(wSpace).width;
+        wordCounter++;
+      }
+    } else {
+      const anchorX = s.align === 'left' ? cx - maxW / 2 : s.align === 'right' ? cx + maxW / 2 : cx;
+      drawStroke(ln, anchorX, y, s.align);
+      ctx.textAlign = s.align;
+      ctx.fillStyle = s.color;
+      ctx.fillText(ln, anchorX, y);
+    }
     y += lineH;
   }
   ctx.restore();
@@ -165,7 +191,7 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
   const visuals = visualsAt(project, t);
   for (const { el, track } of visuals) {
     const fa = fadeAlpha(el, t);
-    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, fa); continue; }
+    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, t, fa); continue; }
     const media = el as VideoElement | ImageElement;
     const src = media.type === 'video' ? pool.getVideo(media.url) : pool.getImage(media.url);
     const sw = media.type === 'video' ? (src as HTMLVideoElement).videoWidth : (src as HTMLImageElement).naturalWidth;
