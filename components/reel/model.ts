@@ -30,6 +30,7 @@ export interface TextStyle {
   karaoke?: boolean;       // (compat) equivale a anim: 'karaoke'
   anim?: 'none' | 'karaoke' | 'reveal' | 'highlight'; // animación palabra por palabra
   accent?: string;         // color del resaltado
+  glow?: boolean;          // resplandor (para estilo neón)
 }
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600',

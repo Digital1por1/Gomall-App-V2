@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { UserProfile } from '../types';
 import {
-  ReelProject, ReelElement, TextElement, VideoElement, ImageElement, AudioElement, Track,
+  ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
   addElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
@@ -22,6 +22,22 @@ const V2_KEY = 'reel_v2';
 
 const BRAND = '#EA5B25';
 const STICKERS = ['🔥', '⭐', '❤️', '👍', '🎉', '💯', '😍', '🛒', '✅', '⚡', '🎁', '📢', '👀', '💥', '🤑', '🏷️', '👇', '🚀'];
+
+// Presets de subtítulos/texto estilo CapCut.
+const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = [
+  { id: 'capcut', label: 'CapCut', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true } },
+  { id: 'caja', label: 'Caja', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false } },
+  { id: 'clasico', label: 'Clásico', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false } },
+  { id: 'neon', label: 'Neón', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true } },
+  { id: 'minimal', label: 'Minimal', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false } },
+];
+
+// Plantillas de reel: agregan textos pre-armados (gancho + CTA) y fijan formato 9:16.
+const TEMPLATES: { id: string; label: string; icon: string; hook: string; cta: string }[] = [
+  { id: 'promo', label: 'Promo / Oferta', icon: 'fa-tag', hook: 'OFERTA POR TIEMPO LIMITADO', cta: '¡Aprovechá ahora! 🔥' },
+  { id: 'lanzamiento', label: 'Lanzamiento', icon: 'fa-rocket', hook: 'YA DISPONIBLE', cta: 'Conocelo hoy 🚀' },
+  { id: 'tips', label: 'Tips / Educativo', icon: 'fa-lightbulb', hook: '3 TIPS QUE NO SABÍAS', cta: 'Guardá este reel 📌' },
+];
 
 interface Props { profile: UserProfile | null; onClose: () => void; initialCopy?: string | null }
 
@@ -57,7 +73,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
-  const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'plantillas' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
+  const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
@@ -90,6 +107,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const fileVideoRef = useRef<HTMLInputElement>(null);
   const fileImageRef = useRef<HTMLInputElement>(null);
   const fileAudioRef = useRef<HTMLInputElement>(null);
+  const fileLogoRef = useRef<HTMLInputElement>(null);
+  const micRef = useRef<MediaRecorder | null>(null);
+  const micChunksRef = useRef<Blob[]>([]);
 
   // Historial simple (undo/redo) sobre el proyecto.
   const histRef = useRef<{ past: ReelProject[]; future: ReelProject[] }>({ past: [], future: [] });
@@ -269,6 +289,52 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     });
     commit(addElement(project, overlay.id, el));
     setSelectedId(el.id);
+  };
+
+  // ---------- logo de marca ----------
+  const brandLogoUrl = profile?.currentLogoUrl || kit?.logoUrls?.[0] || null;
+  const addLogoImage = (url: string) => {
+    const overlay = project.tracks.find(t => t.kind === 'overlay')!;
+    const el = makeImageElement(url, { name: 'Logo', start: 0, duration: Math.max(4, totalDur || 4), transform: { x: 82, y: 12, scale: 18, rotation: 0, opacity: 100 } });
+    commit(addElement(project, overlay.id, el));
+    setSelectedId(el.id);
+  };
+  const addLogo = () => { if (brandLogoUrl) addLogoImage(brandLogoUrl); else fileLogoRef.current?.click(); };
+
+  // ---------- grabar voz en off (micrófono) ----------
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(m => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } }) || '';
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      micChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) micChunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const type = rec.mimeType || mime || 'audio/webm';
+        const blob = new Blob(micChunksRef.current, { type });
+        if (blob.size < 512) { alert('La grabación quedó vacía. Revisá el micrófono.'); return; }
+        const url = URL.createObjectURL(blob);
+        const dur = await probeDuration(url, 'audio');
+        const audio = project.tracks.find(t => t.kind === 'audio')!;
+        commit(addElement(project, audio.id, makeAudioElement(url, dur, { name: 'Voz en off', start: 0, volume: 1 })));
+      };
+      micRef.current = rec; rec.start(); setRecording(true);
+    } catch { alert('No se pudo acceder al micrófono. Revisá los permisos del navegador.'); }
+  };
+  const stopRec = () => { micRef.current?.stop(); setRecording(false); };
+
+  // ---------- plantillas de reel ----------
+  const applyTemplate = (tpl: typeof TEMPLATES[number]) => {
+    let p: ReelProject = { ...project, aspect: '9:16' };
+    const overlay = p.tracks.find(t => t.kind === 'overlay')!;
+    const baseStyle: TextStyle = { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 8, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600' };
+    const end = Math.max(4, projectDuration(project));
+    const hook = { ...makeTextElement(tpl.hook, { start: 0.3, duration: 3, transform: { x: 50, y: 16, scale: 100, rotation: 0, opacity: 100 }, style: baseStyle }), transition: 'zoom', transitionDur: 0.4 } as ReelElement;
+    const cta = { ...makeTextElement(tpl.cta, { start: Math.max(2, end - 3), duration: 3, transform: { x: 50, y: 84, scale: 100, rotation: 0, opacity: 100 }, style: { ...baseStyle, size: 7 } }), transition: 'slide', transitionDur: 0.4 } as ReelElement;
+    p = addElement(p, overlay.id, hook);
+    p = addElement(p, overlay.id, cta);
+    commit(p);
   };
 
   // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
@@ -572,6 +638,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   // ---------- UI ----------
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
+    { id: 'plantillas', icon: 'fa-table-cells-large', label: 'Plantillas' },
     { id: 'texto', icon: 'fa-font', label: 'Texto' },
     { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
     { id: 'audio', icon: 'fa-music', label: 'Audio' },
@@ -623,8 +690,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             {tab === 'media' && (<>
               <button onClick={() => fileVideoRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-video mr-2" />Subir video</button>
               <button onClick={() => fileImageRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-image mr-2" />Subir imagen</button>
-              <p className="text-[11px] text-white/40 leading-relaxed">Los videos se agregan en fila en la pista principal; las imágenes como overlay (PiP) que podés reposicionar.</p>
+              <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Agregar logo{brandLogoUrl ? ' de marca' : ''}</button>
+              <p className="text-[11px] text-white/40 leading-relaxed">Los videos van en fila en la pista principal; imágenes y logo como overlay que reposicionás arrastrando en el preview.</p>
             </>)}
+            {tab === 'plantillas' && (
+              <div className="space-y-2">
+                {TEMPLATES.map(tpl => (
+                  <button key={tpl.id} onClick={() => applyTemplate(tpl)} className="w-full py-3 px-3 rounded-xl border border-white/15 text-left hover:bg-white/5 flex items-center gap-3">
+                    <i className={`fa-solid ${tpl.icon} text-lg`} style={{ color: BRAND }} />
+                    <div><div className="text-sm font-semibold text-white">{tpl.label}</div><div className="text-[11px] text-white/40">"{tpl.hook}"</div></div>
+                  </button>
+                ))}
+                <p className="text-[11px] text-white/40 leading-relaxed mt-2">Cada plantilla agrega un texto de gancho y un cierre (CTA) con animación, y fija el formato 9:16. Aplicala sobre tus clips.</p>
+              </div>
+            )}
             {tab === 'texto' && (<>
               <button onClick={addText} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}><i className="fa-solid fa-plus mr-2" />Agregar texto</button>
               <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
@@ -641,7 +720,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             )}
             {tab === 'audio' && (<>
               <button onClick={() => fileAudioRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-music mr-2" />Subir música / audio</button>
-              <p className="text-[11px] text-white/40 leading-relaxed">El audio se agrega en la pista de audio, desde el inicio.</p>
+              <button onClick={recording ? stopRec : startRec} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: recording ? '#dc2626' : `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                {recording ? <><i className="fa-solid fa-stop mr-2" />Detener grabación</> : <><i className="fa-solid fa-microphone mr-2" />Grabar voz en off</>}
+              </button>
+              <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
             </>)}
             {tab === 'ajustes' && (<>
               <label className="text-[11px] text-white/50 font-semibold block mb-1">Formato</label>
@@ -811,6 +893,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       <input ref={fileVideoRef} type="file" accept="video/*" multiple hidden onChange={(e) => { onPickVideo(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={fileImageRef} type="file" accept="image/*" multiple hidden onChange={(e) => { onPickImage(e.target.files); e.currentTarget.value = ''; }} />
       <input ref={fileAudioRef} type="file" accept="audio/*" multiple hidden onChange={(e) => { onPickAudio(e.target.files); e.currentTarget.value = ''; }} />
+      <input ref={fileLogoRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) addLogoImage(URL.createObjectURL(f)); e.currentTarget.value = ''; }} />
     </div>
   );
 };
@@ -826,6 +909,13 @@ const Slider: React.FC<{ min: number; max: number; step?: number; value: number;
 const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void }> = ({ el, onText, onStyle, onTransform }) => (
   <div className="space-y-4">
     <Row label="Texto"><textarea value={el.text} onChange={(e) => onText(e.target.value)} rows={2} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white resize-none outline-none focus:border-white/30" /></Row>
+    <Row label="Estilo (preset)">
+      <div className="grid grid-cols-3 gap-2">
+        {SUB_PRESETS.map(p => (
+          <button key={p.id} onClick={() => onStyle(p.style)} className="py-1.5 rounded-lg text-[11px] font-semibold border border-white/12 text-white/70 hover:bg-white/5">{p.label}</button>
+        ))}
+      </div>
+    </Row>
     <Row label={`Tamaño: ${el.style.size}%`}><Slider min={3} max={20} value={el.style.size} onChange={(v) => onStyle({ size: v })} /></Row>
     <Row label="Color"><input type="color" value={el.style.color} onChange={(e) => onStyle({ color: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
     <Row label="Caja de fondo">

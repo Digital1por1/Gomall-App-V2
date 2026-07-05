@@ -101,6 +101,7 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   ctx.globalAlpha = Math.max(0, Math.min(1, (el.transform.opacity / 100) * alphaMul));
   ctx.font = `${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
   ctx.textBaseline = 'middle';
+  if (s.glow) { ctx.shadowColor = s.accent || s.color; ctx.shadowBlur = fontPx * 0.5; }
   const maxW = W * 0.88;
   const lines = wrapText(ctx, el.text || '', maxW);
   const lineH = fontPx * 1.18;
@@ -250,7 +251,15 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
       else if (ex.type === 'slide') slideX -= ex.p * W;
       else if (ex.type === 'white') whiteA = Math.max(whiteA, ex.p);
     }
-    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, t, alpha); continue; }
+    if (el.type === 'text') {
+      const te = el as TextElement;
+      ctx.save();
+      if (slideX) ctx.translate(slideX, 0);
+      if (extraScale !== 1) { const cx = (te.transform.x / 100) * W, cy = (te.transform.y / 100) * H; ctx.translate(cx, cy); ctx.scale(extraScale, extraScale); ctx.translate(-cx, -cy); }
+      drawTextEl(ctx, te, W, H, t, alpha);
+      ctx.restore();
+      continue;
+    }
     const media = el as VideoElement | ImageElement;
     const src = media.type === 'video' ? pool.getVideo(media.url) : pool.getImage(media.url);
     const sw = media.type === 'video' ? (src as HTMLVideoElement).videoWidth : (src as HTMLImageElement).naturalWidth;
