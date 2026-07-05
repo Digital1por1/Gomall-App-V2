@@ -14,6 +14,7 @@ import {
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
 import { exportProject, buildMixedAudio } from './reel/exporter';
+import { transcribe } from './reel/whisper';
 import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
 
 const V2_KEY = 'reel_v2';
@@ -57,6 +58,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [subMsg, setSubMsg] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -247,6 +250,37 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     commit(addElement(project, overlay.id, el));
     setSelectedId(el.id);
     setTab('texto');
+  };
+
+  // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
+  const generateSubtitles = async () => {
+    const findFirst = (pred: (e: ReelElement) => boolean): ReelElement | null => {
+      for (const t of project.tracks) for (const el of t.elements) if (pred(el)) return el;
+      return null;
+    };
+    const source = findFirst(e => e.type === 'audio') || findFirst(e => e.type === 'video');
+    const srcUrl = source ? (source as VideoElement | AudioElement).url : undefined;
+    if (!srcUrl) { alert('Agregá un video o audio con voz para generar subtítulos.'); return; }
+    setTranscribing(true); setSubMsg('');
+    try {
+      const segs = await transcribe(srcUrl, setSubMsg);
+      if (!segs.length) { alert('No se detectó voz en el audio.'); return; }
+      const overlay = project.tracks.find(t => t.kind === 'overlay')!;
+      let p = project;
+      for (const s of segs) {
+        const el = makeTextElement(s.text, {
+          start: s.start, duration: Math.max(0.4, s.end - s.start),
+          name: 'Subtítulo',
+          transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
+          style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center' },
+        });
+        p = addElement(p, overlay.id, el);
+      }
+      commit(p);
+    } catch (e: any) {
+      console.error('[subtitulos v2]', e);
+      alert('No se pudieron generar los subtítulos: ' + (e?.message || 'error'));
+    } finally { setTranscribing(false); setSubMsg(''); }
   };
 
   // ---------- edición de elementos ----------
@@ -476,7 +510,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             </>)}
             {tab === 'texto' && (<>
               <button onClick={addText} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}><i className="fa-solid fa-plus mr-2" />Agregar texto</button>
-              <p className="text-[11px] text-white/40 leading-relaxed">Se agrega en el tiempo actual del cabezal. Editá el contenido y el estilo en el panel derecho.</p>
+              <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
+                {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{subMsg || 'Transcribiendo…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Subtítulos automáticos (IA)</>}
+              </button>
+              <p className="text-[11px] text-white/40 leading-relaxed">"Agregar texto" crea un texto en el cabezal. "Subtítulos automáticos" transcribe la voz del audio/video y crea un texto por frase (la 1ª vez baja el modelo).</p>
             </>)}
             {tab === 'audio' && (<>
               <button onClick={() => fileAudioRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-music mr-2" />Subir música / audio</button>
