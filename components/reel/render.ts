@@ -240,11 +240,11 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     const sh = media.type === 'video' ? (src as HTMLVideoElement).videoHeight : (src as HTMLImageElement).naturalHeight;
     if (!sw || !sh) continue;
     if (track.kind === 'video') {
-      // Pista base: cubre todo el canvas ("Rellenar") o entra completo ("Ajustar").
+      // Pista base: por defecto "Ver completo" (contain); "Rellenar" (cover) solo si se elige explícito.
       ctx.save();
       if (slideX) ctx.translate(slideX, 0);
-      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
-      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
+      if ((media as any).fit === 'cover') drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
+      else drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
       ctx.restore();
       if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {

@@ -844,8 +844,8 @@ const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; 
     {isBase && (
       <Row label="Encuadre">
         <div className="flex gap-2">
-          <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'cover') === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Rellenar</button>
-          <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'contain' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Ver completo</button>
+          <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'contain') !== 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Ver completo</button>
+          <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Rellenar</button>
         </div>
       </Row>
     )}
