@@ -109,7 +109,8 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const totalH = lines.length * lineH;
   let y = cy - totalH / 2 + lineH / 2;
 
-  // Cuántas palabras están "habladas" hasta el instante t (para karaoke).
+  // Animación palabra por palabra: cuántas palabras están "habladas" hasta t.
+  const mode: 'none' | 'karaoke' | 'reveal' | 'highlight' = s.anim || (s.karaoke ? 'karaoke' : 'none');
   const totalWords = (el.text || '').split(/\s+/).filter(Boolean).length;
   const progress = el.duration > 0 ? Math.max(0, Math.min(1, (t - el.start) / el.duration)) : 1;
   const activeWords = Math.floor(progress * totalWords + 1e-6);
@@ -137,7 +138,7 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
       roundRect(ctx, bx, y - lineH / 2 + padY * 0.5, boxW, lineH - padY, fontPx * 0.14);
       ctx.fill();
     }
-    if (s.karaoke && totalWords > 0) {
+    if (mode !== 'none' && totalWords > 0) {
       // Dibuja palabra por palabra desde el inicio de la línea (alineación calculada a mano).
       const words = ln.split(' ');
       const lineStart = s.align === 'left' ? cx - maxW / 2 : s.align === 'right' ? cx + maxW / 2 - m.width : cx - m.width / 2;
@@ -145,9 +146,20 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
       let x = lineStart;
       for (const w of words) {
         const wSpace = w + ' ';
-        drawStroke(w, x, y, 'left');
-        ctx.fillStyle = wordCounter < activeWords ? accent : s.color;
-        ctx.fillText(w, x, y);
+        const isActive = wordCounter === activeWords;
+        const isPast = wordCounter < activeWords;
+        const show = mode === 'reveal' ? (isPast || isActive) : true; // "revelado": solo las ya dichas
+        if (show) {
+          ctx.save();
+          if (mode === 'highlight' && isActive) { const cxw = x + ctx.measureText(w).width / 2; ctx.translate(cxw, y); ctx.scale(1.12, 1.12); ctx.translate(-cxw, -y); }
+          drawStroke(w, x, y, 'left');
+          let fill = s.color;
+          if (mode === 'karaoke') fill = (isPast || isActive) ? accent : s.color;
+          else if (mode === 'highlight' && isActive) fill = accent;
+          ctx.fillStyle = fill;
+          ctx.fillText(w, x, y);
+          ctx.restore();
+        }
         x += ctx.measureText(wSpace).width;
         wordCounter++;
       }
@@ -184,6 +196,16 @@ export function fadeAlpha(el: ReelElement, t: number): number {
   return Math.max(0, Math.min(1, a));
 }
 
+// Estado de la transición de ENTRADA del elemento en t: progreso p (1 al inicio → 0 al terminar).
+function transitionState(el: ReelElement, t: number): { type: string; p: number } | null {
+  const type = (el as any).transition as string | undefined;
+  const dur = (el as any).transitionDur as number | undefined;
+  if (!type || type === 'none' || !dur || dur <= 0) return null;
+  const local = t - el.start;
+  if (local < 0 || local > dur) return null;
+  return { type, p: 1 - local / dur };
+}
+
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
 export function sourceTime(el: VideoElement | ImageElement, t: number): number {
   const local = t - el.start;
@@ -202,7 +224,16 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
   const visuals = visualsAt(project, t);
   for (const { el, track } of visuals) {
     const fa = fadeAlpha(el, t);
-    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, t, fa); continue; }
+    const tr = transitionState(el, t);
+    // Efectos de la transición de entrada.
+    let alpha = fa, extraScale = 1, slideX = 0, whiteA = 0;
+    if (tr) {
+      if (tr.type === 'fade') alpha *= (1 - tr.p);
+      else if (tr.type === 'zoom') extraScale = 1 + 0.25 * tr.p;
+      else if (tr.type === 'slide') slideX = tr.p * W;
+      else if (tr.type === 'white') whiteA = tr.p;
+    }
+    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, t, alpha); continue; }
     const media = el as VideoElement | ImageElement;
     const src = media.type === 'video' ? pool.getVideo(media.url) : pool.getImage(media.url);
     const sw = media.type === 'video' ? (src as HTMLVideoElement).videoWidth : (src as HTMLImageElement).naturalWidth;
@@ -210,11 +241,15 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     if (!sw || !sh) continue;
     if (track.kind === 'video') {
       // Pista base: cubre todo el canvas ("Rellenar") o entra completo ("Ajustar").
-      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
-      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
+      ctx.save();
+      if (slideX) ctx.translate(slideX, 0);
+      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
+      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
+      ctx.restore();
+      if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {
       // Overlay: caja PiP posicionada.
-      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, opacity: media.transform.opacity * fa });
+      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, opacity: media.transform.opacity * alpha, scale: media.transform.scale * extraScale });
     }
   }
 }

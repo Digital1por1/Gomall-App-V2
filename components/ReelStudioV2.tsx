@@ -9,12 +9,13 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement,
-  makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId,
+  addElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
+  makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
 import { exportProject, buildMixedAudio } from './reel/exporter';
 import { transcribe } from './reel/whisper';
+import { computePeaks, detectBeats, silenceBounds } from './reel/analyze';
 import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
 
 const V2_KEY = 'reel_v2';
@@ -62,6 +63,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const [subMsg, setSubMsg] = useState('');
+  const [autoTarget, setAutoTarget] = useState<'auto' | 15 | 30 | 60>('auto');
+  const [autoBeat, setAutoBeat] = useState(false);
+  const [autoTrim, setAutoTrim] = useState(false);
+  const [compaginating, setCompaginating] = useState(false);
+  const [autoMsg, setAutoMsg] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -294,6 +300,38 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       console.error('[subtitulos v2]', e);
       alert('No se pudieron generar los subtítulos: ' + (e?.message || 'error'));
     } finally { setTranscribing(false); setSubMsg(''); }
+  };
+
+  // Compaginado automático: opcional recorte de silencios + beat-sync + duración objetivo.
+  const runAutoCompaginate = async () => {
+    const vtrack = project.tracks.find(t => t.kind === 'video');
+    const clips = vtrack ? vtrack.elements.filter(e => e.type === 'video' || e.type === 'image') : [];
+    if (!clips.length) { alert('Agregá al menos un video en la pista principal.'); return; }
+    setCompaginating(true); setAutoMsg('');
+    try {
+      const boundsByEl: Record<string, [number, number]> = {};
+      if (autoTrim) {
+        setAutoMsg('Analizando silencios…');
+        for (const c of clips) {
+          const sd = (c as any).sourceDuration || c.duration;
+          if (c.type === 'video') {
+            const peaks = await computePeaks((c as VideoElement).url);
+            boundsByEl[c.id] = silenceBounds(peaks, sd);
+          } else { boundsByEl[c.id] = [0, sd]; }
+        }
+      }
+      let beats: number[] = [];
+      if (autoBeat) {
+        setAutoMsg('Detectando beats…');
+        const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
+        if (music) beats = await detectBeats(music.url);
+        if (!beats.length) console.info('[auto] sin beats (o sin música)');
+      }
+      pause();
+      commit(autoCompaginate(project, { target: autoTarget, beatSync: autoBeat, boundsByEl, beats }));
+      setCurrentTime(0);
+    } catch (e) { console.error('[auto]', e); alert('No se pudo compaginar automáticamente.'); }
+    finally { setCompaginating(false); setAutoMsg(''); }
   };
 
   // ---------- edición de elementos ----------
@@ -613,6 +651,23 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                     style={project.aspect === a ? { borderColor: BRAND, color: BRAND, background: 'rgba(234,91,37,.12)' } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>{a}</button>
                 ))}
               </div>
+
+              <div className="pt-4 mt-4 border-t border-white/5 space-y-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>
+                <label className="text-[11px] text-white/50 font-semibold block">Duración objetivo</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {([['auto', 'Auto'], [15, '15s'], [30, '30s'], [60, '60s']] as [ 'auto' | 15 | 30 | 60, string ][]).map(([val, lbl]) => (
+                    <button key={String(val)} onClick={() => setAutoTarget(val)} className="py-1.5 rounded-lg text-xs font-semibold border"
+                      style={autoTarget === val ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>{lbl}</button>
+                  ))}
+                </div>
+                <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={autoTrim} onChange={(e) => setAutoTrim(e.target.checked)} /> Recortar silencios (inicio/fin)</label>
+                <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={autoBeat} onChange={(e) => setAutoBeat(e.target.checked)} /> Cortar al ritmo de la música (beat-sync)</label>
+                <button onClick={runAutoCompaginate} disabled={compaginating} className="w-full py-2.5 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  {compaginating ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{autoMsg || 'Compaginando…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Compaginar automático</>}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">Re-corta los clips de la pista principal en orden para llegar a la duración elegida.</p>
+              </div>
             </>)}
           </div>
         </section>
@@ -657,8 +712,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             {selected && selected.type !== 'audio' && (
               <div className="space-y-3 pt-2 border-t border-white/5">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Transición</div>
-                <Row label={`Aparición: ${(selected.fadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeIn || 0} onChange={(v) => patchSel({ fadeIn: v } as any)} /></Row>
-                <Row label={`Salida: ${(selected.fadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeOut || 0} onChange={(v) => patchSel({ fadeOut: v } as any)} /></Row>
+                <Row label="Transición de entrada">
+                  <select value={(selected as any).transition || 'none'} onChange={(e) => patchSel({ transition: e.target.value as TransitionKind, transitionDur: (selected as any).transitionDur || 0.5 } as any)} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+                    <option value="none">Ninguna</option>
+                    <option value="fade">Fundido (negro)</option>
+                    <option value="white">Flash blanco</option>
+                    <option value="zoom">Zoom</option>
+                    <option value="slide">Deslizar</option>
+                  </select>
+                </Row>
+                {(selected as any).transition && (selected as any).transition !== 'none' && (
+                  <Row label={`Duración: ${((selected as any).transitionDur || 0.5).toFixed(1)}s`}><Slider min={0.1} max={2} step={0.1} value={(selected as any).transitionDur || 0.5} onChange={(v) => patchSel({ transitionDur: v } as any)} /></Row>
+                )}
+                <Row label={`Aparición (fade): ${(selected.fadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeIn || 0} onChange={(v) => patchSel({ fadeIn: v } as any)} /></Row>
+                <Row label={`Salida (fade): ${(selected.fadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeOut || 0} onChange={(v) => patchSel({ fadeOut: v } as any)} /></Row>
               </div>
             )}
             {selected && (
@@ -757,10 +824,17 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
     <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>
     <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
     <div className="pt-2 border-t border-white/5 space-y-3">
-      <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={!!el.style.karaoke} onChange={(e) => onStyle({ karaoke: e.target.checked })} /> Animación karaoke (palabra por palabra)</label>
-      {el.style.karaoke && (
+      <Row label="Animación (palabra por palabra)">
+        <select value={el.style.anim || (el.style.karaoke ? 'karaoke' : 'none')} onChange={(e) => onStyle({ anim: e.target.value as any, karaoke: e.target.value === 'karaoke' })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+          <option value="none">Ninguna</option>
+          <option value="karaoke">Karaoke</option>
+          <option value="reveal">Revelado</option>
+          <option value="highlight">Resaltado</option>
+        </select>
+      </Row>
+      {(el.style.anim && el.style.anim !== 'none') || el.style.karaoke ? (
         <Row label="Color de resalte"><input type="color" value={el.style.accent || '#FFE600'} onChange={(e) => onStyle({ accent: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
-      )}
+      ) : null}
     </div>
   </div>
 );

@@ -13,6 +13,7 @@ export const ASPECTS: Record<AspectId, { w: number; h: number; label: string }> 
 
 export type TrackKind = 'video' | 'overlay' | 'audio';
 export type ElementType = 'video' | 'image' | 'text' | 'audio';
+export type TransitionKind = 'none' | 'fade' | 'white' | 'zoom' | 'slide';
 
 // Posición/transformación de un elemento visual. x,y en % del canvas (centro del elemento); scale en %.
 export interface Transform { x: number; y: number; scale: number; rotation: number; opacity: number }
@@ -26,8 +27,9 @@ export interface TextStyle {
   bg: string | null;       // color de caja (o null)
   stroke: boolean;
   align: 'center' | 'left' | 'right';
-  karaoke?: boolean;       // resaltado palabra por palabra según el tiempo
-  accent?: string;         // color del resaltado karaoke
+  karaoke?: boolean;       // (compat) equivale a anim: 'karaoke'
+  anim?: 'none' | 'karaoke' | 'reveal' | 'highlight'; // animación palabra por palabra
+  accent?: string;         // color del resaltado
 }
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600',
@@ -43,6 +45,8 @@ interface BaseElement {
   sourceDuration?: number;
   fadeIn?: number;      // transición de aparición (s)
   fadeOut?: number;     // transición de salida (s)
+  transition?: TransitionKind;  // transición de entrada del clip (fade/white/zoom/slide)
+  transitionDur?: number;       // duración de la transición (s)
 }
 export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean; fit?: 'cover' | 'contain' }
 export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain' }
@@ -185,6 +189,69 @@ export function splitElement(p: ReelProject, id: string, atTime: number): ReelPr
   return mapTracks(p, t => t.id === found.track.id
     ? { ...t, elements: t.elements.flatMap(e => e.id === id ? [left, right] : [e]).sort((a, b) => a.start - b.start) }
     : t);
+}
+
+// Compaginado automático: re-tima los clips de la pista de video en orden, opcionalmente recortando
+// silencios (bounds precalculados) y ajustándolos a una duración objetivo, con beat-sync opcional.
+export function autoCompaginate(
+  p: ReelProject,
+  opts: { target: 'auto' | 15 | 30 | 60; beatSync: boolean; boundsByEl: Record<string, [number, number]>; beats: number[] },
+): ReelProject {
+  const { target, beatSync, boundsByEl, beats } = opts;
+  const track = p.tracks.find(t => t.kind === 'video');
+  if (!track) return p;
+  const clips = [...track.elements].filter(e => e.type === 'video' || e.type === 'image').sort((a, b) => a.start - b.start);
+  const N = clips.length;
+  if (!N) return p;
+  const srcDur = (c: ReelElement) => (c as any).sourceDuration || c.duration;
+  const bounds = clips.map(c => boundsByEl[c.id] || [0, srcDur(c)] as [number, number]);
+  const avail = bounds.map(([s, e]) => Math.max(0.3, e - s));
+  const totalAvail = avail.reduce((a, b) => a + b, 0);
+  const T = target === 'auto' ? totalAvail : (target as number);
+  const durs: number[] = [];
+
+  if (beatSync && beats.length) {
+    const share = T / N;
+    let cur = 0;
+    for (let i = 0; i < N; i++) {
+      let dur: number;
+      if (i === N - 1) dur = Math.max(0.5, Math.min(avail[i], T - cur));
+      else {
+        const ideal = cur + share;
+        const cand = beats.filter(b => b > cur + 0.4 && b <= cur + avail[i] + 0.01);
+        const snap = cand.length ? cand.reduce((bst, b) => Math.abs(b - ideal) < Math.abs(bst - ideal) ? b : bst, cand[0]) : ideal;
+        dur = Math.max(0.5, Math.min(avail[i], snap - cur));
+      }
+      durs.push(dur); cur += dur;
+    }
+  } else if (target === 'auto') {
+    avail.forEach(a => durs.push(a));
+  } else {
+    const share = T / N;
+    const targets = avail.map(a => Math.min(a, share));
+    for (let iter = 0; iter < 4; iter++) {
+      const used = targets.reduce((a, b) => a + b, 0);
+      const leftover = T - used;
+      if (leftover < 0.05) break;
+      const expandable = avail.map((a, i) => (a - targets[i] > 0.02 ? i : -1)).filter(i => i >= 0);
+      if (!expandable.length) break;
+      const add = leftover / expandable.length;
+      expandable.forEach(i => { targets[i] += Math.min(add, avail[i] - targets[i]); });
+    }
+    for (let i = 0; i < N; i++) durs.push(Math.max(0.5, Math.min(avail[i], targets[i])));
+  }
+
+  let cursor = 0;
+  const patch: Record<string, Partial<ReelElement>> = {};
+  clips.forEach((c, i) => {
+    const ts = bounds[i][0];
+    patch[c.id] = { start: cursor, duration: durs[i], trimStart: ts, trimEnd: ts + durs[i] } as Partial<ReelElement>;
+    cursor += durs[i];
+  });
+  return mapTracks(p, tk => tk.id !== track.id ? tk : {
+    ...tk,
+    elements: tk.elements.map(e => patch[e.id] ? ({ ...e, ...patch[e.id] } as ReelElement) : e).sort((a, b) => a.start - b.start),
+  });
 }
 
 // ---------- constructores de elementos ----------
