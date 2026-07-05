@@ -21,7 +21,14 @@ import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMedi
 const V2_KEY = 'reel_v2';
 
 const BRAND = '#EA5B25';
-const STICKERS = ['🔥', '⭐', '❤️', '👍', '🎉', '💯', '😍', '🛒', '✅', '⚡', '🎁', '📢', '👀', '💥', '🤑', '🏷️', '👇', '🚀'];
+const STICKERS = [
+  '🔥', '⭐', '❤️', '👍', '🎉', '💯', '😍', '🛒', '✅', '⚡', '🎁', '📢', '👀', '💥', '🤑', '🏷️', '👇', '🚀',
+  '😱', '🤩', '😎', '🥳', '😮', '🙌', '👏', '💪', '🤯', '😳', '👉', '👆', '👌', '🤝', '💰', '💸', '💎', '🏆',
+  '📉', '📈', '⏰', '⏳', '🔔', '📌', '💡', '🎯', '🧠', '❌', '⚠️', '✨', '🌟', '💥', '🎬', '📱', '🛍️', '🎧',
+];
+
+// Tipografías disponibles (cargadas en index.html).
+const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Anton', 'Playfair Display', 'Roboto', 'Open Sans', 'Ubuntu', 'Lora', 'Cinzel', 'Permanent Marker', 'Pacifico', 'Dancing Script'];
 
 // Presets de subtítulos/texto estilo CapCut.
 const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = [
@@ -32,12 +39,6 @@ const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = 
   { id: 'minimal', label: 'Minimal', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false } },
 ];
 
-// Plantillas de reel: agregan textos pre-armados (gancho + CTA) y fijan formato 9:16.
-const TEMPLATES: { id: string; label: string; icon: string; hook: string; cta: string }[] = [
-  { id: 'promo', label: 'Promo / Oferta', icon: 'fa-tag', hook: 'OFERTA POR TIEMPO LIMITADO', cta: '¡Aprovechá ahora! 🔥' },
-  { id: 'lanzamiento', label: 'Lanzamiento', icon: 'fa-rocket', hook: 'YA DISPONIBLE', cta: 'Conocelo hoy 🚀' },
-  { id: 'tips', label: 'Tips / Educativo', icon: 'fa-lightbulb', hook: '3 TIPS QUE NO SABÍAS', cta: 'Guardá este reel 📌' },
-];
 
 interface Props { profile: UserProfile | null; onClose: () => void; initialCopy?: string | null }
 
@@ -73,7 +74,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
-  const [tab, setTab] = useState<'media' | 'plantillas' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -321,18 +322,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   };
   const stopRec = () => { micRef.current?.stop(); setRecording(false); };
 
-  // ---------- plantillas de reel ----------
-  const applyTemplate = (tpl: typeof TEMPLATES[number]) => {
-    let p: ReelProject = { ...project, aspect: '9:16' };
-    const overlay = p.tracks.find(t => t.kind === 'overlay')!;
-    const baseStyle: TextStyle = { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: '#000000', stroke: false, align: 'center', karaoke: false, accent: '#FFE600' };
-    const end = Math.max(4, projectDuration(project));
-    const hookEnd = Math.min(end, 3.2);
-    const hook = { ...makeTextElement(tpl.hook, { start: 0.3, duration: Math.max(1, hookEnd - 0.3), transform: { x: 50, y: 22, scale: 100, rotation: 0, opacity: 100 }, style: baseStyle }), transition: 'zoom', transitionDur: 0.4 } as ReelElement;
-    const ctaStart = Math.max(hookEnd + 0.2, end - 3);
-    const cta = { ...makeTextElement(tpl.cta, { start: ctaStart, duration: Math.max(1, end - ctaStart), transform: { x: 50, y: 80, scale: 100, rotation: 0, opacity: 100 }, style: { ...baseStyle, bg: null, stroke: true } }), transition: 'slide', transitionDur: 0.4 } as ReelElement;
-    p = addElement(p, overlay.id, hook);
-    p = addElement(p, overlay.id, cta);
+  // Aplica el estilo (tipografía/tamaño/color/animación) del texto seleccionado a TODOS los textos.
+  const syncTextStyle = () => {
+    if (!selected || selected.type !== 'text') return;
+    const style = (selected as TextElement).style;
+    let p = project;
+    for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text' && el.id !== selected.id) p = updateElement(p, el.id, { style: { ...style } } as any);
     commit(p);
   };
 
@@ -635,7 +630,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   // ---------- UI ----------
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
-    { id: 'plantillas', icon: 'fa-table-cells-large', label: 'Plantillas' },
     { id: 'texto', icon: 'fa-font', label: 'Texto' },
     { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
     { id: 'audio', icon: 'fa-music', label: 'Audio' },
@@ -643,12 +637,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   ];
 
   return (
-    <div className="fixed inset-0 z-[95] bg-[#131011] text-[#f3eeec] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
+    <div className="fixed inset-0 z-[95] bg-[#313137] text-[#f3eeec] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Top bar */}
-      <header className="flex items-center gap-3 px-4 h-14 border-b border-white/10 bg-[#1b1719]">
+      <header className="flex items-center gap-3 px-4 h-14 border-b border-white/10 bg-[#3b3b42]">
         <div className="w-8 h-8 rounded-lg grid place-items-center text-white font-black" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>G</div>
-        <b className="text-sm tracking-widest">GOMALL</b>
-        <span className="text-sm text-white/50 tracking-widest font-semibold">Creator Studio</span>
         <input value={project.name} onChange={(e) => setProject(p => ({ ...p, name: e.target.value }))} placeholder="Reel sin título"
           className="ml-3 text-sm bg-transparent text-white/70 outline-none border-b border-transparent focus:border-white/30 focus:text-white w-48 placeholder:text-white/30" />
         <div className="flex-1" />
@@ -671,7 +663,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       {/* Cuerpo: rail | panel | preview | propiedades */}
       <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: '56px 280px 1fr 300px' }}>
         {/* rail */}
-        <nav className="bg-[#1b1719] border-r border-white/10 flex flex-col items-center gap-1 py-3">
+        <nav className="bg-[#3b3b42] border-r border-white/10 flex flex-col items-center gap-1 py-3">
           {RAIL.map(r => (
             <button key={r.id} onClick={() => setTab(r.id)} title={r.label}
               className="w-10 h-10 rounded-xl grid place-items-center text-white/60 hover:bg-white/10"
@@ -682,7 +674,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         </nav>
 
         {/* panel izquierdo (según tab) */}
-        <section className="bg-[#1b1719] border-r border-white/10 flex flex-col min-h-0">
+        <section className="bg-[#3b3b42] border-r border-white/10 flex flex-col min-h-0">
           <div className="px-4 py-3 text-sm font-bold border-b border-white/5">{RAIL.find(r => r.id === tab)?.label}</div>
           <div className="p-4 overflow-y-auto text-sm space-y-3">
             {tab === 'media' && (<>
@@ -691,17 +683,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Subir logo</button>
               <p className="text-[11px] text-white/40 leading-relaxed">Los videos van en fila en la pista principal; imágenes y logo como overlay que reposicionás arrastrando en el preview.</p>
             </>)}
-            {tab === 'plantillas' && (
-              <div className="space-y-2">
-                {TEMPLATES.map(tpl => (
-                  <button key={tpl.id} onClick={() => applyTemplate(tpl)} className="w-full py-3 px-3 rounded-xl border border-white/15 text-left hover:bg-white/5 flex items-center gap-3">
-                    <i className={`fa-solid ${tpl.icon} text-lg`} style={{ color: BRAND }} />
-                    <div><div className="text-sm font-semibold text-white">{tpl.label}</div><div className="text-[11px] text-white/40">"{tpl.hook}"</div></div>
-                  </button>
-                ))}
-                <p className="text-[11px] text-white/40 leading-relaxed mt-2">Cada plantilla agrega un texto de gancho y un cierre (CTA) con animación, y fija el formato 9:16. Aplicala sobre tus clips.</p>
-              </div>
-            )}
             {tab === 'texto' && (<>
               <button onClick={addText} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}><i className="fa-solid fa-plus mr-2" />Agregar texto</button>
               <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
@@ -747,7 +728,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         </section>
 
         {/* preview */}
-        <section className="bg-[#0c0a0b] flex flex-col min-h-0">
+        <section className="bg-[#2a2a30] flex flex-col min-h-0">
           <div className="flex-1 flex items-center justify-center p-5 min-h-0 overflow-hidden">
             {/* Flexbox: el alto del canvas = alto disponible; el ancho sale del aspecto 9:16 → siempre vertical. */}
             <canvas ref={canvasRef}
@@ -767,7 +748,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         </section>
 
         {/* propiedades */}
-        <aside className="bg-[#1b1719] border-l border-white/10 flex flex-col min-h-0">
+        <aside className="bg-[#3b3b42] border-l border-white/10 flex flex-col min-h-0">
           <div className="px-4 py-3 text-sm font-bold border-b border-white/5 flex items-center justify-between">
             Propiedades
             {selected && <button onClick={deleteSel} className="text-red-400 hover:text-red-300 text-xs"><i className="fa-solid fa-trash" /></button>}
@@ -776,7 +757,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             {!selected && <p className="text-white/40 text-xs">Seleccioná un elemento en la timeline para editar sus propiedades.</p>}
 
             {selected && selected.type === 'text' && (
-              <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} />
+              <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} onSyncAll={syncTextStyle} />
             )}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
               <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} />
@@ -823,7 +804,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       </div>
 
       {/* Timeline */}
-      <div className="h-[240px] bg-[#1b1719] border-t border-white/10 flex flex-col min-h-0">
+      <div className="h-[240px] bg-[#3b3b42] border-t border-white/10 flex flex-col min-h-0">
         <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
           <button onClick={splitAtPlayhead} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10" title="Cortar en el cabezal (S)"><i className="fa-solid fa-scissors text-xs" /></button>
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
@@ -899,7 +880,7 @@ const Slider: React.FC<{ min: number; max: number; step?: number; value: number;
   <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-[color:var(--b)]" style={{ ['--b' as any]: BRAND }} />
 );
 
-const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void }> = ({ el, onText, onStyle, onTransform }) => (
+const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void; onSyncAll: () => void }> = ({ el, onText, onStyle, onTransform, onSyncAll }) => (
   <div className="space-y-4">
     <Row label="Texto"><textarea value={el.text} onChange={(e) => onText(e.target.value)} rows={2} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white resize-none outline-none focus:border-white/30" /></Row>
     <Row label="Estilo (preset)">
@@ -909,6 +890,14 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
         ))}
       </div>
     </Row>
+    <Row label="Tipografía">
+      <select value={el.style.font} onChange={(e) => onStyle({ font: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+        {FONTS.map(f => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+      </select>
+    </Row>
+    <button onClick={onSyncAll} className="w-full py-2 rounded-lg text-white text-[11px] font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+      <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar este estilo a TODOS los subtítulos
+    </button>
     <Row label={`Tamaño: ${el.style.size}%`}><Slider min={3} max={20} value={el.style.size} onChange={(v) => onStyle({ size: v })} /></Row>
     <Row label="Color"><input type="color" value={el.style.color} onChange={(e) => onStyle({ color: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
     <Row label="Caja de fondo">
