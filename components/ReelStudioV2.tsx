@@ -322,12 +322,17 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   };
   const stopRec = () => { micRef.current?.stop(); setRecording(false); };
 
-  // Aplica el estilo (tipografía/tamaño/color/animación) del texto seleccionado a TODOS los textos.
+  // Aplica el estilo (tipografía/tamaño/color/animación) Y la posición del texto seleccionado a TODOS los textos.
   const syncTextStyle = () => {
     if (!selected || selected.type !== 'text') return;
-    const style = (selected as TextElement).style;
+    const src = selected as TextElement;
+    const style = src.style;
     let p = project;
-    for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text' && el.id !== selected.id) p = updateElement(p, el.id, { style: { ...style } } as any);
+    for (const t of p.tracks) for (const el of t.elements) {
+      if (el.type === 'text' && el.id !== selected.id) {
+        p = updateElement(p, el.id, { style: { ...style }, transform: { ...(el as TextElement).transform, x: src.transform.x, y: src.transform.y } } as any);
+      }
+    }
     commit(p);
   };
 
