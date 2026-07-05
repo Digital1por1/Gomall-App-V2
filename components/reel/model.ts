@@ -39,6 +39,8 @@ interface BaseElement {
   trimStart: number;    // recorte de la fuente (s) — para media
   trimEnd: number;      // fin del recorte de la fuente (s)
   sourceDuration?: number;
+  fadeIn?: number;      // transición de aparición (s)
+  fadeOut?: number;     // transición de salida (s)
 }
 export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean }
 export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform }

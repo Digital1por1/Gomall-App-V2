@@ -585,6 +585,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             {selected && selected.type === 'audio' && (
               <AudioProps el={selected as AudioElement} onVolume={(v) => patchSel({ volume: v } as any)} onLoop={(l) => patchSel({ loop: l } as any)} />
             )}
+            {selected && selected.type !== 'audio' && (
+              <div className="space-y-3 pt-2 border-t border-white/5">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Transición</div>
+                <Row label={`Aparición: ${(selected.fadeIn || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeIn || 0} onChange={(v) => patchSel({ fadeIn: v } as any)} /></Row>
+                <Row label={`Salida: ${(selected.fadeOut || 0).toFixed(1)}s`}><Slider min={0} max={3} step={0.1} value={selected.fadeOut || 0} onChange={(v) => patchSel({ fadeOut: v } as any)} /></Row>
+              </div>
+            )}
             {selected && (
               <div>
                 <label className="text-[11px] text-white/50 font-semibold">Duración: {selected.duration.toFixed(1)}s</label>

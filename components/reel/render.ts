@@ -83,11 +83,11 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
-function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H: number) {
+function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H: number, alphaMul = 1) {
   const s = el.style;
   const fontPx = Math.max(8, (s.size / 100) * H);
   ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, el.transform.opacity / 100));
+  ctx.globalAlpha = Math.max(0, Math.min(1, (el.transform.opacity / 100) * alphaMul));
   ctx.font = `${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
   ctx.textAlign = s.align;
   ctx.textBaseline = 'middle';
@@ -137,6 +137,16 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// Multiplicador de opacidad por transición fade in/out del elemento en el instante t.
+export function fadeAlpha(el: ReelElement, t: number): number {
+  const local = t - el.start;
+  const inN = el.fadeIn || 0, outN = el.fadeOut || 0;
+  let a = 1;
+  if (inN > 0 && local < inN) a = Math.min(a, local / inN);
+  if (outN > 0 && local > el.duration - outN) a = Math.min(a, Math.max(0, (el.duration - local) / outN));
+  return Math.max(0, Math.min(1, a));
+}
+
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
 export function sourceTime(el: VideoElement | ImageElement, t: number): number {
   const local = t - el.start;
@@ -154,7 +164,8 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
 
   const visuals = visualsAt(project, t);
   for (const { el, track } of visuals) {
-    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H); continue; }
+    const fa = fadeAlpha(el, t);
+    if (el.type === 'text') { drawTextEl(ctx, el as TextElement, W, H, fa); continue; }
     const media = el as VideoElement | ImageElement;
     const src = media.type === 'video' ? pool.getVideo(media.url) : pool.getImage(media.url);
     const sw = media.type === 'video' ? (src as HTMLVideoElement).videoWidth : (src as HTMLImageElement).naturalWidth;
@@ -162,10 +173,10 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     if (!sw || !sh) continue;
     if (track.kind === 'video') {
       // Pista base: cubre todo el canvas.
-      drawCover(ctx, src, sw, sh, W, H, media.transform.opacity, media.transform.scale);
+      drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * fa, media.transform.scale);
     } else {
       // Overlay: caja PiP posicionada.
-      drawOverlayMedia(ctx, src, sw, sh, W, H, media.transform);
+      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, opacity: media.transform.opacity * fa });
     }
   }
 }
