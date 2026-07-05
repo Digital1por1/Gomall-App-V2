@@ -39,6 +39,35 @@ async function decodeToMono16k(url: string): Promise<Float32Array> {
   return rendered.getChannelData(0).slice();
 }
 
+// Parte un segmento largo en líneas cortas (por cantidad de palabras, largo y puntuación),
+// repartiendo el tiempo proporcionalmente. Cada línea es un subtítulo editable aparte.
+function splitIntoLines(text: string, start: number, end: number, maxWords = 5, maxChars = 30): SubSegment[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let cur: string[] = [];
+  for (const w of words) {
+    cur.push(w);
+    const endsPhrase = /[.!?,;:]$/.test(w);
+    const tooLong = cur.length >= maxWords || cur.join(' ').length >= maxChars;
+    if (endsPhrase || tooLong) { lines.push(cur.join(' ')); cur = []; }
+  }
+  if (cur.length) lines.push(cur.join(' '));
+
+  const totalWords = words.length;
+  const dur = Math.max(0.2, end - start);
+  const segs: SubSegment[] = [];
+  let counted = 0;
+  for (const line of lines) {
+    const lw = line.split(/\s+/).filter(Boolean).length;
+    const s = start + (counted / totalWords) * dur;
+    counted += lw;
+    const e = start + (counted / totalWords) * dur;
+    segs.push({ text: line, start: s, end: Math.max(s + 0.3, e) });
+  }
+  return segs;
+}
+
 export async function transcribe(url: string, onStatus?: (msg: string) => void): Promise<SubSegment[]> {
   onStatus?.('Preparando audio…');
   const audio = await decodeToMono16k(url);
@@ -54,13 +83,16 @@ export async function transcribe(url: string, onStatus?: (msg: string) => void):
     task: 'transcribe',
   });
   const chunks: any[] = out?.chunks || [];
-  return chunks
-    .map((c) => {
-      const text = String(c?.text || '').trim();
-      const start = Math.max(0, Number(c?.timestamp?.[0]) || 0);
-      let end = Number(c?.timestamp?.[1]);
-      if (!isFinite(end)) end = Math.min(total, start + Math.max(1.2, text.length * 0.06));
-      return { text, start, end: Math.max(start + 0.3, end) };
-    })
-    .filter((c) => c.text);
+  const segs: SubSegment[] = [];
+  for (const c of chunks) {
+    const text = String(c?.text || '').trim();
+    if (!text) continue;
+    const start = Math.max(0, Number(c?.timestamp?.[0]) || 0);
+    let end = Number(c?.timestamp?.[1]);
+    if (!isFinite(end)) end = Math.min(total, start + Math.max(1.2, text.length * 0.06));
+    end = Math.max(start + 0.3, end);
+    // Dividir el segmento en líneas cortas (frases), cada una como subtítulo aparte.
+    segs.push(...splitIntoLines(text, start, end));
+  }
+  return segs;
 }
