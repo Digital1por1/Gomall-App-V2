@@ -559,8 +559,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     }
   };
 
-  const changeAspect = (aspect: AspectId) => commit({ ...project, aspect });
-
   // ---------- persistencia local (IndexedDB) ----------
   const persistV2 = async () => {
     if (projectDuration(project) <= 0) { try { await clearProjectAt(V2_KEY); } catch { /* noop */ } setSaveState('idle'); return; }
@@ -618,7 +616,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             }
             tracks.push({ ...track, elements: els });
           }
-          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks }); setSaveState('saved'); }
+          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks, aspect: '9:16' }); setSaveState('saved'); }
         }
       } catch (e) { console.warn('[reel v2] no se pudo restaurar', e); }
       finally { hydratedRef.current = true; }
@@ -727,15 +725,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
             </>)}
             {tab === 'ajustes' && (<>
-              <label className="text-[11px] text-white/50 font-semibold block mb-1">Formato</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(Object.keys(ASPECTS) as AspectId[]).map(a => (
-                  <button key={a} onClick={() => changeAspect(a)} className="py-2 rounded-lg text-xs font-semibold border"
-                    style={project.aspect === a ? { borderColor: BRAND, color: BRAND, background: 'rgba(234,91,37,.12)' } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>{a}</button>
-                ))}
-              </div>
+              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Historia (9:16)</b></div>
 
-              <div className="pt-4 mt-4 border-t border-white/5 space-y-3">
+              <div className="pt-4 mt-2 border-t border-white/5 space-y-3">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>
                 <label className="text-[11px] text-white/50 font-semibold block">Duración objetivo</label>
                 <div className="grid grid-cols-4 gap-2">
