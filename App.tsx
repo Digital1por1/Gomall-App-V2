@@ -8,6 +8,9 @@ import AdminDashboard from './components/AdminDashboard';
 import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
+import ReelStudioV2 from './components/ReelStudioV2';
+// Editor de reels V2 (multi-track, en pruebas): se activa con ?editor=v2 en la URL.
+const USE_REELS_V2 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editor') === 'v2';
 import BrandSettings from './components/BrandSettings';
 import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
@@ -1148,11 +1151,19 @@ const App: React.FC = () => {
         />
       )}
       {showReels && (
-        <ReelStudio
-          profile={profile}
-          onClose={() => setShowReels(false)}
-          initialCopy={reelCopy}
-        />
+        USE_REELS_V2 ? (
+          <ReelStudioV2
+            profile={profile}
+            onClose={() => setShowReels(false)}
+            initialCopy={reelCopy}
+          />
+        ) : (
+          <ReelStudio
+            profile={profile}
+            onClose={() => setShowReels(false)}
+            initialCopy={reelCopy}
+          />
+        )
       )}
       {showBrand && user && (
         <BrandSettings
