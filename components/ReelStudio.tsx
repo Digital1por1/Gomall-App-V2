@@ -1476,6 +1476,81 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
     setReelDur(s.reelDur); setTrimDead(s.trimDead); setBeatSync(s.beatSync); setBeats(s.beats);
   };
 
+  // === Undo / Redo (historial en memoria de snapshots del estado editable) ===
+  const historyRef = useRef<{ past: ReelSnapshot[]; future: ReelSnapshot[] }>({ past: [], future: [] });
+  const isApplyingRef = useRef(false);     // true mientras aplicamos un undo/redo (no debe grabarse)
+  const histTimerRef = useRef<number | null>(null);
+  const histInitRef = useRef(false);       // baseline capturado tras la hidratación
+  const lastSnapRef = useRef<string>('');  // JSON del último snapshot "asentado"
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  const recordHistory = () => {
+    const key = JSON.stringify(captureState());
+    if (key === lastSnapRef.current) return;
+    if (lastSnapRef.current) {
+      historyRef.current.past.push(JSON.parse(lastSnapRef.current));
+      if (historyRef.current.past.length > 50) historyRef.current.past.shift();
+      historyRef.current.future = [];
+    }
+    lastSnapRef.current = key;
+    setCanUndo(historyRef.current.past.length > 0);
+    setCanRedo(historyRef.current.future.length > 0);
+  };
+
+  // Graba el estado (con debounce) al asentarse un cambio; ignora los cambios provenientes de un undo/redo.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!histInitRef.current) { histInitRef.current = true; lastSnapRef.current = JSON.stringify(captureState()); return; }
+    if (isApplyingRef.current) { isApplyingRef.current = false; lastSnapRef.current = JSON.stringify(captureState()); return; }
+    if (histTimerRef.current) window.clearTimeout(histTimerRef.current);
+    histTimerRef.current = window.setTimeout(recordHistory, 450);
+    return () => { if (histTimerRef.current) window.clearTimeout(histTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips, activeIdx, videoVolume, musicUrl, musicName, musicVolume, voiceUrl, voiceName, voiceVolume, subtitles, subStyle, subColor, subScale, subAnim, subAccent, subFont, subPos, logoEnabled, logoPos, logoSize, transition, transDur, reelDur, trimDead, beatSync, beats]);
+
+  const undo = () => {
+    const h = historyRef.current;
+    if (!h.past.length) return;
+    if (histTimerRef.current) { window.clearTimeout(histTimerRef.current); recordHistory(); } // asienta cambios pendientes
+    if (!h.past.length) return;
+    const prev = h.past.pop() as ReelSnapshot;
+    if (lastSnapRef.current) h.future.unshift(JSON.parse(lastSnapRef.current));
+    isApplyingRef.current = true;
+    lastSnapRef.current = JSON.stringify(prev);
+    applyState(prev);
+    setCanUndo(h.past.length > 0);
+    setCanRedo(h.future.length > 0);
+  };
+  const redo = () => {
+    const h = historyRef.current;
+    if (!h.future.length) return;
+    const next = h.future.shift() as ReelSnapshot;
+    if (lastSnapRef.current) h.past.push(JSON.parse(lastSnapRef.current));
+    isApplyingRef.current = true;
+    lastSnapRef.current = JSON.stringify(next);
+    applyState(next);
+    setCanUndo(h.past.length > 0);
+    setCanRedo(h.future.length > 0);
+  };
+
+  // Atajos de teclado: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z o Ctrl+Y (redo). No interferir con inputs de texto.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (t as any)?.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // === Persistencia local (IndexedDB): que el reel no se pierda al cerrar/recargar ===
   // Convierte un objectURL en un id estable, guardando el blob la primera vez que se lo ve.
   const persistUrl = async (url: string | null): Promise<string | null> => {
@@ -1622,6 +1697,11 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
                   : null}
             </span>
           )}
+          <div className="flex items-center bg-slate-100 rounded-2xl overflow-hidden">
+            <button onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className="h-11 w-11 flex items-center justify-center text-slate-500 hover:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"><i className="fa-solid fa-rotate-left"></i></button>
+            <div className="w-px h-5 bg-slate-200"></div>
+            <button onClick={redo} disabled={!canRedo} title="Rehacer (Ctrl+Shift+Z)" className="h-11 w-11 flex items-center justify-center text-slate-500 hover:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"><i className="fa-solid fa-rotate-right"></i></button>
+          </div>
           <button onClick={newReel} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-file-circle-plus"></i> Nuevo</button>
           <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-arrow-left"></i> Volver</button>
         </div>
