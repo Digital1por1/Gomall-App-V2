@@ -156,6 +156,21 @@ export function addAudioElement(p: ReelProject, el: AudioElement): ReelProject {
   return { ...p, tracks: [...p.tracks, track] };
 }
 
+// Agrega un elemento visual en una pista de overlay SIN solapamiento; si todas se solapan, crea una
+// pista de overlay nueva (así stickers/imágenes quedan en su propia capa, separados de los subtítulos).
+export function addOverlayElement(p: ReelProject, el: ReelElement): ReelProject {
+  const overlaps = (t: Track) => t.elements.some(e => !(el.start + el.duration <= e.start || el.start >= e.start + e.duration));
+  const free = p.tracks.find(t => t.kind === 'overlay' && !overlaps(t));
+  if (free) return addElement(p, free.id, el);
+  const track: Track = { id: genId('trk'), kind: 'overlay', name: 'Overlay', elements: [el], muted: false, hidden: false, locked: false };
+  // Insertar junto a las otras pistas de overlay (antes de las de audio), para agrupar en la timeline.
+  const idxs = p.tracks.map((t, i) => (t.kind === 'overlay' ? i : -1)).filter(i => i >= 0);
+  const insertAt = idxs.length ? idxs[idxs.length - 1] + 1 : p.tracks.length;
+  const tracks = [...p.tracks];
+  tracks.splice(insertAt, 0, track);
+  return { ...p, tracks };
+}
+
 export function updateElement(p: ReelProject, id: string, patch: Partial<ReelElement>): ReelProject {
   return mapTracks(p, t => {
     if (!t.elements.some(e => e.id === id)) return t;

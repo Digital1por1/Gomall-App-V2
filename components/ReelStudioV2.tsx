@@ -9,7 +9,7 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, addAudioElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
+  addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
@@ -76,6 +76,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [snap, setSnap] = useState(true);
   const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
+  const [stickerDur, setStickerDur] = useState(3); // duración (s) de un sticker nuevo
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
@@ -281,13 +282,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     setTab('texto');
   };
   const addSticker = (emoji: string) => {
-    const overlay = project.tracks.find(t => t.kind === 'overlay')!;
     const el = makeTextElement(emoji, {
-      start: currentTime, duration: 3, name: 'Sticker',
+      start: currentTime, duration: stickerDur, name: 'Sticker',
       transform: { x: 50, y: 40, scale: 100, rotation: 0, opacity: 100 },
       style: { font: 'Inter', color: '#FFFFFF', size: 16, weight: 400, bg: null, stroke: false, align: 'center', karaoke: false, accent: '#FFE600' },
     });
-    commit(addElement(project, overlay.id, el));
+    commit(addOverlayElement(project, el)); // capa de overlay propia (separada de los subtítulos)
     setSelectedId(el.id);
   };
 
@@ -338,13 +338,14 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
 
   // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
   const generateSubtitles = async () => {
-    const findFirst = (pred: (e: ReelElement) => boolean): ReelElement | null => {
-      for (const t of project.tracks) for (const el of t.elements) if (pred(el)) return el;
-      return null;
-    };
-    const source = findFirst(e => e.type === 'audio') || findFirst(e => e.type === 'video');
-    const srcUrl = source ? (source as VideoElement | AudioElement).url : undefined;
-    if (!srcUrl) { alert('Agregá un video o audio con voz para generar subtítulos.'); return; }
+    // Preferimos la VOZ en off para transcribir (no la música). Heurística: nombre "voz/voice/off",
+    // si no, el último audio agregado (la voz suele ir después de la música); si no hay audio, el video.
+    const audios: AudioElement[] = [];
+    for (const t of project.tracks) for (const el of t.elements) if (el.type === 'audio') audios.push(el as AudioElement);
+    const voice = audios.find(a => /voz|voice|off|narrac/i.test(a.name)) || audios[audios.length - 1] || audios[0];
+    let srcUrl: string | undefined = voice?.url;
+    if (!srcUrl) { for (const t of project.tracks) for (const el of t.elements) if (el.type === 'video') { srcUrl = (el as VideoElement).url; break; } }
+    if (!srcUrl) { alert('Agregá una voz en off, un audio o un video con voz para generar subtítulos.'); return; }
     setTranscribing(true); setSubMsg('');
     try {
       const segs = await transcribe(srcUrl, setSubMsg);
@@ -696,10 +697,22 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <p className="text-[11px] text-white/40 leading-relaxed">"Agregar texto" crea un texto en el cabezal. "Subtítulos automáticos" transcribe la voz del audio/video y crea un texto por frase (la 1ª vez baja el modelo).</p>
             </>)}
             {tab === 'stickers' && (
-              <div className="grid grid-cols-5 gap-2">
-                {STICKERS.map(s => (
-                  <button key={s} onClick={() => addSticker(s)} className="aspect-square rounded-lg bg-white/5 hover:bg-white/15 text-2xl grid place-items-center">{s}</button>
-                ))}
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[11px] text-white/50 font-semibold mb-1">Duración del sticker</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 2, 3, 5].map(d => (
+                      <button key={d} onClick={() => setStickerDur(d)} className="py-1.5 rounded-lg text-xs font-semibold border"
+                        style={stickerDur === d ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>{d}s</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {STICKERS.map((s, i) => (
+                    <button key={s + i} onClick={() => addSticker(s)} className="aspect-square rounded-lg bg-white/5 hover:bg-white/15 text-2xl grid place-items-center">{s}</button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-white/40 leading-relaxed">El sticker se agrega en el cabezal, con la duración elegida, en su propia capa (podés reposicionarlo arrastrándolo y recortarlo en la timeline).</p>
               </div>
             )}
             {tab === 'audio' && (<>

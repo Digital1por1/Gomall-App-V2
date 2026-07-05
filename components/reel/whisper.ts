@@ -75,13 +75,39 @@ export async function transcribe(url: string, onStatus?: (msg: string) => void):
   const pipe = await loadWhisper((pct) => onStatus?.(`Descargando modelo… ${pct}%`));
   onStatus?.('Transcribiendo…');
   const total = audio.length / 16000;
-  const out: any = await pipe(audio, {
-    return_timestamps: true,
-    chunk_length_s: 30,
-    stride_length_s: 5,
-    language: 'spanish',
-    task: 'transcribe',
-  });
+
+  // Timestamps POR PALABRA → sincronía real con la voz (no estimada). Agrupamos en líneas cortas.
+  try {
+    const out: any = await pipe(audio, { return_timestamps: 'word', chunk_length_s: 30, stride_length_s: 5, language: 'spanish', task: 'transcribe' });
+    const words: any[] = out?.chunks || [];
+    if (words.length && Array.isArray(words[0]?.timestamp)) {
+      const segs: SubSegment[] = [];
+      let cur: { text: string; start: number; end: number }[] = [];
+      const flush = () => {
+        if (!cur.length) return;
+        const text = cur.map(w => w.text).join('').trim();
+        const start = cur[0].start;
+        const end = Math.max(start + 0.25, cur[cur.length - 1].end);
+        if (text) segs.push({ text, start, end });
+        cur = [];
+      };
+      for (const w of words) {
+        const text = String(w?.text || '');
+        const s = Number(w?.timestamp?.[0]);
+        const e = Number(w?.timestamp?.[1]);
+        const prevEnd = cur.length ? cur[cur.length - 1].end : (segs.length ? segs[segs.length - 1].end : 0);
+        cur.push({ text, start: isFinite(s) ? s : prevEnd, end: isFinite(e) ? e : (isFinite(s) ? s + 0.3 : prevEnd + 0.3) });
+        const clean = text.trim();
+        const lineLen = cur.map(x => x.text).join('').trim().length;
+        if (cur.length >= 5 || lineLen >= 30 || /[.!?,;:]$/.test(clean)) flush();
+      }
+      flush();
+      if (segs.length) return segs;
+    }
+  } catch (e) { console.warn('[whisper] word timestamps no disponibles, uso segmentos:', e); }
+
+  // Fallback: timestamps por segmento (estimando el reparto por palabra).
+  const out: any = await pipe(audio, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5, language: 'spanish', task: 'transcribe' });
   const chunks: any[] = out?.chunks || [];
   const segs: SubSegment[] = [];
   for (const c of chunks) {
@@ -91,7 +117,6 @@ export async function transcribe(url: string, onStatus?: (msg: string) => void):
     let end = Number(c?.timestamp?.[1]);
     if (!isFinite(end)) end = Math.min(total, start + Math.max(1.2, text.length * 0.06));
     end = Math.max(start + 0.3, end);
-    // Dividir el segmento en líneas cortas (frases), cada una como subtítulo aparte.
     segs.push(...splitIntoLines(text, start, end));
   }
   return segs;
