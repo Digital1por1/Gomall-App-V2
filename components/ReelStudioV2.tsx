@@ -649,7 +649,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         <div className="w-8 h-8 rounded-lg grid place-items-center text-white font-black" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>G</div>
         <b className="text-sm tracking-widest">GOMALL</b>
         <span className="text-sm text-white/50 tracking-widest font-semibold">Creator Studio</span>
-        <span className="ml-3 text-xs text-white/40">Reel sin título</span>
+        <input value={project.name} onChange={(e) => setProject(p => ({ ...p, name: e.target.value }))} placeholder="Reel sin título"
+          className="ml-3 text-sm bg-transparent text-white/70 outline-none border-b border-transparent focus:border-white/30 focus:text-white w-48 placeholder:text-white/30" />
         <div className="flex-1" />
         {saveState !== 'idle' && (
           <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-white/40 mr-1">
@@ -723,7 +724,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
             </>)}
             {tab === 'ajustes' && (<>
-              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Historia (9:16)</b></div>
+              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Reel (9:16)</b></div>
 
               <div className="pt-4 mt-2 border-t border-white/5 space-y-3">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>
@@ -748,10 +749,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         {/* preview */}
         <section className="bg-[#0c0a0b] flex flex-col min-h-0">
           <div className="flex-1 grid place-items-center p-5 min-h-0 overflow-hidden">
-            <canvas ref={canvasRef}
-              onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
-              className="rounded-xl shadow-2xl block"
-              style={{ aspectRatio: `${CW} / ${CH}`, maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+            {/* Contenedor con el aspecto del formato: la altura manda (el reel es más alto que ancho). */}
+            <div className="relative" style={{ aspectRatio: `${CW} / ${CH}`, height: '100%', maxHeight: '100%', maxWidth: '100%' }}>
+              <canvas ref={canvasRef}
+                onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
+                className="absolute inset-0 w-full h-full rounded-xl shadow-2xl block"
+                style={{ background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+            </div>
           </div>
           <div className="flex items-center gap-3 px-5 py-3 border-t border-white/10">
             <span className="text-xs tabular-nums text-white/60"><b style={{ color: BRAND }}>{fmtTime(currentTime)}</b> / {fmtTime(totalDur)}</span>

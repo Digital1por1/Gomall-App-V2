@@ -88,7 +88,7 @@ export function genId(prefix = 'id'): string {
 export function createProject(aspect: AspectId = '9:16'): ReelProject {
   return {
     id: genId('proj'),
-    name: 'Reel sin título',
+    name: '',
     aspect,
     fps: 30,
     tracks: [
