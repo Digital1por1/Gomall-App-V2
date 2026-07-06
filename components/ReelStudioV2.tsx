@@ -74,7 +74,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
-  const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'texto' | 'plantillas' | 'stickers' | 'audio' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -320,6 +320,54 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     setSelectedId(el.id);
   };
 
+  // ---------- plantillas de marca ----------
+  // Aplican elementos de marca (logo, título, CTA) usando el brand kit. Se etiquetan con name "tpl:" para
+  // poder reemplazarlos al elegir otra plantilla (no se acumulan).
+  const applyTemplate = (id: 'completa' | 'inferior' | 'cierre' | 'logo') => {
+    const dur = Math.max(totalDur, 5);
+    const headline = (initialCopy?.split('\n')[0] || 'Tu titular acá').slice(0, 40);
+    const logo = kit?.logoUrls?.[0];
+    const hFont = kit?.headlineFont || 'Inter';
+    const hColor = kit?.headlineColor || '#FFFFFF';
+    const brand = kit?.brandColors?.[0] || BRAND;
+    const ctaFont = kit?.ctaFont || hFont;
+    const ctaColor = kit?.ctaColor || '#FFFFFF';
+    const ctaBg = kit?.ctaBgColor || brand;
+
+    const tplIds: string[] = [];
+    for (const t of project.tracks) for (const el of t.elements) if ((el.name || '').startsWith('tpl:')) tplIds.push(el.id);
+    let p = project;
+    for (const elId of tplIds) p = removeElement(p, elId);
+    const overlay = p.tracks.find(t => t.kind === 'overlay')!;
+    const addTxt = (text: string, name: string, start: number, duration: number, y: number, size: number, color: string, bg: string | null, font: string) => {
+      p = addElement(p, overlay.id, makeTextElement(text, {
+        name: 'tpl:' + name, start, duration,
+        transform: { x: 50, y, scale: 100, rotation: 0, opacity: 100 },
+        style: { font, color, size, weight: 900, bg, stroke: !bg, align: 'center', anim: 'none', karaoke: false },
+      }));
+    };
+    const addLogo = (start: number, duration: number, x: number, y: number, scale: number) => {
+      if (logo) p = addElement(p, overlay.id, makeImageElement(logo, { name: 'tpl:logo', start, duration, transform: { x, y, scale, rotation: 0, opacity: 100 } }));
+    };
+
+    if (id === 'logo') addLogo(0, dur, 82, 10, 16);
+    if (id === 'completa') {
+      addLogo(0, dur, 82, 10, 16);
+      addTxt(headline, 'titulo', 0, Math.min(3, dur), 22, 8, hColor, brand, hFont);
+      addTxt('¡Aprovechá ahora!', 'cta', Math.max(0, dur - 3), Math.min(3, dur), 80, 7, ctaColor, ctaBg, ctaFont);
+    }
+    if (id === 'inferior') {
+      addLogo(0, dur, 82, 10, 15);
+      addTxt(headline, 'titulo', 0, Math.min(4, dur), 85, 6.5, hColor, brand, hFont);
+    }
+    if (id === 'cierre') {
+      addTxt('¡Aprovechá ahora!', 'cta', Math.max(0, dur - 3), Math.min(3, dur), 48, 9, ctaColor, ctaBg, ctaFont);
+      addLogo(Math.max(0, dur - 3), Math.min(3, dur), 50, 22, 34);
+    }
+    commit(p);
+    setTab('texto'); // para que pueda editar los textos recién agregados
+  };
+
   // ---------- logo (subir cualquier logo) ----------
   const addLogoImage = (url: string) => {
     const overlay = project.tracks.find(t => t.kind === 'overlay')!;
@@ -514,9 +562,15 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     }
   };
   const onTimelinePointerUp = () => {
-    if (dragRef.current && dragRef.current.mode !== 'playhead') {
-      // Asienta un punto de historial tras el drag.
-      setProject(p => { histRef.current.past.push(p); if (histRef.current.past.length > 60) histRef.current.past.shift(); histRef.current.future = []; setCanUndo(true); setCanRedo(false); return p; });
+    const d = dragRef.current;
+    if (d && d.mode !== 'playhead') {
+      setProject(p => {
+        // Si moviste un clip de la pista de video, se reacomodan en orden y se cierran los huecos (reordenar arrastrando).
+        const f = findElement(p, d.id);
+        const np = (d.mode === 'move' && f && f.track.kind === 'video') ? closeVideoGaps(p) : p;
+        histRef.current.past.push(p); if (histRef.current.past.length > 60) histRef.current.past.shift(); histRef.current.future = []; setCanUndo(true); setCanRedo(false);
+        return np;
+      });
     }
     dragRef.current = null;
   };
@@ -680,6 +734,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
     { id: 'texto', icon: 'fa-font', label: 'Texto' },
+    { id: 'plantillas', icon: 'fa-swatchbook', label: 'Plantillas' },
     { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
     { id: 'audio', icon: 'fa-music', label: 'Audio' },
     { id: 'ajustes', icon: 'fa-sliders', label: 'Ajustes' },
@@ -739,6 +794,27 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
               </button>
               <p className="text-[11px] text-white/40 leading-relaxed">"Agregar texto" crea un texto en el cabezal. "Subtítulos automáticos" transcribe la voz del audio/video y crea un texto por frase (la 1ª vez baja el modelo).</p>
             </>)}
+            {tab === 'plantillas' && (
+              <div className="space-y-2">
+                <p className="text-[11px] text-white/40 leading-relaxed mb-1">Aplican tu marca al reel (logo, título y CTA con tus fuentes y colores). Elegís una y después editás los textos.</p>
+                {([
+                  { id: 'completa', label: 'Marca completa', desc: 'Logo + título de apertura + CTA de cierre', icon: 'fa-star' },
+                  { id: 'inferior', label: 'Barra inferior', desc: 'Título en barra de color abajo + logo', icon: 'fa-window-minimize' },
+                  { id: 'cierre', label: 'Placa de cierre', desc: 'CTA final grande con el logo', icon: 'fa-flag-checkered' },
+                  { id: 'logo', label: 'Solo logo', desc: 'Marca de agua en la esquina', icon: 'fa-stamp' },
+                ] as { id: 'completa' | 'inferior' | 'cierre' | 'logo'; label: string; desc: string; icon: string }[]).map(t => (
+                  <button key={t.id} onClick={() => applyTemplate(t.id)} className="w-full text-left p-3 rounded-xl border border-white/12 hover:border-[color:var(--b)] hover:bg-white/5 flex items-center gap-3" style={{ ['--b' as any]: BRAND }}>
+                    <span className="w-9 h-9 rounded-lg grid place-items-center text-white shrink-0" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}><i className={`fa-solid ${t.icon}`} /></span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold text-white truncate">{t.label}</span>
+                      <span className="block text-[11px] text-white/45 leading-tight">{t.desc}</span>
+                    </span>
+                  </button>
+                ))}
+                {!kit && <p className="text-[11px] text-amber-300/80 leading-relaxed mt-1"><i className="fa-solid fa-triangle-exclamation mr-1" />No tenés un brand kit configurado: se usan colores y fuentes por defecto. Cargá tu marca para que las plantillas usen tu logo y paleta.</p>}
+                {kit && !kit.logoUrls?.[0] && <p className="text-[11px] text-amber-300/80 leading-relaxed mt-1"><i className="fa-solid fa-triangle-exclamation mr-1" />Tu brand kit no tiene logo: las plantillas con logo lo omiten.</p>}
+              </div>
+            )}
             {tab === 'stickers' && (
               <div className="space-y-3">
                 <div className="grid grid-cols-5 gap-2">
