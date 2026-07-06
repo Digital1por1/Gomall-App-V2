@@ -217,6 +217,21 @@ export function moveTrack(p: ReelProject, trackId: string, dir: -1 | 1): ReelPro
   return { ...p, tracks };
 }
 
+// Cierra los huecos de la pista de video: reacomoda sus clips en orden, pegados desde 0.
+// (Un hueco en la pista base = frame negro en la reproducción; esto lo evita.)
+export function closeVideoGaps(p: ReelProject): ReelProject {
+  const track = p.tracks.find(t => t.kind === 'video');
+  if (!track || !track.elements.length) return p;
+  const order = [...track.elements].sort((a, b) => a.start - b.start);
+  const patch: Record<string, number> = {};
+  let cursor = 0;
+  for (const c of order) { patch[c.id] = cursor; cursor += c.duration; }
+  return mapTracks(p, tk => tk.id !== track.id ? tk : {
+    ...tk,
+    elements: tk.elements.map(e => (patch[e.id] != null ? { ...e, start: patch[e.id] } : e)).sort((a, b) => a.start - b.start),
+  });
+}
+
 // Corta un elemento en dos en el instante atTime (de la timeline). Respeta el recorte de la fuente.
 export function splitElement(p: ReelProject, id: string, atTime: number): ReelProject {
   const found = findElement(p, id);

@@ -9,7 +9,7 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, moveTrack, setTrackFlag, splitElement, autoCompaginate,
+  addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, moveTrack, setTrackFlag, splitElement, closeVideoGaps, autoCompaginate,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
@@ -409,7 +409,15 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     if (!selected || selected.type !== 'text') return;
     patchSel({ style: { ...(selected as TextElement).style, ...s } } as any);
   };
-  const deleteSel = () => { if (selectedId) { commit(removeElement(project, selectedId)); setSelectedId(null); } };
+  const deleteSel = () => {
+    if (!selectedId) return;
+    const f = findElement(project, selectedId);
+    let p = removeElement(project, selectedId);
+    if (f && f.track.kind === 'video') p = closeVideoGaps(p); // borrar un clip base cierra el hueco (sin negro)
+    commit(p);
+    setSelectedId(null);
+  };
+  const closeGaps = () => commit(closeVideoGaps(project));
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
     if (!selectedId) return;
@@ -770,9 +778,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
           <div className="p-4 overflow-y-auto text-sm space-y-4">
             {!selected && <p className="text-white/40 text-xs">Seleccioná un elemento en la timeline para editar sus propiedades.</p>}
 
-            {selected && selected.type === 'text' && (
+            {selected && selected.type === 'text' && ((selected as TextElement).name === 'Sticker' ? (
+              <StickerProps el={selected as TextElement} onStyle={patchTextStyle} onTransform={patchTransform} />
+            ) : (
               <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} onSyncAll={syncTextStyle} />
-            )}
+            ))}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
               <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} />
             )}
@@ -822,6 +832,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
           <button onClick={splitAtPlayhead} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10" title="Cortar en el cabezal (S)"><i className="fa-solid fa-scissors text-xs" /></button>
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
+          <button onClick={closeGaps} title="Cerrar huecos de la pista de video (evita el negro)" className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10"><i className="fa-solid fa-arrows-left-right-to-line text-xs" /></button>
           <button onClick={() => setSnap(s => !s)} title="Imán (snapping)" className="w-8 h-8 grid place-items-center rounded-lg text-xs"
             style={snap ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff' } : { color: 'rgba(255,255,255,.5)' }}><i className="fa-solid fa-magnet" /></button>
           <div className="w-px h-5 bg-white/10 mx-1" />
@@ -946,6 +957,18 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
         <Row label="Color de resalte"><input type="color" value={el.style.accent || '#FFE600'} onChange={(e) => onStyle({ accent: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
       ) : null}
     </div>
+  </div>
+);
+
+const StickerProps: React.FC<{ el: TextElement; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void }> = ({ el, onStyle, onTransform }) => (
+  <div className="space-y-4">
+    <div className="text-center text-5xl leading-none py-2 select-none">{el.text}</div>
+    <Row label={`Tamaño: ${el.style.size}%`}><Slider min={5} max={40} value={el.style.size} onChange={(v) => onStyle({ size: v })} /></Row>
+    <Row label={`Rotación: ${Math.round(el.transform.rotation)}°`}><Slider min={-180} max={180} value={el.transform.rotation} onChange={(v) => onTransform({ rotation: v })} /></Row>
+    <Row label={`Opacidad: ${Math.round(el.transform.opacity)}%`}><Slider min={0} max={100} value={el.transform.opacity} onChange={(v) => onTransform({ opacity: v })} /></Row>
+    <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
+    <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>
+    <p className="text-[11px] text-white/40 leading-relaxed">Arrastralo en el preview para moverlo; arrastrá los bordes en la timeline para cambiar su duración.</p>
   </div>
 );
 

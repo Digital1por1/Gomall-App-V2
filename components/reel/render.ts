@@ -107,6 +107,8 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const lineH = fontPx * 1.18;
   const cx = (el.transform.x / 100) * W;
   const cy = (el.transform.y / 100) * H;
+  const rot = el.transform.rotation || 0;
+  if (rot) { ctx.translate(cx, cy); ctx.rotate((rot * Math.PI) / 180); ctx.translate(-cx, -cy); }
   const totalH = lines.length * lineH;
   let y = cy - totalH / 2 + lineH / 2;
 
