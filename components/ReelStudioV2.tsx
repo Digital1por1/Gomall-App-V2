@@ -87,6 +87,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [clipThumbs, setClipThumbs] = useState<Record<string, string>>({}); // url → miniatura (dataURL) para los bloques de la timeline
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Persistencia V2: mapa url→mediaId (prefijo v2_ para no chocar con la media del editor V1); gate de hidratación.
@@ -173,6 +174,35 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
 
   // Marca la mezcla de audio como desactualizada ante cualquier cambio del proyecto (se reconstruye al reproducir).
   useEffect(() => { mixDirtyRef.current = true; }, [project]);
+
+  // Genera una miniatura (un frame representativo) por cada video, para pintarla en los bloques de la timeline.
+  useEffect(() => {
+    const urls = new Set<string>();
+    for (const t of project.tracks) for (const el of t.elements) if (el.type === 'video') urls.add((el as VideoElement).url);
+    urls.forEach(url => {
+      if (clipThumbs[url]) return;
+      const v = document.createElement('video');
+      v.src = url; v.muted = true; v.crossOrigin = 'anonymous'; v.preload = 'metadata'; v.playsInline = true;
+      let done = false;
+      const cleanup = () => { try { v.removeAttribute('src'); v.load(); } catch { /* noop */ } };
+      const grab = () => {
+        if (done) return; done = true;
+        try {
+          const c = document.createElement('canvas');
+          const ar = (v.videoWidth || 9) / (v.videoHeight || 16);
+          c.width = 80; c.height = Math.max(24, Math.round(80 / (ar || 0.5625)));
+          const ctx = c.getContext('2d');
+          if (ctx) { ctx.drawImage(v, 0, 0, c.width, c.height); const data = c.toDataURL('image/jpeg', 0.5); setClipThumbs(prev => (prev[url] ? prev : { ...prev, [url]: data })); }
+        } catch { /* noop */ }
+        cleanup();
+      };
+      v.onloadeddata = () => { try { v.currentTime = Math.min(0.1, (v.duration || 1) / 2); } catch { grab(); } };
+      v.onseeked = grab;
+      v.onerror = () => { done = true; cleanup(); };
+      setTimeout(() => { if (!done && v.readyState >= 2) grab(); }, 2500);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const stopAudio = () => {
     if (mixSrcRef.current) { try { mixSrcRef.current.stop(); } catch { /* noop */ } mixSrcRef.current = null; }
@@ -753,10 +783,18 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
         <section className="bg-[#2a2a30] flex flex-col min-h-0">
           <div className="flex-1 flex items-center justify-center p-5 min-h-0 overflow-hidden">
             {/* Flexbox: el alto del canvas = alto disponible; el ancho sale del aspecto 9:16 → siempre vertical. */}
-            <canvas ref={canvasRef}
-              onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
-              className="rounded-xl shadow-2xl block"
-              style={{ height: '100%', aspectRatio: `${CW} / ${CH}`, maxWidth: '100%', background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+            <div className="relative" style={{ height: '100%', aspectRatio: `${CW} / ${CH}`, maxWidth: '100%' }}>
+              <canvas ref={canvasRef}
+                onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
+                className="rounded-xl shadow-2xl block w-full h-full"
+                style={{ background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+              {/* Handles para escalar/rotar el sticker seleccionado directo en el preview */}
+              {selected && selected.type === 'text' && (selected as TextElement).name === 'Sticker' && currentTime >= selected.start && currentTime < selected.start + selected.duration && (
+                <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+                  <StickerHandles el={selected as TextElement} onStyle={patchTextStyle} onTransform={patchTransform} />
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3 px-5 py-3 border-t border-white/10">
             <span className="text-xs tabular-nums text-white/60"><b style={{ color: BRAND }}>{fmtTime(currentTime)}</b> / {fmtTime(totalDur)}</span>
@@ -869,6 +907,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                     <div key={el.id} onPointerDown={(e) => onBlockPointerDown(e, el.id, 'move')}
                       className="absolute top-2 bottom-2 rounded-lg overflow-hidden cursor-grab select-none"
                       style={{ left, width, background: bg, outline: isSel ? `2px solid ${BRAND}` : '1px solid rgba(0,0,0,.3)', color: el.type === 'text' ? BRAND : '#fff' }}>
+                      {el.type === 'video' && clipThumbs[(el as VideoElement).url] && (<>
+                        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `url(${clipThumbs[(el as VideoElement).url]})`, backgroundSize: 'cover', backgroundRepeat: 'repeat-x', backgroundPosition: 'center', opacity: 0.85 }} />
+                        <div className="absolute inset-x-0 top-0 h-5 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+                      </>)}
                       <span className="absolute left-2 top-1 text-[10px] font-semibold truncate max-w-[85%] pointer-events-none">
                         <i className={`fa-solid ${el.type === 'video' ? 'fa-video' : el.type === 'image' ? 'fa-image' : el.type === 'text' ? 'fa-font' : 'fa-music'} mr-1`} />
                         {el.type === 'text' ? (el as TextElement).text || 'Texto' : el.name}
@@ -959,6 +1001,45 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
     </div>
   </div>
 );
+
+// Manijas de escala/rotación sobre el preview para el sticker seleccionado (manipulación directa).
+const StickerHandles: React.FC<{ el: TextElement; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void }> = ({ el, onStyle, onTransform }) => {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const modeRef = useRef<{ kind: 'scale'; cx: number; cy: number; startDist: number; origSize: number } | { kind: 'rotate'; cx: number; cy: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const m = modeRef.current; if (!m) return;
+      if (m.kind === 'scale') {
+        const d = Math.hypot(e.clientX - m.cx, e.clientY - m.cy);
+        onStyle({ size: Math.round(Math.max(3, Math.min(60, m.origSize * (d / m.startDist))) * 10) / 10 });
+      } else {
+        let a = Math.atan2(e.clientY - m.cy, e.clientX - m.cx) * 180 / Math.PI + 90;
+        a = ((a + 180) % 360 + 360) % 360 - 180;
+        onTransform({ rotation: Math.round(a) });
+      }
+    };
+    const onUp = () => { modeRef.current = null; };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, [onStyle, onTransform]);
+  const start = (kind: 'scale' | 'rotate', e: React.PointerEvent) => {
+    e.stopPropagation(); e.preventDefault();
+    const r = boxRef.current?.parentElement?.getBoundingClientRect(); if (!r) return;
+    const cx = r.left + (el.transform.x / 100) * r.width;
+    const cy = r.top + (el.transform.y / 100) * r.height;
+    modeRef.current = kind === 'scale'
+      ? { kind, cx, cy, startDist: Math.max(1, Math.hypot(e.clientX - cx, e.clientY - cy)), origSize: el.style.size }
+      : { kind, cx, cy };
+  };
+  return (
+    <div ref={boxRef} className="absolute" style={{ left: `${el.transform.x}%`, top: `${el.transform.y}%`, height: `${Math.max(6, el.style.size * 1.25)}%`, aspectRatio: '1 / 1', transform: `translate(-50%,-50%) rotate(${el.transform.rotation || 0}deg)`, border: `1.5px dashed ${BRAND}`, borderRadius: 8, pointerEvents: 'none' }}>
+      <div onPointerDown={(e) => start('rotate', e)} title="Rotar" className="absolute left-1/2 grid place-items-center rounded-full shadow" style={{ top: -26, width: 18, height: 18, transform: 'translateX(-50%)', background: BRAND, pointerEvents: 'auto', cursor: 'grab' }}><i className="fa-solid fa-rotate text-[9px] text-white" /></div>
+      <div style={{ position: 'absolute', left: '50%', top: -26, width: 1, height: 18, background: BRAND, transform: 'translateX(-50%)', pointerEvents: 'none' }} />
+      <div onPointerDown={(e) => start('scale', e)} title="Escalar" className="absolute rounded-full shadow" style={{ right: -8, bottom: -8, width: 16, height: 16, background: BRAND, pointerEvents: 'auto', cursor: 'nwse-resize' }} />
+    </div>
+  );
+};
 
 const StickerProps: React.FC<{ el: TextElement; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void }> = ({ el, onStyle, onTransform }) => (
   <div className="space-y-4">
