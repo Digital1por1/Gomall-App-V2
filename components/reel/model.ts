@@ -24,6 +24,7 @@ export interface TextStyle {
   color: string;
   size: number;            // % de la altura del canvas
   weight: number;
+  italic?: boolean;        // cursiva
   bg: string | null;       // color de caja (o null)
   stroke: boolean;
   align: 'center' | 'left' | 'right';
@@ -201,6 +202,19 @@ export function moveElement(p: ReelProject, id: string, newStart: number, newTra
 
 export function setTrackFlag(p: ReelProject, trackId: string, flag: 'muted' | 'hidden' | 'locked', value: boolean): ReelProject {
   return mapTracks(p, t => t.id === trackId ? { ...t, [flag]: value } : t);
+}
+
+// Reordena una pista intercambiándola con su vecina NO vacía en la dirección dada (-1 = subir, +1 = bajar).
+// Salta pistas vacías (que no se muestran en la timeline) para que el movimiento se sienta directo.
+export function moveTrack(p: ReelProject, trackId: string, dir: -1 | 1): ReelProject {
+  const tracks = [...p.tracks];
+  const idx = tracks.findIndex(t => t.id === trackId);
+  if (idx < 0) return p;
+  let j = idx + dir;
+  while (j >= 0 && j < tracks.length && tracks[j].elements.length === 0) j += dir;
+  if (j < 0 || j >= tracks.length) return p;
+  [tracks[idx], tracks[j]] = [tracks[j], tracks[idx]];
+  return { ...p, tracks };
 }
 
 // Corta un elemento en dos en el instante atTime (de la timeline). Respeta el recorte de la fuente.

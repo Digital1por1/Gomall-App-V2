@@ -99,7 +99,7 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const fontPx = Math.max(8, (s.size / 100) * H);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, (el.transform.opacity / 100) * alphaMul));
-  ctx.font = `${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
+  ctx.font = `${s.italic ? 'italic ' : ''}${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
   ctx.textBaseline = 'middle';
   if (s.glow) { ctx.shadowColor = s.accent || s.color; ctx.shadowBlur = fontPx * 0.5; }
   const maxW = W * 0.88;

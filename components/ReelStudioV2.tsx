@@ -9,7 +9,7 @@ import { UserProfile } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
-  addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, setTrackFlag, splitElement, autoCompaginate,
+  addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, moveTrack, setTrackFlag, splitElement, autoCompaginate,
   makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
@@ -30,9 +30,9 @@ const STICKERS = [
 // Tipografías disponibles (cargadas en index.html).
 const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Anton', 'Playfair Display', 'Roboto', 'Open Sans', 'Ubuntu', 'Lora', 'Cinzel', 'Permanent Marker', 'Pacifico', 'Dancing Script'];
 
-// Presets de subtítulos/texto estilo CapCut.
+// Presets de subtítulos/texto (look dinámico palabra por palabra).
 const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = [
-  { id: 'capcut', label: 'CapCut', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true } },
+  { id: 'capcut', label: 'Viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true } },
   { id: 'caja', label: 'Caja', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false } },
   { id: 'clasico', label: 'Clásico', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false } },
   { id: 'neon', label: 'Neón', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true } },
@@ -76,7 +76,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [snap, setSnap] = useState(true);
   const [tab, setTab] = useState<'media' | 'texto' | 'stickers' | 'audio' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
-  const [stickerDur, setStickerDur] = useState(3); // duración (s) de un sticker nuevo
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
@@ -283,7 +282,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   };
   const addSticker = (emoji: string) => {
     const el = makeTextElement(emoji, {
-      start: currentTime, duration: stickerDur, name: 'Sticker',
+      start: currentTime, duration: 3, name: 'Sticker',
       transform: { x: 50, y: 40, scale: 100, rotation: 0, opacity: 100 },
       style: { font: 'Inter', color: '#FFFFFF', size: 16, weight: 400, bg: null, stroke: false, align: 'center', karaoke: false, accent: '#FFE600' },
     });
@@ -411,6 +410,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
     patchSel({ style: { ...(selected as TextElement).style, ...s } } as any);
   };
   const deleteSel = () => { if (selectedId) { commit(removeElement(project, selectedId)); setSelectedId(null); } };
+  // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
+  const moveSelTrack = (dir: -1 | 1) => {
+    if (!selectedId) return;
+    const f = findElement(project, selectedId); if (!f) return;
+    commit(moveTrack(project, f.track.id, dir));
+  };
   // Corta el elemento seleccionado (o el que esté bajo el cabezal) en el instante actual.
   const splitAtPlayhead = () => {
     let id = selectedId;
@@ -698,21 +703,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
             </>)}
             {tab === 'stickers' && (
               <div className="space-y-3">
-                <div>
-                  <div className="text-[11px] text-white/50 font-semibold mb-1">Duración del sticker</div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[1, 2, 3, 5].map(d => (
-                      <button key={d} onClick={() => setStickerDur(d)} className="py-1.5 rounded-lg text-xs font-semibold border"
-                        style={stickerDur === d ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>{d}s</button>
-                    ))}
-                  </div>
-                </div>
                 <div className="grid grid-cols-5 gap-2">
                   {STICKERS.map((s, i) => (
                     <button key={s + i} onClick={() => addSticker(s)} className="aspect-square rounded-lg bg-white/5 hover:bg-white/15 text-2xl grid place-items-center">{s}</button>
                   ))}
                 </div>
-                <p className="text-[11px] text-white/40 leading-relaxed">El sticker se agrega en el cabezal, con la duración elegida, en su propia capa (podés reposicionarlo arrastrándolo y recortarlo en la timeline).</p>
+                <p className="text-[11px] text-white/40 leading-relaxed">El sticker se agrega en el cabezal, en su propia capa. Seleccionalo en la timeline y arrastrá sus bordes para <b className="text-white/70">alargarlo o achicarlo</b>; movelo en el preview para reposicionarlo.</p>
               </div>
             )}
             {tab === 'audio' && (<>
@@ -828,6 +824,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
           <button onClick={() => setSnap(s => !s)} title="Imán (snapping)" className="w-8 h-8 grid place-items-center rounded-lg text-xs"
             style={snap ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff' } : { color: 'rgba(255,255,255,.5)' }}><i className="fa-solid fa-magnet" /></button>
+          <div className="w-px h-5 bg-white/10 mx-1" />
+          <button onClick={() => moveSelTrack(-1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Subir la pista del elemento seleccionado"><i className="fa-solid fa-arrow-up text-xs" /></button>
+          <button onClick={() => moveSelTrack(1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Bajar la pista del elemento seleccionado"><i className="fa-solid fa-arrow-down text-xs" /></button>
           <div className="flex-1" />
           <span className="text-xs text-white/40">Zoom</span>
           <input type="range" min={20} max={160} value={pxPerSec} onChange={(e) => setPxPerSec(Number(e.target.value))} className="w-28 accent-[color:var(--b)]" style={{ ['--b' as any]: BRAND }} />
@@ -844,8 +843,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                 </div>
               ))}
             </div>
-            {/* Pistas */}
-            {project.tracks.map(track => (
+            {/* Pistas (solo las que tienen algo — sin filas vacías) */}
+            {project.tracks.filter(track => track.elements.length > 0).map(track => (
               <div key={track.id} className="h-14 relative border-b border-white/5">
                 <div className="absolute left-0 top-0 bottom-0 w-0 z-10" />
                 {track.elements.map(el => {
@@ -912,6 +911,14 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
       <select value={el.style.font} onChange={(e) => onStyle({ font: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
         {FONTS.map(f => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
       </select>
+    </Row>
+    <Row label="Formato">
+      <div className="flex gap-2">
+        <button onClick={() => onStyle({ weight: el.style.weight >= 700 ? 400 : 800 })} className="flex-1 py-1.5 rounded-lg text-sm font-black border"
+          style={el.style.weight >= 700 ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>B</button>
+        <button onClick={() => onStyle({ italic: !el.style.italic })} className="flex-1 py-1.5 rounded-lg text-sm font-semibold italic border"
+          style={el.style.italic ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>I</button>
+      </div>
     </Row>
     <button onClick={onSyncAll} className="w-full py-2 rounded-lg text-white text-[11px] font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
       <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar este estilo a TODOS los subtítulos
