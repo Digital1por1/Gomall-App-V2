@@ -2,36 +2,33 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Profiles: only the owner can read/write their profile
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email in ['digital@1por1.com.ar'];
+    }
+    // El cliente NO puede cambiar su plan ni su límite de tokens (eso solo lo hace el admin o el
+    // servidor con el Admin SDK, que ignora estas reglas). Evita el auto-upgrade a un plan pago.
+    function billingUnchanged() {
+      return request.resource.data.plan == resource.data.plan
+          && request.resource.data.tokenLimit == resource.data.tokenLimit;
+    }
+
+    // Perfiles: el dueño lee/crea/actualiza el suyo, PERO no puede tocar plan/tokenLimit. Admin, todo.
     match /profiles/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read:   if isAdmin() || (request.auth != null && request.auth.uid == userId);
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if isAdmin() || (request.auth != null && request.auth.uid == userId && billingUnchanged());
+      allow delete: if isAdmin();
     }
 
-    // Admin can read all profiles
-    match /profiles/{userId} {
-      allow read: if request.auth != null && request.auth.token.email in ['digital@1por1.com.ar'];
-      allow write: if request.auth != null && (
-        request.auth.uid == userId ||
-        request.auth.token.email in ['digital@1por1.com.ar']
-      );
-    }
-
-    // Saved designs: only the owner
+    // Diseños guardados: solo el dueño (admin puede leer)
     match /usuarios/{userId}/disenos/{disenoId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read:  if isAdmin() || (request.auth != null && request.auth.uid == userId);
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Admin can read all designs
-    match /usuarios/{userId}/disenos/{disenoId} {
-      allow read: if request.auth != null && request.auth.token.email in ['digital@1por1.com.ar'];
-    }
-
-    // Usage history snapshots
+    // Historial de uso
     match /usuarios/{userId}/historial/{docId} {
-      allow read, write: if request.auth != null && (
-        request.auth.uid == userId ||
-        request.auth.token.email in ['digital@1por1.com.ar']
-      );
+      allow read, write: if isAdmin() || (request.auth != null && request.auth.uid == userId);
     }
   }
 }
