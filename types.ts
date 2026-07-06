@@ -143,6 +143,8 @@ export interface CampaignPiece {
   imagePrompt: string;   // prompt sugerido para generar la imagen/reel
   copy: string;          // caption/copy sugerido
   rationale: string;     // por qué se recomienda esta pieza
+  assetUrl?: string;     // asset final producido (URL del reel/imagen en Storage)
+  thumbUrl?: string;     // miniatura/póster del asset final
 }
 
 export interface Campaign {

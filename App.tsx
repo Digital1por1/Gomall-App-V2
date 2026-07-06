@@ -16,7 +16,7 @@ import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
 import Home from './components/Home';
 import Landing from './components/Landing';
-import { persistImage } from './components/storage';
+import { persistImage, persistBlob } from './components/storage';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece, Campaign } from './types';
 
@@ -151,6 +151,7 @@ const App: React.FC = () => {
   const [showReels, setShowReels] = useState(false);
   const [showProductAd, setShowProductAd] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
+  const [reelPieceId, setReelPieceId] = useState<string | null>(null); // pieza de campaña que originó el reel (para adjuntarle el asset)
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [pendingImprove, setPendingImprove] = useState<{ image: string; prompt: string } | null>(null);
 
@@ -615,6 +616,36 @@ const App: React.FC = () => {
     return await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(blob); });
   };
 
+  // Guarda el reel exportado en la nube (Storage + Firestore) y, si salió de una campaña, lo adjunta a esa pieza.
+  const saveReelToCloud = async ({ blob, thumbBlob, name, ext }: { blob: Blob; thumbBlob: Blob | null; name: string; ext: string }): Promise<{ url: string } | void> => {
+    if (!user) { alert('Iniciá sesión para guardar el reel en la nube.'); return; }
+    const uid = user.uid;
+    const url = await persistBlob(blob, 'reels', ext);
+    if (!url) throw new Error('No se pudo subir el video.');
+    let thumbUrl: string | null = null;
+    if (thumbBlob) { try { thumbUrl = await persistBlob(thumbBlob, 'thumbs', 'jpg'); } catch { /* póster opcional */ } }
+    // Biblioteca de reels del usuario
+    try {
+      await db.collection('usuarios').doc(uid).collection('reels').add({
+        name: name || 'Reel', url, thumbUrl: thumbUrl || null,
+        campaignId: returnCampaignId || null, pieceId: reelPieceId || null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) { console.warn('[reel cloud] no se pudo registrar en la biblioteca', e); }
+    // Adjuntar a la pieza de campaña
+    if (returnCampaignId && reelPieceId) {
+      const camps = profile?.campaigns || [];
+      const idx = camps.findIndex(c => c.id === returnCampaignId);
+      const patchPieces = (c: Campaign): Campaign => ({ ...c, pieces: c.pieces.map(p => p.id === reelPieceId ? { ...p, assetUrl: url, thumbUrl: thumbUrl || undefined } : p) });
+      if (idx >= 0) {
+        const updated = camps.map(c => c.id === returnCampaignId ? patchPieces(c) : c);
+        try { await db.collection('profiles').doc(uid).update({ campaigns: updated }); } catch (e) { console.warn('[reel cloud] no se pudo adjuntar a la campaña', e); }
+      }
+      setCampaignDraft(prev => (prev && prev.id === returnCampaignId ? patchPieces(prev) : prev));
+    }
+    return { url };
+  };
+
   const handleUsePiece = async (piece: CampaignPiece, campaignId?: string, productImage?: string, campaign?: Campaign) => {
     // Recordar la campaña en memoria para poder volver a ella (sin guardarla)
     if (campaign) setCampaignDraft(campaign);
@@ -622,6 +653,7 @@ const App: React.FC = () => {
     // Las piezas de reel van al editor de video
     if (piece.type === 'reel') {
       setReelCopy(piece.copy || null);
+      setReelPieceId(piece.id);
       setShowCampaigns(false);
       setShowReels(true);
       return;
@@ -1156,6 +1188,8 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setShowReels(false)}
             initialCopy={reelCopy}
+            onSaveCloud={saveReelToCloud}
+            campaignName={returnCampaignId ? (campaignDraft?.name || null) : null}
           />
         ) : (
           <ReelStudio
@@ -1212,7 +1246,7 @@ const App: React.FC = () => {
           designsCount={savedProjects.length}
           onNewDesign={startNewDesign}
           onNewCampaign={() => { setCampaignInitial(null); setOpenCampaignId(null); setShowCampaigns(true); }}
-          onOpenReels={() => { setReelCopy(null); setShowReels(true); }}
+          onOpenReels={() => { setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null); setShowReels(true); }}
           onOpenProductAd={() => setShowProductAd(true)}
           onEditBrand={() => setShowBrand(true)}
           onOpenDesigns={() => { setActiveTab('editor'); setOpenSection('PROJECTS'); setReturnCampaignId(null); setAppView('editor'); }}

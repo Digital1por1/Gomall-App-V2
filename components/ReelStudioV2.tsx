@@ -56,7 +56,13 @@ const SUB_PRESETS: { id: string; label: string; group: 'viral' | 'sobrio' | 'mar
 ];
 
 
-interface Props { profile: UserProfile | null; onClose: () => void; initialCopy?: string | null }
+interface Props {
+  profile: UserProfile | null;
+  onClose: () => void;
+  initialCopy?: string | null;
+  onSaveCloud?: (a: { blob: Blob; thumbBlob: Blob | null; name: string; ext: string }) => Promise<{ url: string } | void>;
+  campaignName?: string | null;
+}
 
 // Mide la duración de un archivo de media.
 function probeDuration(url: string, kind: 'video' | 'audio'): Promise<number> {
@@ -82,7 +88,7 @@ type DragState =
   | { mode: 'playhead'; }
   | null;
 
-const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
+const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, onSaveCloud, campaignName }) => {
   const kit = profile?.brandKits?.[0];
   const [project, setProject] = useState<ReelProject>(() => createProject('9:16'));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -95,6 +101,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
+  const [savingCloud, setSavingCloud] = useState(false);
+  const [cloudMsg, setCloudMsg] = useState('');
   const [transcribing, setTranscribing] = useState(false);
   const [subMsg, setSubMsg] = useState('');
   const [autoTarget, setAutoTarget] = useState<'auto' | 15 | 30 | 60>('auto');
@@ -652,13 +660,30 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
   }, [selectedId, playing, project, totalDur]);
 
   // ---------- export ----------
+  const buildExportBlob = async (): Promise<{ blob: Blob; ext: string }> => {
+    const off = document.createElement('canvas');
+    return exportProject(project, off, poolRef.current, (pct) => setExportPct(pct));
+  };
+  // Genera un póster (primer frame) reducido para usar de miniatura del reel guardado.
+  const makePosterBlob = async (): Promise<Blob | null> => {
+    try {
+      const full = document.createElement('canvas'); full.width = CW; full.height = CH;
+      const fctx = full.getContext('2d'); if (!fctx) return null;
+      await seekVideosAt(poolRef.current, project, 0);
+      drawReelFrame(fctx, project, 0, poolRef.current);
+      const scale = 360 / CW;
+      const small = document.createElement('canvas'); small.width = 360; small.height = Math.round(CH * scale);
+      const sctx = small.getContext('2d'); if (!sctx) return null;
+      sctx.drawImage(full, 0, 0, small.width, small.height);
+      return await new Promise<Blob | null>(res => small.toBlob(b => res(b), 'image/jpeg', 0.7));
+    } catch { return null; }
+  };
   const runExport = async () => {
     if (totalDur <= 0) { alert('Agregá al menos un video o imagen.'); return; }
     pause();
     setExporting(true); setExportPct(0); setExportedUrl(null);
-    const off = document.createElement('canvas');
     try {
-      const { blob, ext } = await exportProject(project, off, poolRef.current, (pct) => setExportPct(pct));
+      const { blob, ext } = await buildExportBlob();
       const url = URL.createObjectURL(blob);
       setExportedUrl(url);
       const a = document.createElement('a'); a.href = url; a.download = `reel-gomall.${ext}`; a.click();
@@ -667,6 +692,28 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
       alert('No se pudo exportar: ' + (e?.message || 'error'));
     } finally {
       setExporting(false);
+      renderStatic(currentTime);
+    }
+  };
+  // Guardar en la nube: exporta, arma el póster y delega la subida (Storage + Firestore) al contenedor.
+  const saveCloud = async () => {
+    if (!onSaveCloud) return;
+    if (totalDur <= 0) { alert('Agregá al menos un video o imagen.'); return; }
+    pause();
+    setSavingCloud(true); setExportPct(0); setCloudMsg('Exportando…');
+    try {
+      const { blob, ext } = await buildExportBlob();
+      setCloudMsg('Subiendo…');
+      const thumbBlob = await makePosterBlob();
+      await onSaveCloud({ blob, thumbBlob, name: project.name || 'Reel', ext });
+      setCloudMsg('¡Guardado!');
+      setTimeout(() => setCloudMsg(''), 3000);
+    } catch (e: any) {
+      console.error('[reel cloud v2]', e);
+      alert('No se pudo guardar en la nube: ' + (e?.message || 'error'));
+      setCloudMsg('');
+    } finally {
+      setSavingCloud(false);
       renderStatic(currentTime);
     }
   };
@@ -774,7 +821,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
           <button onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className="w-9 h-9 grid place-items-center text-white/60 hover:bg-white/10 disabled:opacity-30"><i className="fa-solid fa-rotate-left" /></button>
           <button onClick={redo} disabled={!canRedo} title="Rehacer" className="w-9 h-9 grid place-items-center text-white/60 hover:bg-white/10 disabled:opacity-30"><i className="fa-solid fa-rotate-right" /></button>
         </div>
-        <button onClick={runExport} disabled={exporting} className="h-9 px-4 rounded-lg text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+        {onSaveCloud && (
+          <button onClick={saveCloud} disabled={savingCloud || exporting} className="h-9 px-4 rounded-lg text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60" style={{ background: 'linear-gradient(135deg,#2f6d4f,#1f4a37)' }}
+            title={campaignName ? `Guardar y adjuntar a la campaña "${campaignName}"` : 'Guardar el reel en tu cuenta'}>
+            {savingCloud ? <><i className="fa-solid fa-circle-notch fa-spin" /> {cloudMsg || `${exportPct}%`}</> : <><i className="fa-solid fa-cloud-arrow-up" /> Guardar en la nube</>}
+          </button>
+        )}
+        <button onClick={runExport} disabled={exporting || savingCloud} className="h-9 px-4 rounded-lg text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
           {exporting ? <><i className="fa-solid fa-circle-notch fa-spin" /> {exportPct}%</> : <><i className="fa-solid fa-clapperboard" /> Exportar</>}
         </button>
         <button onClick={onClose} className="h-9 px-3 rounded-lg bg-white/10 text-white/70 text-xs font-bold hover:bg-white/20"><i className="fa-solid fa-arrow-left" /></button>

@@ -27,6 +27,18 @@ export async function persistImage(src: string | null | undefined, folder: strin
   }
 }
 
+/**
+ * Sube un Blob cualquiera (ej: el MP4 del reel o su póster) a Storage y devuelve la URL pública.
+ * folder: 'reels' | 'thumbs' | ...  ext: 'mp4' | 'webm' | 'jpg' ...
+ */
+export async function persistBlob(blob: Blob, folder: string, ext: string): Promise<string | null> {
+  const user = firebase.auth().currentUser;
+  if (!user) return null;
+  const ref = firebase.storage().ref(`assets/${user.uid}/${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
+  const snap = await ref.put(blob);
+  return await snap.ref.getDownloadURL();
+}
+
 /** Sube un array de imágenes (logos/recursos), devolviendo URLs. */
 export async function persistImages(arr: string[] | undefined, folder: string): Promise<string[]> {
   if (!arr || arr.length === 0) return arr || [];

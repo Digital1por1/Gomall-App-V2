@@ -364,10 +364,20 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
                         <textarea value={piece.imagePrompt} onChange={(e) => updatePiece(piece.id, { imagePrompt: e.target.value })} rows={3} placeholder="Describí el visual a generar (sin texto)…" className="w-full text-[11px] text-slate-500 font-mono bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 leading-relaxed outline-none focus:ring-2 focus:ring-orange-100 focus:bg-white transition-all resize-none" />
                       </div>
 
+                      {piece.assetUrl && (
+                        <a href={piece.assetUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 p-2 rounded-xl bg-green-50 border border-green-100 hover:bg-green-100 transition-all">
+                          {piece.thumbUrl ? <img src={piece.thumbUrl} alt="" className="w-10 h-14 object-cover rounded-lg shrink-0" /> : <span className="w-10 h-14 rounded-lg bg-green-200 grid place-items-center shrink-0 text-green-700"><i className="fa-solid fa-film" /></span>}
+                          <span className="min-w-0">
+                            <span className="block text-[10px] font-black text-green-700 uppercase tracking-wider"><i className="fa-solid fa-circle-check mr-1"></i>Reel guardado</span>
+                            <span className="block text-[10px] text-green-600 font-semibold">Tocá para ver / descargar</span>
+                          </span>
+                        </a>
+                      )}
+
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => { navigator.clipboard?.writeText(piece.copy); }} className="flex-1 py-2.5 bg-slate-50 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100"><i className="fa-solid fa-copy mr-1.5"></i>Copiar texto</button>
                         {(piece.type === 'imagen' || piece.type === 'reel') && (
-                          <button onClick={() => onUsePiece(piece, activeCampaign.id, activeCampaign.productImage, activeCampaign)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>Crear en editor</button>
+                          <button onClick={() => onUsePiece(piece, activeCampaign.id, activeCampaign.productImage, activeCampaign)} className="flex-1 py-2.5 bg-orange-50 text-[#EA5B25] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all border border-orange-100"><i className="fa-solid fa-arrow-right-to-bracket mr-1.5"></i>{piece.assetUrl ? 'Editar en editor' : 'Crear en editor'}</button>
                         )}
                       </div>
                     </div>
