@@ -30,16 +30,29 @@ const STICKERS = [
 // Tipografías disponibles (cargadas en index.html).
 const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Anton', 'Playfair Display', 'Roboto', 'Open Sans', 'Ubuntu', 'Lora', 'Cinzel', 'Permanent Marker', 'Pacifico', 'Dancing Script'];
 
-// Presets de subtítulos/texto (look dinámico palabra por palabra).
-const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = [
-  { id: 'capcut', label: 'Viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: false } },
-  { id: 'hormozi', label: 'Hormozi', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#22C55E', glow: false, anim: 'wordbox', karaoke: false, upper: true } },
-  { id: 'beast', label: 'Beast', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 8, accent: '#FFE600', glow: false, anim: 'pop', karaoke: false, upper: true } },
-  { id: 'pop', label: 'Pop', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: false } },
-  { id: 'caja', label: 'Caja', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
-  { id: 'clasico', label: 'Clásico', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
-  { id: 'neon', label: 'Neón', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true, upper: false } },
-  { id: 'minimal', label: 'Minimal', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false, upper: false } },
+// Presets de subtítulos/texto, agrupados por tipo. group: viral (animados/llamativos) | sobrio (limpios) | marca.
+const PRESET_GROUPS: { id: 'viral' | 'sobrio' | 'marca'; label: string }[] = [
+  { id: 'viral', label: 'Virales' },
+  { id: 'sobrio', label: 'Sobrios' },
+  { id: 'marca', label: 'Marca' },
+];
+const SUB_PRESETS: { id: string; label: string; group: 'viral' | 'sobrio' | 'marca'; style: Partial<TextStyle> }[] = [
+  // Virales
+  { id: 'capcut', label: 'Viral', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: false } },
+  { id: 'hormozi', label: 'Hormozi', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#22C55E', glow: false, anim: 'wordbox', karaoke: false, upper: true } },
+  { id: 'amarillo', label: 'Amarillo', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: true } },
+  { id: 'beast', label: 'Beast', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 8, accent: '#FFE600', glow: false, anim: 'pop', karaoke: false, upper: true } },
+  { id: 'pop', label: 'Pop', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: false } },
+  { id: 'contorno', label: 'Contorno', group: 'viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 9, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: true } },
+  // Sobrios
+  { id: 'tiktok', label: 'TikTok', group: 'sobrio', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 700, size: 5.5, glow: false, anim: 'none', karaoke: false, upper: false } },
+  { id: 'caja', label: 'Caja', group: 'sobrio', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
+  { id: 'clasico', label: 'Clásico', group: 'sobrio', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
+  { id: 'revelado', label: 'Revelado', group: 'sobrio', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 800, size: 6.5, glow: false, anim: 'reveal', karaoke: false, upper: false } },
+  { id: 'minimal', label: 'Minimal', group: 'sobrio', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false, upper: false } },
+  // Marca
+  { id: 'cian', label: 'Cian', group: 'marca', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#5CC2DB', glow: false, anim: 'karaoke', karaoke: true, upper: false } },
+  { id: 'neon', label: 'Neón', group: 'marca', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true, upper: false } },
 ];
 
 
@@ -1039,9 +1052,16 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
   <div className="space-y-4">
     <Row label="Texto"><textarea value={el.text} onChange={(e) => onText(e.target.value)} rows={2} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white resize-none outline-none focus:border-white/30" /></Row>
     <Row label="Estilo (preset)">
-      <div className="grid grid-cols-3 gap-2">
-        {SUB_PRESETS.map(p => (
-          <button key={p.id} onClick={() => onStyle(p.style)} className="py-1.5 rounded-lg text-[11px] font-semibold border border-white/12 text-white/70 hover:bg-white/5">{p.label}</button>
+      <div className="space-y-2.5">
+        {PRESET_GROUPS.map(g => (
+          <div key={g.id}>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-white/35 mb-1">{g.label}</div>
+            <div className="grid grid-cols-3 gap-2">
+              {SUB_PRESETS.filter(p => p.group === g.id).map(p => (
+                <button key={p.id} onClick={() => onStyle(p.style)} className="py-1.5 rounded-lg text-[11px] font-semibold border border-white/12 text-white/70 hover:border-[color:var(--b)] hover:bg-white/5" style={{ ['--b' as any]: BRAND }}>{p.label}</button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </Row>
