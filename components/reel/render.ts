@@ -102,8 +102,9 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   ctx.font = `${s.italic ? 'italic ' : ''}${s.weight} ${fontPx}px "${s.font}", Inter, sans-serif`;
   ctx.textBaseline = 'middle';
   if (s.glow) { ctx.shadowColor = s.accent || s.color; ctx.shadowBlur = fontPx * 0.5; }
+  const txt = s.upper ? (el.text || '').toUpperCase() : (el.text || '');
   const maxW = W * 0.88;
-  const lines = wrapText(ctx, el.text || '', maxW);
+  const lines = wrapText(ctx, txt, maxW);
   const lineH = fontPx * 1.18;
   const cx = (el.transform.x / 100) * W;
   const cy = (el.transform.y / 100) * H;
@@ -113,8 +114,8 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   let y = cy - totalH / 2 + lineH / 2;
 
   // Animación palabra por palabra: cuántas palabras están "habladas" hasta t.
-  const mode: 'none' | 'karaoke' | 'reveal' | 'highlight' = s.anim || (s.karaoke ? 'karaoke' : 'none');
-  const totalWords = (el.text || '').split(/\s+/).filter(Boolean).length;
+  const mode: 'none' | 'karaoke' | 'reveal' | 'highlight' | 'pop' | 'wordbox' = s.anim || (s.karaoke ? 'karaoke' : 'none');
+  const totalWords = txt.split(/\s+/).filter(Boolean).length;
   const progress = el.duration > 0 ? Math.max(0, Math.min(1, (t - el.start) / el.duration)) : 1;
   const activeWords = Math.floor(progress * totalWords + 1e-6);
   const accent = s.accent || '#FFE600';
@@ -154,11 +155,22 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
         const show = mode === 'reveal' ? (isPast || isActive) : true; // "revelado": solo las ya dichas
         if (show) {
           ctx.save();
-          if (mode === 'highlight' && isActive) { const cxw = x + ctx.measureText(w).width / 2; ctx.translate(cxw, y); ctx.scale(1.12, 1.12); ctx.translate(-cxw, -y); }
-          drawStroke(w, x, y, 'left');
+          const wpx = ctx.measureText(w).width;
+          const bump = (mode === 'highlight' || mode === 'pop') && isActive;
+          if (bump) { const sc = mode === 'pop' ? 1.18 : 1.12; const cxw = x + wpx / 2; ctx.translate(cxw, y); ctx.scale(sc, sc); ctx.translate(-cxw, -y); }
+          if (mode === 'wordbox' && isActive) {
+            // Caja resaltando la palabra activa (look Submagic/Hormozi).
+            const px = fontPx * 0.18, py = fontPx * 0.6;
+            ctx.fillStyle = accent;
+            roundRect(ctx, x - px, y - py, wpx + px * 2, py * 2, fontPx * 0.16);
+            ctx.fill();
+          } else {
+            drawStroke(w, x, y, 'left');
+          }
           let fill = s.color;
-          if (mode === 'karaoke') fill = (isPast || isActive) ? accent : s.color;
+          if (mode === 'karaoke' || mode === 'pop') fill = (isPast || isActive) ? accent : s.color;
           else if (mode === 'highlight' && isActive) fill = accent;
+          else if (mode === 'wordbox' && isActive) fill = '#111111';
           ctx.fillStyle = fill;
           ctx.fillText(w, x, y);
           ctx.restore();
@@ -240,23 +252,30 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     const tr = transitionState(el, t);
     const ex = exitTransitionState(el, t);
     // Efectos de las transiciones de entrada y salida.
-    let alpha = fa, extraScale = 1, slideX = 0, whiteA = 0;
+    let alpha = fa, extraScale = 1, slideX = 0, slideY = 0, whiteA = 0, blurPx = 0;
     if (tr) {
       if (tr.type === 'fade') alpha *= (1 - tr.p);
       else if (tr.type === 'zoom') extraScale = 1 + 0.25 * tr.p;
       else if (tr.type === 'slide') slideX = tr.p * W;
+      else if (tr.type === 'slideup') slideY = tr.p * H;
+      else if (tr.type === 'slidedown') slideY = -tr.p * H;
+      else if (tr.type === 'blur') blurPx = tr.p * 24;
       else if (tr.type === 'white') whiteA = tr.p;
     }
     if (ex) {
       if (ex.type === 'fade') alpha *= (1 - ex.p);
       else if (ex.type === 'zoom') extraScale *= (1 + 0.25 * ex.p);
       else if (ex.type === 'slide') slideX -= ex.p * W;
+      else if (ex.type === 'slideup') slideY -= ex.p * H;
+      else if (ex.type === 'slidedown') slideY += ex.p * H;
+      else if (ex.type === 'blur') blurPx = Math.max(blurPx, ex.p * 24);
       else if (ex.type === 'white') whiteA = Math.max(whiteA, ex.p);
     }
     if (el.type === 'text') {
       const te = el as TextElement;
       ctx.save();
-      if (slideX) ctx.translate(slideX, 0);
+      if (slideX || slideY) ctx.translate(slideX, slideY);
+      if (blurPx) ctx.filter = `blur(${blurPx}px)`;
       if (extraScale !== 1) { const cx = (te.transform.x / 100) * W, cy = (te.transform.y / 100) * H; ctx.translate(cx, cy); ctx.scale(extraScale, extraScale); ctx.translate(-cx, -cy); }
       drawTextEl(ctx, te, W, H, t, alpha);
       ctx.restore();
@@ -270,7 +289,8 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     if (track.kind === 'video') {
       // Pista base: por defecto LLENA el formato (cover, sin bordes negros); "Completo" (contain) solo si se elige.
       ctx.save();
-      if (slideX) ctx.translate(slideX, 0);
+      if (slideX || slideY) ctx.translate(slideX, slideY);
+      if (blurPx) ctx.filter = `blur(${blurPx}px)`;
       if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
       else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
       ctx.restore();

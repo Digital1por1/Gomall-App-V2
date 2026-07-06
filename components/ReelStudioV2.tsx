@@ -32,11 +32,14 @@ const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Anton', 'Playfair
 
 // Presets de subtítulos/texto (look dinámico palabra por palabra).
 const SUB_PRESETS: { id: string; label: string; style: Partial<TextStyle> }[] = [
-  { id: 'capcut', label: 'Viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true } },
-  { id: 'caja', label: 'Caja', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false } },
-  { id: 'clasico', label: 'Clásico', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false } },
-  { id: 'neon', label: 'Neón', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true } },
-  { id: 'minimal', label: 'Minimal', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false } },
+  { id: 'capcut', label: 'Viral', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: false } },
+  { id: 'hormozi', label: 'Hormozi', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#22C55E', glow: false, anim: 'wordbox', karaoke: false, upper: true } },
+  { id: 'beast', label: 'Beast', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 8, accent: '#FFE600', glow: false, anim: 'pop', karaoke: false, upper: true } },
+  { id: 'pop', label: 'Pop', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: false } },
+  { id: 'caja', label: 'Caja', style: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
+  { id: 'clasico', label: 'Clásico', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 700, size: 6, glow: false, anim: 'none', karaoke: false, upper: false } },
+  { id: 'neon', label: 'Neón', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true, upper: false } },
+  { id: 'minimal', label: 'Minimal', style: { color: '#FFFFFF', bg: null, stroke: true, weight: 600, size: 5, glow: false, anim: 'none', karaoke: false, upper: false } },
 ];
 
 
@@ -912,7 +915,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                     <option value="fade">Fundido (negro)</option>
                     <option value="white">Flash blanco</option>
                     <option value="zoom">Zoom</option>
-                    <option value="slide">Deslizar</option>
+                    <option value="slide">Deslizar ◀</option>
+                    <option value="slideup">Deslizar ▲</option>
+                    <option value="slidedown">Deslizar ▼</option>
+                    <option value="blur">Desenfoque</option>
                   </select>
                 </Row>
                 {(selected as any).transition && (selected as any).transition !== 'none' && (
@@ -924,7 +930,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy }) => {
                     <option value="fade">Fundido (negro)</option>
                     <option value="white">Flash blanco</option>
                     <option value="zoom">Zoom</option>
-                    <option value="slide">Deslizar</option>
+                    <option value="slide">Deslizar ◀</option>
+                    <option value="slideup">Deslizar ▲</option>
+                    <option value="slidedown">Deslizar ▼</option>
+                    <option value="blur">Desenfoque</option>
                   </select>
                 </Row>
                 {(selected as any).transitionOut && (selected as any).transitionOut !== 'none' && (
@@ -1047,6 +1056,8 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
           style={el.style.weight >= 700 ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>B</button>
         <button onClick={() => onStyle({ italic: !el.style.italic })} className="flex-1 py-1.5 rounded-lg text-sm font-semibold italic border"
           style={el.style.italic ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>I</button>
+        <button onClick={() => onStyle({ upper: !el.style.upper })} title="Mayúsculas" className="flex-1 py-1.5 rounded-lg text-sm font-bold border"
+          style={el.style.upper ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Aa</button>
       </div>
     </Row>
     <button onClick={onSyncAll} className="w-full py-2 rounded-lg text-white text-[11px] font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
@@ -1069,6 +1080,8 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
           <option value="karaoke">Karaoke</option>
           <option value="reveal">Revelado</option>
           <option value="highlight">Resaltado</option>
+          <option value="pop">Pop (rebote)</option>
+          <option value="wordbox">Caja por palabra</option>
         </select>
       </Row>
       {(el.style.anim && el.style.anim !== 'none') || el.style.karaoke ? (

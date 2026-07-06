@@ -13,7 +13,7 @@ export const ASPECTS: Record<AspectId, { w: number; h: number; label: string }> 
 
 export type TrackKind = 'video' | 'overlay' | 'audio';
 export type ElementType = 'video' | 'image' | 'text' | 'audio';
-export type TransitionKind = 'none' | 'fade' | 'white' | 'zoom' | 'slide';
+export type TransitionKind = 'none' | 'fade' | 'white' | 'zoom' | 'slide' | 'slideup' | 'slidedown' | 'blur';
 
 // Posición/transformación de un elemento visual. x,y en % del canvas (centro del elemento); scale en %.
 export interface Transform { x: number; y: number; scale: number; rotation: number; opacity: number }
@@ -29,9 +29,10 @@ export interface TextStyle {
   stroke: boolean;
   align: 'center' | 'left' | 'right';
   karaoke?: boolean;       // (compat) equivale a anim: 'karaoke'
-  anim?: 'none' | 'karaoke' | 'reveal' | 'highlight'; // animación palabra por palabra
+  anim?: 'none' | 'karaoke' | 'reveal' | 'highlight' | 'pop' | 'wordbox'; // animación palabra por palabra
   accent?: string;         // color del resaltado
   glow?: boolean;          // resplandor (para estilo neón)
+  upper?: boolean;         // MAYÚSCULAS (look tipo Submagic/Hormozi)
 }
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600',
