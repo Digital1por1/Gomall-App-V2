@@ -612,7 +612,16 @@ const App: React.FC = () => {
 
   // Inicia un diseño individual en blanco y abre el editor
   const startNewDesign = () => {
-    setState(DEFAULT_STATE);
+    // Diseño nuevo en blanco, pero preservando el brand kit y las librerías del perfil
+    // (logo, tipografías, recursos) para que aparezcan en sus secciones sin tener que crear una campaña.
+    setState(prev => ({
+      ...DEFAULT_STATE,
+      logoLibrary: profile?.logoLibrary || prev.logoLibrary || [],
+      resourceLibrary: profile?.resourceLibrary || prev.resourceLibrary || [],
+      backgroundLibrary: profile?.backgroundLibrary || prev.backgroundLibrary || [],
+      customFonts: profile?.customFonts || prev.customFonts || [],
+      brandKits: profile?.brandKits || prev.brandKits || [],
+    }));
     setReturnCampaignId(null);
     setActiveTab('editor');
     setOpenSection('IMAGEN');
