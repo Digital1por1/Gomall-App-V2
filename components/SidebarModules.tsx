@@ -399,25 +399,6 @@ const SidebarModules: React.FC<SidebarProps> = ({
               <optgroup label="Sistema">{SYSTEM_FONTS.map(f => <option key={f} value={f}>{f}</option>)}</optgroup>
               {(state.customFonts || []).length > 0 && <optgroup label="Mis Tipografías">{(state.customFonts || []).map(f => <option key={f.family} value={f.family}>{f.name}</option>)}</optgroup>}
             </select>
-
-            {(state.customFonts || []).length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {(state.customFonts || []).map(font => (
-                  <div
-                    key={font.family}
-                    onClick={() => updateTextLayer(key, { font: font.family })}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border cursor-pointer transition-all text-[9px] font-bold ${layer.font === font.family ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-100 hover:border-slate-300'}`}
-                  >
-                    <span style={{ fontFamily: font.family }}>{font.name}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); removeCustomFont(font.family); }}
-                      className="text-[8px] opacity-60 hover:opacity-100 ml-0.5"
-                      title="Eliminar"
-                    >✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="space-y-2">
