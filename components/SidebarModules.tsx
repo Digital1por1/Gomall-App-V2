@@ -244,9 +244,12 @@ const SidebarModules: React.FC<SidebarProps> = ({
           await updateUsage(15000);
           recordUsage(genType === 'improve' ? 'mejorar' : 'imagen', data.usage);
 
-          updateState({ 
+          updateState({
             imageVariants: [{ id: String(Date.now()), url: String(data.imageUrl), prompt: String(effectivePrompt || 'AI Improved Post') }, ...state.imageVariants],
-            selectedVariantIndex: 0
+            selectedVariantIndex: 0,
+            // La imagen nueva arranca llenando el formato (sin heredar un zoom/paneo de una imagen anterior).
+            feedBackgroundConfig: { scale: 1, offset: { x: 50, y: 50 } },
+            storyBackgroundConfig: { scale: 1, offset: { x: 50, y: 50 } }
           });
           setTempImproveImage(null);
           setGenStatus('ready');

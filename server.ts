@@ -114,6 +114,14 @@ VERIFICATION: imagine the frame divided into a 10x10 grid. Text is only allowed 
 - Composition: thoughtful framing, rule of thirds, generous negative space, asymmetry when it serves the subject.
 - Never produce obvious AI tell-tales: overly smooth skin, plasticky reflections, melted hands, perfect symmetry, repeating patterns.`;
 
+      // Recordatorio final, absoluto y en la última posición del prompt (los modelos de imagen le dan mucho peso a lo último).
+      const finalNoText = `====================
+RECORDATORIO FINAL — REGLA ABSOLUTA SOBRE TEXTO:
+Salvo que el USER REQUEST/INSTRUCTIONS de arriba pida texto de forma EXPLÍCITA y literal, la imagen debe salir SIN NINGÚN texto: cero palabras, letras, números, títulos, subtítulos, captions, precios, porcentajes, sellos, watermarks, firmas, ESLOGANES, TAGLINES ni frases de marca.
+Si el pedido menciona una marca (por ejemplo Adidas, Nike, Coca-Cola), representá el PRODUCTO y su estética SIN escribir el nombre de la marca ni su eslogan sobre la imagen (no escribas "Impossible is Nothing", "Just Do It", etc.). El logo/etiqueta que ya viene físicamente en el producto SÍ se conserva; lo prohibido es agregar tipografía nueva.
+Una imagen que incluya texto no pedido se considera FALLIDA y debe rehacerse limpia.
+====================`;
+
       if (genType === 'image' || genType === 'improve') {
         const parts: any[] = [];
 
@@ -144,7 +152,9 @@ TEXT & LOGO POLICY (STRICT):
 - If the user does not mention text or logos, the image must be completely free of any added typography or branding.
 - If the user does ask for text, every letter must obey the HARD LAYOUT CONSTRAINTS above — break long words into stacked lines rather than letting them bleed off the canvas.
 
-USER INSTRUCTIONS: ${String(prompt)}`
+USER INSTRUCTIONS: ${String(prompt)}
+
+${finalNoText}`
           });
         } else {
           parts.push({
@@ -162,7 +172,9 @@ TEXT & LOGO POLICY (STRICT):
 - By default the image must be completely free of any typography or branding.
 - If the user does ask for text, then: pick a font weight and size such that the text occupies at most ${textWidthCap} of the frame width; split long headlines into 2 or 3 stacked lines so each line stays within the safe area; center horizontally; confirm the first and last letters have clear margin from the frame edges.
 
-USER REQUEST: ${String(prompt)}`
+USER REQUEST: ${String(prompt)}
+
+${finalNoText}`
           });
         }
 
