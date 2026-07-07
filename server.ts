@@ -20,8 +20,70 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
+  // === Enforcement server-side (opcional): se activa SOLO si cargás FIREBASE_SERVICE_ACCOUNT ===
+  // Sin service account queda en fail-open (se comporta como hasta ahora, sin verificar ni cobrar).
+  let adminDb: any = null;
+  try {
+    const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (saRaw) {
+      const admin: any = (await import('firebase-admin')).default;
+      const saJson = saRaw.trim().startsWith('{') ? saRaw : Buffer.from(saRaw, 'base64').toString('utf8');
+      if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.cert(JSON.parse(saJson)) });
+      adminDb = { admin, db: admin.firestore() };
+      console.log('[auth] enforcement server-side ACTIVO');
+    } else {
+      console.warn('[auth] FIREBASE_SERVICE_ACCOUNT ausente -> enforcement DESACTIVADO (fail-open)');
+    }
+  } catch (e: any) {
+    console.error('[auth] Admin SDK no disponible, fail-open:', (e && e.message) || e);
+    adminDb = null;
+  }
+  const MONTH_MS = 30 * 24 * 3600 * 1000;
+  // Verifica el ID token y el límite del plan. Devuelve {ok:true,...} o responde el error y {ok:false}.
+  async function guard(req: any, res: any): Promise<any> {
+    if (!adminDb) return { ok: true, uid: null };
+    const m = String(req.headers.authorization || '').match(/^Bearer (.+)$/);
+    if (!m) { res.status(401).json({ error: 'No autenticado.' }); return { ok: false }; }
+    let decoded: any;
+    try { decoded = await adminDb.admin.auth().verifyIdToken(m[1]); }
+    catch { res.status(401).json({ error: 'Sesion invalida.' }); return { ok: false }; }
+    try {
+      const ref = adminDb.db.collection('profiles').doc(decoded.uid);
+      const snap = await ref.get();
+      const d: any = snap.exists ? snap.data() : {};
+      const limit = d.tokenLimit || 500000;
+      const lastReset = (d.usage && d.usage.lastReset) || 0;
+      let used = (d.usage && d.usage.tokensUsed) || 0;
+      if (lastReset && Date.now() - lastReset > MONTH_MS) used = 0;
+      if (used >= limit) { res.status(402).json({ error: 'Alcanzaste el limite de tu plan. Actualiza tu plan para seguir generando.' }); return { ok: false }; }
+      return { ok: true, uid: decoded.uid, ref, lastReset };
+    } catch (e: any) {
+      console.error('[auth] no se pudo leer el perfil, fail-open:', (e && e.message) || e);
+      return { ok: true, uid: decoded.uid };
+    }
+  }
+  // Cobra el consumo REAL de tokens al perfil (fuente de verdad server-side). Fire-and-forget.
+  async function charge(ctx: any, tokens: number): Promise<void> {
+    if (!adminDb || !ctx || !ctx.ref) return;
+    try {
+      const now = Date.now();
+      const inc = adminDb.admin.firestore.FieldValue.increment(tokens || 0);
+      const newCycle = ctx.lastReset && now - ctx.lastReset > MONTH_MS;
+      const usage = newCycle
+        ? { tokensUsed: tokens || 0, lastUsed: now, lastReset: now }
+        : { tokensUsed: inc, lastUsed: now, ...(ctx.lastReset ? {} : { lastReset: now }) };
+      await ctx.ref.set({ usage }, { merge: true });
+    } catch (e: any) { console.error('[auth] no se pudo cobrar el consumo:', (e && e.message) || e); }
+  }
+  // Envuelve res.json para cobrar el consumo real que viene en el payload (campo usage.total).
+  function meter(g: any, res: any) {
+    const _json = res.json.bind(res);
+    res.json = (b: any) => { try { if (adminDb && b && b.usage) charge(g, b.usage.total); } catch { /* noop */ } return _json(b); };
+  }
+
   app.post("/api/generate", async (req, res) => {
     try {
+      const g = await guard(req, res); if (!g.ok) return; meter(g, res);
       const { prompt, genType, tempImproveImage, activeLayout, textParts, campaignBrief, brandContext } = req.body;
       
       const isStory = activeLayout === 'story';
@@ -249,6 +311,7 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
   // Lee el sitio web del negocio y lo resume con IA para usarlo como contexto de marca
   app.post("/api/analyze-site", async (req, res) => {
     try {
+      const g = await guard(req, res); if (!g.ok) return; meter(g, res);
       let { url } = req.body;
       if (!url || typeof url !== "string") return res.status(400).json({ error: "Falta la URL." });
       url = url.trim().replace(/^@/, "");
@@ -306,6 +369,7 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
   // Transcribe el audio de un reel en segmentos de subtítulo cronometrados
   app.post("/api/transcribe", async (req, res) => {
     try {
+      const g = await guard(req, res); if (!g.ok) return; meter(g, res);
       const { audio, mime } = req.body;
       if (!audio) return res.status(400).json({ error: "Falta el audio." });
       const response = await ai.models.generateContent({

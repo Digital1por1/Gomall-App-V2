@@ -41,6 +41,27 @@ const auth = firebase.auth(app);
 const db = firebase.firestore(app);
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 
+// Interceptor: adjunta el token de sesión (ID token) a TODAS las llamadas a /api/ para que el
+// servidor pueda verificar quién es y aplicar el límite del plan. Defensivo: si algo falla, deja pasar
+// la request original sin romperla.
+if (typeof window !== 'undefined' && !(window as any).__apiAuthPatched) {
+  (window as any).__apiAuthPatched = true;
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    try {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.pathname : (input as Request).url);
+      if (url && (url.startsWith('/api/') || url.includes('/api/'))) {
+        const u = firebase.auth().currentUser;
+        if (u) {
+          const token = await u.getIdToken();
+          init = { ...(init || {}), headers: { ...((init && init.headers) || {}), Authorization: `Bearer ${token}` } };
+        }
+      }
+    } catch { /* si falla, seguimos sin token */ }
+    return origFetch(input as any, init);
+  };
+}
+
 export const MONTHLY_TOKEN_LIMIT = 500000; 
 
 /** 

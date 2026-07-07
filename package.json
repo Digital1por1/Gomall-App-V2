@@ -18,6 +18,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "express": "^5.2.1",
     "firebase": "^10.8.0",
+    "firebase-admin": "^12.7.0",
     "html-to-image": "^1.11.11",
     "lucide-react": "^0.344.0",
     "mediabunny": "^1.50.6",
