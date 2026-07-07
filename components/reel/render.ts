@@ -302,21 +302,33 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
   }
 }
 
-// Prepara (seek) todos los videos activos en t y espera a que estén en ese frame. Para export determinístico.
+// Prepara (seek) todos los videos activos en t y espera a que el frame esté REALMENTE presentado.
+// Usa requestVideoFrameCallback (más confiable que 'seeked' para pintar el frame correcto en el canvas);
+// si no está, cae a 'seeked'. Sin esto, el export captura el frame anterior → "imágenes fijas".
 export function seekVideosAt(pool: MediaPool, project: ReelProject, t: number): Promise<void> {
   const active = visualsAt(project, t).filter(({ el }) => el.type === 'video') as { el: VideoElement }[];
   return Promise.all(active.map(({ el }) => {
-    const v = pool.getVideo(el.url);
+    const v = pool.getVideo(el.url) as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
     const target = sourceTime(el, t);
     return new Promise<void>((res) => {
-      if (Math.abs(v.currentTime - target) < 0.001 && v.readyState >= 2) { res(); return; }
       let done = false;
       const fin = () => { if (done) return; done = true; v.onseeked = null; res(); };
-      v.onseeked = fin;
-      const ensure = () => { try { v.currentTime = target; } catch { fin(); } };
+      const hasRVFC = typeof v.requestVideoFrameCallback === 'function';
+      const already = Math.abs(v.currentTime - target) < 0.001 && v.readyState >= 2;
+      const ensure = () => {
+        // Registrar el aviso de "frame listo" ANTES de disparar el seek.
+        if (hasRVFC) v.requestVideoFrameCallback!(() => fin());
+        else v.onseeked = fin;
+        if (already) {
+          // Ya está en el frame correcto: rVFC puede no dispararse (no hay frame nuevo) → resolver por timeout corto.
+          setTimeout(fin, 40);
+        } else {
+          try { v.currentTime = target; } catch { fin(); }
+        }
+      };
       if (v.readyState >= 1) ensure();
       else { const h = () => { v.removeEventListener('loadedmetadata', h); ensure(); }; v.addEventListener('loadedmetadata', h); }
-      setTimeout(fin, 600);
+      setTimeout(fin, 800); // backstop: nunca colgar el export
     });
   })).then(() => undefined);
 }
