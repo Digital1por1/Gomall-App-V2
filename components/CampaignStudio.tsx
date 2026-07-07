@@ -82,6 +82,10 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
 
   const briefValid = objective && product.trim() && platforms.length > 0;
 
+  // La cantidad elegida es POR tipo de plataforma seleccionada: Feed/Stories → imágenes, Reels → reels.
+  const imageCount = platforms.includes('Feed / Stories') ? pieceCount : 0;
+  const reelCount = platforms.includes('Reels') ? pieceCount : 0;
+
   const handleGenerate = async () => {
     if (!briefValid) return;
     setGenerating(true);
@@ -92,7 +96,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
         body: JSON.stringify({
           genType: 'campaign',
           campaignBrief: {
-            objective, product, audience, dates, platforms, keyMessage, pieceCount,
+            objective, product, audience, dates, platforms, keyMessage, pieceCount, imageCount, reelCount,
             images: briefImages.map(d => ({ data: d.split(',')[1], mime: (d.match(/^data:([^;]+)/) || [])[1] || 'image/jpeg' })),
           },
           brandContext: {
@@ -307,13 +311,20 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
               </div>
 
               <div className="space-y-2">
-                <label className={labelClass}>¿Cuántas publicaciones querés?</label>
-                <p className="text-[9px] text-slate-300 font-bold px-1">Cada publicación es un contenido distinto (un post o un reel) con su imagen y su texto.</p>
+                <label className={labelClass}>¿Cuántas publicaciones por plataforma?</label>
+                <p className="text-[9px] text-slate-300 font-bold px-1">Se genera esta cantidad de cada plataforma elegida: Feed/Stories → posts, Reels → reels.</p>
                 <div className="flex gap-2 flex-wrap">
                   {[1, 2, 3, 4, 5, 6].map(n => (
                     <button key={n} onClick={() => setPieceCount(n)} className={`w-12 h-12 rounded-xl text-sm font-black transition-all ${pieceCount === n ? 'bg-[#EA5B25] text-white shadow-sm' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>{n}</button>
                   ))}
                 </div>
+                {(imageCount + reelCount) > 0 && (
+                  <p className="text-[10px] text-slate-500 font-bold px-1">
+                    Total: {imageCount + reelCount} pieza{imageCount + reelCount > 1 ? 's' : ''}
+                    {imageCount > 0 && ` · ${imageCount} de Feed/Stories`}
+                    {reelCount > 0 && ` · ${reelCount} de Reels`}
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">

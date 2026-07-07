@@ -238,6 +238,12 @@ ${finalNoText}`
         const brief = campaignBrief || {};
         const brand = brandContext || {};
 
+        // Cantidad por tipo: Feed/Stories -> "imagen", Reels -> "reel". Cae al comportamiento viejo si no vienen.
+        const plats = Array.isArray(brief.platforms) ? brief.platforms : [];
+        const imgN = Number.isFinite(brief.imageCount) ? Math.max(0, Math.floor(brief.imageCount)) : (plats.includes('Feed / Stories') ? (brief.pieceCount || 4) : 0);
+        const reelN = Number.isFinite(brief.reelCount) ? Math.max(0, Math.floor(brief.reelCount)) : (plats.includes('Reels') ? (brief.pieceCount || 0) : 0);
+        const totalN = Math.max(1, imgN + reelN);
+
         const campaignPrompt = `Sos un estratega de marketing y director creativo senior. Tu trabajo es diseñar una campaña de contenido para redes sociales (Instagram) completa y accionable.
 
 CONTEXTO DE LA MARCA:
@@ -257,10 +263,10 @@ BRIEF DE LA CAMPAÑA:
 - Cantidad de piezas deseadas: ${String(brief.pieceCount || 4)}
 
 INSTRUCCIONES:
-1. Proponé exactamente ${String(brief.pieceCount || 4)} piezas de contenido coherentes entre sí y alineadas al objetivo y al rubro "${String(brand.industry || '')}".
-2. Tipos de pieza permitidos según las plataformas elegidas: si incluye "Feed / Stories" usá "imagen" (un post sirve para feed y story) y "copy"; si incluye "Reels" podés usar "reel". NUNCA propongas piezas tipo "reel" si "Reels" NO está entre las plataformas seleccionadas.
+1. Proponé EXACTAMENTE ${imgN} pieza(s) tipo "imagen" y EXACTAMENTE ${reelN} pieza(s) tipo "reel". El total DEBE ser ${totalN} piezas, ni más ni menos. No cambies estas cantidades.
+2. Solo se permiten los tipos "imagen" y "reel" (NO uses "copy" como tipo; el texto va dentro del campo "copy" de cada pieza). "imagen" = post para Feed/Stories (formato "Feed 4:5" o "Story 9:16"); "reel" = video vertical (formato "Reel 9:16"). Todas las piezas deben ser coherentes entre sí y alineadas al objetivo y al rubro "${String(brand.industry || '')}".
 3. Para cada pieza:
-   - "type": uno de exactamente "imagen", "reel" o "copy".
+   - "type": uno de exactamente "imagen" o "reel" (respetando las cantidades del punto 1).
    - "title": nombre corto y descriptivo de la pieza.
    - "format": formato sugerido, ej "Feed 4:5", "Story 9:16" o "Reel 9:16".
    - "imagePrompt": un prompt DETALLADO en ESPAÑOL para generar SOLO el visual (describí escena, estilo fotográfico, iluminación, composición). PROHIBIDO incluir texto, palabras, letras, números, precios, porcentajes, titulares, logos o tipografía dentro del imagePrompt: el texto se agrega después como capas editables en el editor. La imagen debe quedar limpia y con espacio negativo libre para colocar el texto encima. Si la pieza es "copy" puro, dejá igualmente un prompt visual de portada sin texto.
