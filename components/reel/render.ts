@@ -113,11 +113,25 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const totalH = lines.length * lineH;
   let y = cy - totalH / 2 + lineH / 2;
 
-  // Animación palabra por palabra: cuántas palabras están "habladas" hasta t.
+  // Animación palabra por palabra. En vez de repartir el tiempo parejo entre las palabras, se pondera por
+  // el largo de cada palabra (las largas duran más) para seguir mejor el ritmo del habla, con un pequeño
+  // adelanto (LEAD) para que el destaque no se sienta atrasado respecto al audio.
   const mode: 'none' | 'karaoke' | 'reveal' | 'highlight' | 'pop' | 'wordbox' = s.anim || (s.karaoke ? 'karaoke' : 'none');
-  const totalWords = txt.split(/\s+/).filter(Boolean).length;
-  const progress = el.duration > 0 ? Math.max(0, Math.min(1, (t - el.start) / el.duration)) : 1;
-  const activeWords = Math.floor(progress * totalWords + 1e-6);
+  const allWordsTimed = txt.split(/\s+/).filter(Boolean);
+  const totalWords = allWordsTimed.length;
+  const LEAD = 0.06; // s de anticipación del destaque
+  const durTimed = el.duration > 0 ? el.duration : 0.001;
+  const localTimed = Math.max(0, (t - el.start) + LEAD);
+  let activeWords = 0;
+  if (totalWords > 0) {
+    const weights = allWordsTimed.map(w => Math.max(2, w.length));
+    const totalW = weights.reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    for (let k = 0; k < totalWords; k++) {
+      acc += (weights[k] / totalW) * durTimed;
+      if (localTimed >= acc) activeWords = k + 1; else break;
+    }
+  }
   const accent = s.accent || '#FFE600';
   let wordCounter = 0;
 
