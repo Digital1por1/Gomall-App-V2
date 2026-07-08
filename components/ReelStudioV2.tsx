@@ -97,7 +97,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
-  const [tab, setTab] = useState<'media' | 'texto' | 'marca' | 'stickers' | 'audio' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -506,6 +506,17 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     setSelectedId(null);
   };
   const closeGaps = () => commit(closeVideoGaps(project));
+  // Aplica un efecto de ENTRADA (transición) al elemento seleccionado.
+  const applyAnim = (kind: TransitionKind) => {
+    if (!selectedId) return;
+    commit(updateElement(project, selectedId, { transition: kind, transitionDur: kind === 'none' ? 0 : 0.5 } as any));
+  };
+  // Aplica el mismo efecto de entrada a TODOS los textos.
+  const applyAnimAllTexts = (kind: TransitionKind) => {
+    let p = project;
+    for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text') p = updateElement(p, el.id, { transition: kind, transitionDur: kind === 'none' ? 0 : 0.5 } as any);
+    commit(p);
+  };
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
     if (!selectedId) return;
@@ -788,6 +799,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     { id: 'marca', icon: 'fa-crown', label: 'Marca' },
     { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
     { id: 'audio', icon: 'fa-music', label: 'Audio' },
+    { id: 'animacion', icon: 'fa-wand-magic-sparkles', label: 'Animación' },
     { id: 'ajustes', icon: 'fa-sliders', label: 'Ajustes' },
   ];
 
@@ -910,6 +922,40 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </button>
               <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
             </>)}
+            {tab === 'animacion' && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-white/40 leading-relaxed">Efectos de entrada. Seleccioná un elemento en la timeline y elegí cómo aparece.</p>
+                {!selected && <p className="text-[11px] text-amber-300/80"><i className="fa-solid fa-hand-pointer mr-1" />Tocá un elemento en la timeline para animarlo.</p>}
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { id: 'fade', label: 'Aparecer', icon: 'fa-circle-half-stroke' },
+                    { id: 'slideup', label: 'Subir', icon: 'fa-arrow-up' },
+                    { id: 'slidedown', label: 'Bajar', icon: 'fa-arrow-down' },
+                    { id: 'slide', label: 'Entrar', icon: 'fa-arrow-left' },
+                    { id: 'zoom', label: 'Zoom', icon: 'fa-magnifying-glass-plus' },
+                    { id: 'blur', label: 'Desenfoque', icon: 'fa-droplet' },
+                    { id: 'white', label: 'Flash', icon: 'fa-bolt' },
+                    { id: 'none', label: 'Ninguna', icon: 'fa-ban' },
+                  ] as { id: TransitionKind; label: string; icon: string }[]).map(a => {
+                    const active = !!selected && ((selected as any).transition || 'none') === a.id;
+                    return (
+                      <button key={a.id} disabled={!selected} onClick={() => applyAnim(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
+                        style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
+                        <i className={`fa-solid ${a.icon}`} /> {a.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selected && selected.type === 'text' && (
+                  <button onClick={() => applyAnimAllTexts(((selected as any).transition as TransitionKind) || 'fade')} className="w-full py-2.5 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                    <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar a TODOS los textos
+                  </button>
+                )}
+                {selected && selected.type === 'image' && findElement(project, selected.id)?.track.kind === 'video' && (
+                  <label className="flex items-center gap-2 text-xs text-white/70 pt-2 border-t border-white/5"><input type="checkbox" checked={!!(selected as any).kenBurns} onChange={(e) => patchSel({ kenBurns: e.target.checked } as any)} /> Zoom lento en la imagen (Ken Burns)</label>
+                )}
+              </div>
+            )}
             {tab === 'ajustes' && (<>
               <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Reel (9:16)</b></div>
 

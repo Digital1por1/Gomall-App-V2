@@ -258,7 +258,6 @@ const App: React.FC = () => {
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [reelPieceId, setReelPieceId] = useState<string | null>(null); // pieza de campaña que originó el reel (para adjuntarle el asset)
   const [reelInitialProject, setReelInitialProject] = useState<ReelProject | null>(null); // proyecto pre-armado al "Animar" un diseño
-  const [showAnimPicker, setShowAnimPicker] = useState(false); // selector de estilo de animación al "Animar"
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [pendingImprove, setPendingImprove] = useState<{ image: string; prompt: string } | null>(null);
 
@@ -714,13 +713,13 @@ const App: React.FC = () => {
     setAppView('editor');
   };
 
-  // "Animar": arma un reel desde el diseño actual (fondo + textos) con el estilo de animación elegido y abre el editor de reels.
-  const animateDesign = (animStyle: AnimStyle) => {
-    const proj = buildReelFromDesign(state, animStyle);
+  // "Animar": arma un reel desde el diseño actual (fondo + textos + logo, sin efectos) y abre el editor de reels.
+  // Las animaciones se eligen adentro del editor (pestaña "Animación").
+  const animateDesign = () => {
+    const proj = buildReelFromDesign(state, 'none');
     if (!proj) { alert('Generá una imagen o agregá algún texto antes de animar.'); return; }
     setReelInitialProject(proj);
     setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null);
-    setShowAnimPicker(false);
     setShowReels(true);
   };
 
@@ -1328,36 +1327,6 @@ const App: React.FC = () => {
         )
       )}
 
-      {/* Selector de estilo de animación al "Animar" un diseño */}
-      {showAnimPicker && (
-        <div className="fixed inset-0 z-[96] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAnimPicker(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="w-8 h-8 rounded-xl grid place-items-center text-white" style={{ background: 'linear-gradient(140deg,#EA5B25,#f0814f)' }}><i className="fa-solid fa-clapperboard text-xs"></i></span>
-              <h3 className="text-base font-black text-slate-900">¿Cómo querés animar los textos?</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 font-semibold mb-4">Se lleva tu diseño al editor de reels. Después podés ajustar cada texto a mano.</p>
-            <div className="space-y-2">
-              {([
-                { id: 'suave', label: 'Suave', desc: 'Textos con fundido + zoom lento en la imagen', icon: 'fa-wind' },
-                { id: 'dinamico', label: 'Dinámico', desc: 'Textos entran deslizándose + zoom en la imagen', icon: 'fa-bolt' },
-                { id: 'viral', label: 'Viral', desc: 'Textos con zoom de impacto + movimiento en la imagen', icon: 'fa-fire' },
-                { id: 'none', label: 'Sin efectos', desc: 'Solo llevar el diseño, los animo yo', icon: 'fa-ban' },
-              ] as { id: AnimStyle; label: string; desc: string; icon: string }[]).map(o => (
-                <button key={o.id} onClick={() => animateDesign(o.id)} className="w-full text-left p-3 rounded-2xl border border-slate-100 hover:border-[#EA5B25] hover:bg-orange-50/40 transition-all flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-xl grid place-items-center bg-slate-900 text-white shrink-0"><i className={`fa-solid ${o.icon} text-xs`}></i></span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-black text-slate-900">{o.label}</span>
-                    <span className="block text-[11px] text-slate-400 font-semibold leading-tight">{o.desc}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setShowAnimPicker(false)} className="w-full mt-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">Cancelar</button>
-          </div>
-        </div>
-      )}
-
       {showBrand && user && (
         <BrandSettings
           profile={profile}
@@ -1578,7 +1547,7 @@ const App: React.FC = () => {
                 <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Story (9:16)</span>
                 <div className="flex gap-2">
                   <button onClick={() => saveProject('story-canvas')} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-200" title="Guardar Proyecto"><i className="fa-solid fa-floppy-disk"></i></button>
-                  <button onClick={() => setShowAnimPicker(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel animado"><i className="fa-solid fa-clapperboard"></i> Animar</button>
+                  <button onClick={animateDesign} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel y animarlo en el editor"><i className="fa-solid fa-clapperboard"></i> Animar</button>
                   <button onClick={() => exportLayout('story-canvas', 'story.png')} className={`bg-[#EA5B25] text-white px-7 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 ${exportingId === 'story-canvas' ? 'opacity-50 cursor-wait' : ''}`}>{exportingId === 'story-canvas' ? 'Exportando...' : 'Exportar'}</button>
                 </div>
               </div>
