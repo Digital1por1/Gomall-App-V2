@@ -10,7 +10,7 @@ import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
   addElement, addAudioElement, addOverlayElement, updateElement, removeElement, moveElement, moveTrack, setTrackFlag, splitElement, closeVideoGaps, autoCompaginate,
-  makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind,
+  makeVideoElement, makeImageElement, makeTextElement, makeAudioElement, genId, TransitionKind, EmphasisKind,
 } from './reel/model';
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
 import { exportProject, buildMixedAudio } from './reel/exporter';
@@ -517,6 +517,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text') p = updateElement(p, el.id, { transition: kind, transitionDur: kind === 'none' ? 0 : 0.5 } as any);
     commit(p);
   };
+  // Aplica un efecto de ÉNFASIS (continuo) al elemento seleccionado.
+  const applyEmphasis = (kind: EmphasisKind) => {
+    if (!selectedId) return;
+    commit(updateElement(project, selectedId, { emphasis: kind } as any));
+  };
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
     if (!selectedId) return;
@@ -923,36 +928,63 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
             </>)}
             {tab === 'animacion' && (
-              <div className="space-y-3">
-                <p className="text-[11px] text-white/40 leading-relaxed">Efectos de entrada. Seleccioná un elemento en la timeline y elegí cómo aparece.</p>
-                {!selected && <p className="text-[11px] text-amber-300/80"><i className="fa-solid fa-hand-pointer mr-1" />Tocá un elemento en la timeline para animarlo.</p>}
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { id: 'fade', label: 'Aparecer', icon: 'fa-circle-half-stroke' },
-                    { id: 'slideup', label: 'Subir', icon: 'fa-arrow-up' },
-                    { id: 'slidedown', label: 'Bajar', icon: 'fa-arrow-down' },
-                    { id: 'slide', label: 'Entrar', icon: 'fa-arrow-left' },
-                    { id: 'zoom', label: 'Zoom', icon: 'fa-magnifying-glass-plus' },
-                    { id: 'blur', label: 'Desenfoque', icon: 'fa-droplet' },
-                    { id: 'white', label: 'Flash', icon: 'fa-bolt' },
-                    { id: 'none', label: 'Ninguna', icon: 'fa-ban' },
-                  ] as { id: TransitionKind; label: string; icon: string }[]).map(a => {
-                    const active = !!selected && ((selected as any).transition || 'none') === a.id;
-                    return (
-                      <button key={a.id} disabled={!selected} onClick={() => applyAnim(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
-                        style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
-                        <i className={`fa-solid ${a.icon}`} /> {a.label}
-                      </button>
-                    );
-                  })}
+              <div className="space-y-4">
+                {!selected
+                  ? <p className="text-[11px] text-amber-300/80"><i className="fa-solid fa-hand-pointer mr-1" />Tocá un elemento en la timeline para animarlo.</p>
+                  : <p className="text-[11px] text-white/40 leading-relaxed">Aplicá efectos al elemento seleccionado.</p>}
+
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Entrada</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { id: 'fade', label: 'Aparecer', icon: 'fa-circle-half-stroke' },
+                      { id: 'slideup', label: 'Subir', icon: 'fa-arrow-up' },
+                      { id: 'slidedown', label: 'Bajar', icon: 'fa-arrow-down' },
+                      { id: 'slide', label: 'Deslizar', icon: 'fa-arrow-left' },
+                      { id: 'zoom', label: 'Zoom', icon: 'fa-magnifying-glass-plus' },
+                      { id: 'blur', label: 'Desenfoque', icon: 'fa-droplet' },
+                      { id: 'white', label: 'Flash', icon: 'fa-bolt' },
+                      { id: 'none', label: 'Ninguna', icon: 'fa-ban' },
+                    ] as { id: TransitionKind; label: string; icon: string }[]).map(a => {
+                      const active = !!selected && ((selected as any).transition || 'none') === a.id;
+                      return (
+                        <button key={a.id} disabled={!selected} onClick={() => applyAnim(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
+                          style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
+                          <i className={`fa-solid ${a.icon}`} /> {a.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Énfasis (continuo)</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { id: 'pulse', label: 'Pulso', icon: 'fa-heart' },
+                      { id: 'breathe', label: 'Latido', icon: 'fa-expand' },
+                      { id: 'wiggle', label: 'Vaivén', icon: 'fa-arrows-left-right' },
+                      { id: 'float', label: 'Flotar', icon: 'fa-arrows-up-down' },
+                      { id: 'none', label: 'Ninguno', icon: 'fa-ban' },
+                    ] as { id: EmphasisKind; label: string; icon: string }[]).map(a => {
+                      const active = !!selected && ((selected as any).emphasis || 'none') === a.id;
+                      return (
+                        <button key={a.id} disabled={!selected} onClick={() => applyEmphasis(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
+                          style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
+                          <i className={`fa-solid ${a.icon}`} /> {a.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {selected && selected.type === 'image' && findElement(project, selected.id)?.track.kind === 'video' && (
+                  <label className="flex items-center gap-2 text-xs text-white/70 pt-1"><input type="checkbox" checked={!!(selected as any).kenBurns} onChange={(e) => patchSel({ kenBurns: e.target.checked } as any)} /> Zoom lento en la imagen (Ken Burns)</label>
+                )}
                 {selected && selected.type === 'text' && (
                   <button onClick={() => applyAnimAllTexts(((selected as any).transition as TransitionKind) || 'fade')} className="w-full py-2.5 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
-                    <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar a TODOS los textos
+                    <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar la entrada a TODOS los textos
                   </button>
-                )}
-                {selected && selected.type === 'image' && findElement(project, selected.id)?.track.kind === 'video' && (
-                  <label className="flex items-center gap-2 text-xs text-white/70 pt-2 border-t border-white/5"><input type="checkbox" checked={!!(selected as any).kenBurns} onChange={(e) => patchSel({ kenBurns: e.target.checked } as any)} /> Zoom lento en la imagen (Ken Burns)</label>
                 )}
               </div>
             )}
@@ -1218,21 +1250,24 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
     </Row>
     <Row label={`Posición Y: ${Math.round(el.transform.y)}%`}><Slider min={0} max={100} value={el.transform.y} onChange={(v) => onTransform({ y: v })} /></Row>
     <Row label={`Posición X: ${Math.round(el.transform.x)}%`}><Slider min={0} max={100} value={el.transform.x} onChange={(v) => onTransform({ x: v })} /></Row>
-    <div className="pt-2 border-t border-white/5 space-y-3">
-      <Row label="Animación (palabra por palabra)">
-        <select value={el.style.anim || (el.style.karaoke ? 'karaoke' : 'none')} onChange={(e) => onStyle({ anim: e.target.value as any, karaoke: e.target.value === 'karaoke' })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
-          <option value="none">Ninguna</option>
-          <option value="karaoke">Karaoke</option>
-          <option value="reveal">Revelado</option>
-          <option value="highlight">Resaltado</option>
-          <option value="pop">Pop (rebote)</option>
-          <option value="wordbox">Caja por palabra</option>
-        </select>
-      </Row>
-      {(el.style.anim && el.style.anim !== 'none') || el.style.karaoke ? (
-        <Row label="Color de resalte"><input type="color" value={el.style.accent || '#FFE600'} onChange={(e) => onStyle({ accent: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
-      ) : null}
-    </div>
+    {/* Karaoke/palabra por palabra: solo para subtítulos. Para el resto, animar desde la pestaña Animación. */}
+    {el.name === 'Subtítulo' && (
+      <div className="pt-2 border-t border-white/5 space-y-3">
+        <Row label="Animación (palabra por palabra)">
+          <select value={el.style.anim || (el.style.karaoke ? 'karaoke' : 'none')} onChange={(e) => onStyle({ anim: e.target.value as any, karaoke: e.target.value === 'karaoke' })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+            <option value="none">Ninguna</option>
+            <option value="karaoke">Karaoke</option>
+            <option value="reveal">Revelado</option>
+            <option value="highlight">Resaltado</option>
+            <option value="pop">Pop (rebote)</option>
+            <option value="wordbox">Caja por palabra</option>
+          </select>
+        </Row>
+        {(el.style.anim && el.style.anim !== 'none') || el.style.karaoke ? (
+          <Row label="Color de resalte"><input type="color" value={el.style.accent || '#FFE600'} onChange={(e) => onStyle({ accent: e.target.value })} className="w-full h-8 rounded-lg bg-transparent cursor-pointer" /></Row>
+        ) : null}
+      </div>
+    )}
   </div>
 );
 

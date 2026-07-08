@@ -14,6 +14,8 @@ export const ASPECTS: Record<AspectId, { w: number; h: number; label: string }> 
 export type TrackKind = 'video' | 'overlay' | 'audio';
 export type ElementType = 'video' | 'image' | 'text' | 'audio';
 export type TransitionKind = 'none' | 'fade' | 'white' | 'zoom' | 'slide' | 'slideup' | 'slidedown' | 'blur';
+// Efecto continuo (énfasis) que se repite mientras el elemento está visible.
+export type EmphasisKind = 'none' | 'pulse' | 'breathe' | 'wiggle' | 'float';
 
 // Posición/transformación de un elemento visual. x,y en % del canvas (centro del elemento); scale en %.
 export interface Transform { x: number; y: number; scale: number; rotation: number; opacity: number }
@@ -54,6 +56,7 @@ interface BaseElement {
   transitionOutDur?: number;       // duración de la transición de salida (s)
   audioFadeIn?: number;   // fade de volumen al inicio (s)
   audioFadeOut?: number;  // fade de volumen al final (s)
+  emphasis?: EmphasisKind;  // efecto continuo mientras está visible (pulso, vaivén, etc.)
 }
 export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean; fit?: 'cover' | 'contain' }
 export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain'; kenBurns?: boolean }

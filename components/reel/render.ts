@@ -245,6 +245,19 @@ function exitTransitionState(el: ReelElement, t: number): { type: string; p: num
   return { type, p: 1 - remaining / dur };
 }
 
+// Efecto continuo (énfasis) en t: multiplicador de escala, rotación (°) y desplazamiento vertical (px).
+function emphasisAt(el: ReelElement, t: number, H: number): { scale: number; rot: number; dy: number } {
+  const kind = (el as any).emphasis as string | undefined;
+  if (!kind || kind === 'none') return { scale: 1, rot: 0, dy: 0 };
+  const local = Math.max(0, t - el.start);
+  const TAU = Math.PI * 2;
+  if (kind === 'pulse') return { scale: 1 + 0.06 * Math.sin(local * TAU * 1.4), rot: 0, dy: 0 };
+  if (kind === 'breathe') return { scale: 1 + 0.035 * Math.sin(local * TAU * 0.5), rot: 0, dy: 0 };
+  if (kind === 'wiggle') return { scale: 1, rot: 3 * Math.sin(local * TAU * 1.8), dy: 0 };
+  if (kind === 'float') return { scale: 1, rot: 0, dy: 0.02 * H * Math.sin(local * TAU * 0.6) };
+  return { scale: 1, rot: 0, dy: 0 };
+}
+
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
 export function sourceTime(el: VideoElement | ImageElement, t: number): number {
   const local = t - el.start;
@@ -285,12 +298,15 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
       else if (ex.type === 'blur') blurPx = Math.max(blurPx, ex.p * 24);
       else if (ex.type === 'white') whiteA = Math.max(whiteA, ex.p);
     }
+    const em = emphasisAt(el, t, H); // efecto continuo (pulso/vaivén/flotar…)
     if (el.type === 'text') {
       const te = el as TextElement;
+      const cx = (te.transform.x / 100) * W, cy = (te.transform.y / 100) * H;
+      const sc = extraScale * em.scale;
       ctx.save();
-      if (slideX || slideY) ctx.translate(slideX, slideY);
+      if (slideX || slideY || em.dy) ctx.translate(slideX, slideY + em.dy);
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      if (extraScale !== 1) { const cx = (te.transform.x / 100) * W, cy = (te.transform.y / 100) * H; ctx.translate(cx, cy); ctx.scale(extraScale, extraScale); ctx.translate(-cx, -cy); }
+      if (sc !== 1 || em.rot) { ctx.translate(cx, cy); if (em.rot) ctx.rotate((em.rot * Math.PI) / 180); if (sc !== 1) ctx.scale(sc, sc); ctx.translate(-cx, -cy); }
       drawTextEl(ctx, te, W, H, t, alpha);
       ctx.restore();
       continue;
@@ -309,15 +325,20 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
         kb = 1 + 0.12 * (media.duration > 0 ? localK / media.duration : 0);
       }
       ctx.save();
-      if (slideX || slideY) ctx.translate(slideX, slideY);
+      if (slideX || slideY || em.dy) ctx.translate(slideX, slideY + em.dy);
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb);
-      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb);
+      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb * em.scale);
+      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb * em.scale);
       ctx.restore();
       if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {
-      // Overlay: caja PiP posicionada.
-      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, opacity: media.transform.opacity * alpha, scale: media.transform.scale * extraScale });
+      // Overlay (logo/recurso/imagen): también responde a transiciones de entrada/salida y al énfasis.
+      ctx.save();
+      if (blurPx) ctx.filter = `blur(${blurPx}px)`;
+      const ox = media.transform.x + (slideX / W) * 100;
+      const oy = media.transform.y + ((slideY + em.dy) / H) * 100;
+      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, x: ox, y: oy, rotation: media.transform.rotation + em.rot, opacity: media.transform.opacity * alpha, scale: media.transform.scale * extraScale * em.scale });
+      ctx.restore();
     }
   }
 }
