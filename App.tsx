@@ -173,6 +173,17 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
   }
 
   const overlay = p.tracks.find(t => t.kind === 'overlay')!;
+  const opa = (v?: number) => (v == null ? 100 : v <= 1 ? Math.round(v * 100) : Math.round(v));
+
+  // Recurso (debajo de los textos)
+  if (state.resource?.url) {
+    const rp = state.resource.storyPosition || { x: 50, y: 50 };
+    p = addReelElement(p, overlay.id, makeReelImage(state.resource.url, {
+      name: 'Recurso', start: 0, duration: 5,
+      transform: { x: rp.x, y: rp.y, scale: Math.max(5, state.resource.size || 30), rotation: 0, opacity: opa(state.resource.opacity) },
+    }));
+  }
+
   for (const k of keys) {
     const layer = layers?.[k];
     if (!layer || !layer.content?.trim()) continue;
@@ -196,6 +207,16 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
       },
     }));
   }
+
+  // Logo (arriba de todo)
+  if (state.logo?.url) {
+    const lp = state.logo.storyPosition || { x: 82, y: 12 };
+    p = addReelElement(p, overlay.id, makeReelImage(state.logo.url, {
+      name: 'Logo', start: 0, duration: 5,
+      transform: { x: lp.x, y: lp.y, scale: Math.max(5, state.logo.size || 18), rotation: 0, opacity: opa(state.logo.opacity) },
+    }));
+  }
+
   return p;
 }
 
