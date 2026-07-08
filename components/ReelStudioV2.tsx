@@ -209,17 +209,21 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   // Marca la mezcla de audio como desactualizada ante cualquier cambio del proyecto (se reconstruye al reproducir).
   useEffect(() => { mixDirtyRef.current = true; }, [project]);
 
-  // Registra las fuentes propias del perfil como @font-face para que el canvas del reel las pueda usar.
+  // Carga las fuentes propias del perfil con la API FontFace (confiable para el canvas) y re-dibuja al estar listas.
   useEffect(() => {
+    const fd: any = (document as any).fonts;
+    if (!fd || typeof (window as any).FontFace !== 'function') return;
+    let cancelled = false;
     (profile?.customFonts || []).forEach((f: CustomFont) => {
       if (!f.url || !f.family) return;
-      const id = `reel-font-${f.family}`;
-      if (!document.getElementById(id)) {
-        const s = document.createElement('style'); s.id = id;
-        s.textContent = `@font-face{font-family:'${f.family}';src:url('${f.url}');font-display:swap;}`;
-        document.head.appendChild(s);
-      }
+      try {
+        if ([...fd].some((ff: any) => ff.family === f.family)) return; // ya cargada
+        const face = new (window as any).FontFace(f.family, `url(${f.url})`);
+        face.load().then((loaded: any) => { if (cancelled) return; fd.add(loaded); if (!playingRef.current) renderStatic(currentTime); }).catch(() => { /* noop */ });
+      } catch { /* noop */ }
     });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   // El canvas dibuja texto con la fuente ya cargada: precarga las fuentes usadas y re-dibuja cuando están listas.

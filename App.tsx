@@ -195,9 +195,13 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
     }));
   }
 
+  const seenText = new Set<string>();
   for (const k of keys) {
     const layer = layers?.[k];
     if (!layer || !layer.content?.trim()) continue;
+    const dedupKey = layer.content.trim().toLowerCase();
+    if (seenText.has(dedupKey)) continue; // no duplicar el mismo texto (ej: descripción repetida en otra capa)
+    seenText.add(dedupKey);
     const pos = layer.storyPosition || { x: 50, y: 50 };
     const bg = k === 'cta'
       ? (state.showCtaBg ? (state.ctaBgColor || null) : null)
