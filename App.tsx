@@ -9,7 +9,7 @@ import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
 import ReelStudioV2 from './components/ReelStudioV2';
-import { ReelProject, createProject as createReelProject, addElement as addReelElement, makeImageElement as makeReelImage, makeTextElement as makeReelText } from './components/reel/model';
+import { ReelProject, TransitionKind, createProject as createReelProject, addElement as addReelElement, addOverlayElement as addReelOverlay, makeImageElement as makeReelImage, makeTextElement as makeReelText } from './components/reel/model';
 // Editor de reels V2 (multi-track) por defecto. Salida de emergencia al editor anterior: ?editor=legacy
 const USE_REELS_V2 = typeof window === 'undefined' ? true : new URLSearchParams(window.location.search).get('editor') !== 'legacy';
 import BrandSettings from './components/BrandSettings';
@@ -153,7 +153,8 @@ const DEFAULT_STATE: ProjectState = {
 // Convierte un diseño (fondo IA + capas de texto) en un ReelProject 9:16 para "Animar": el fondo va como clip
 // y cada texto como capa editable/animable. Usa las posiciones de STORY (9:16) que ya son x/y en % del centro
 // (misma convención que el reel). El tamaño se calibra de px-display a % de altura del reel.
-function buildReelFromDesign(state: ProjectState): ReelProject | null {
+type AnimStyle = 'suave' | 'dinamico' | 'viral' | 'none';
+function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinamico'): ReelProject | null {
   const bgUrl = state.imageVariants?.[state.selectedVariantIndex]?.url;
   const layers = state.textLayers;
   const keys: ('headline' | 'description' | 'additional' | 'cta')[] = ['headline', 'description', 'additional', 'cta'];
@@ -161,6 +162,15 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
   if (!bgUrl && !hasText) return null;
 
   const SIZE_FACTOR = 0.158; // t.size (px al display 9:16, con ×0.9) → % de la altura del reel (calibrado a ~320px de ancho)
+  // Cómo entra/anima cada texto según el estilo elegido.
+  const TA = {
+    suave:    { transition: 'fade'    as TransitionKind, transitionDur: 0.5, anim: 'none'    as const, fadeIn: 0.5 },
+    dinamico: { transition: 'slideup' as TransitionKind, transitionDur: 0.5, anim: 'reveal'  as const, fadeIn: 0 },
+    viral:    { transition: 'zoom'    as TransitionKind, transitionDur: 0.4, anim: 'karaoke' as const, fadeIn: 0 },
+    none:     { transition: 'none'    as TransitionKind, transitionDur: 0,   anim: 'none'    as const, fadeIn: 0 },
+  }[animStyle];
+  const mediaFade = animStyle === 'none' ? 0 : 0.4;
+
   let p = createReelProject('9:16');
 
   if (bgUrl) {
@@ -172,14 +182,13 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
     }));
   }
 
-  const overlay = p.tracks.find(t => t.kind === 'overlay')!;
   const opa = (v?: number) => (v == null ? 100 : v <= 1 ? Math.round(v * 100) : Math.round(v));
 
-  // Recurso (debajo de los textos)
+  // Cada overlay va en su propia pista (addOverlayElement) para moverlo/animarlo por separado.
   if (state.resource?.url) {
     const rp = state.resource.storyPosition || { x: 50, y: 50 };
-    p = addReelElement(p, overlay.id, makeReelImage(state.resource.url, {
-      name: 'Recurso', start: 0, duration: 5,
+    p = addReelOverlay(p, makeReelImage(state.resource.url, {
+      name: 'Recurso', start: 0, duration: 5, fadeIn: mediaFade,
       transform: { x: rp.x, y: rp.y, scale: Math.max(5, state.resource.size || 30), rotation: 0, opacity: opa(state.resource.opacity) },
     }));
   }
@@ -191,8 +200,9 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
     const bg = k === 'cta'
       ? (state.showCtaBg ? (state.ctaBgColor || null) : null)
       : (layer.backgroundColor && layer.backgroundColor !== 'transparent' ? layer.backgroundColor : null);
-    p = addReelElement(p, overlay.id, makeReelText(layer.content, {
+    p = addReelOverlay(p, makeReelText(layer.content, {
       name: 'Texto', start: 0, duration: 5,
+      transition: TA.transition, transitionDur: TA.transitionDur, fadeIn: TA.fadeIn,
       transform: { x: pos.x, y: pos.y, scale: 100, rotation: 0, opacity: 100 },
       style: {
         font: layer.font || 'Inter',
@@ -203,16 +213,18 @@ function buildReelFromDesign(state: ProjectState): ReelProject | null {
         bg,
         stroke: !bg,
         align: layer.align || 'center',
-        anim: 'none', karaoke: false, upper: false,
+        anim: TA.anim,
+        karaoke: TA.anim === 'karaoke',
+        upper: false,
+        accent: '#FFE600',
       },
     }));
   }
 
-  // Logo (arriba de todo)
   if (state.logo?.url) {
     const lp = state.logo.storyPosition || { x: 82, y: 12 };
-    p = addReelElement(p, overlay.id, makeReelImage(state.logo.url, {
-      name: 'Logo', start: 0, duration: 5,
+    p = addReelOverlay(p, makeReelImage(state.logo.url, {
+      name: 'Logo', start: 0, duration: 5, fadeIn: mediaFade,
       transform: { x: lp.x, y: lp.y, scale: Math.max(5, state.logo.size || 18), rotation: 0, opacity: opa(state.logo.opacity) },
     }));
   }
@@ -245,6 +257,7 @@ const App: React.FC = () => {
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [reelPieceId, setReelPieceId] = useState<string | null>(null); // pieza de campaña que originó el reel (para adjuntarle el asset)
   const [reelInitialProject, setReelInitialProject] = useState<ReelProject | null>(null); // proyecto pre-armado al "Animar" un diseño
+  const [showAnimPicker, setShowAnimPicker] = useState(false); // selector de estilo de animación al "Animar"
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [pendingImprove, setPendingImprove] = useState<{ image: string; prompt: string } | null>(null);
 
@@ -700,12 +713,13 @@ const App: React.FC = () => {
     setAppView('editor');
   };
 
-  // "Animar": arma un reel desde el diseño actual (fondo + textos) y abre el editor de reels.
-  const animateDesign = () => {
-    const proj = buildReelFromDesign(state);
+  // "Animar": arma un reel desde el diseño actual (fondo + textos) con el estilo de animación elegido y abre el editor de reels.
+  const animateDesign = (animStyle: AnimStyle) => {
+    const proj = buildReelFromDesign(state, animStyle);
     if (!proj) { alert('Generá una imagen o agregá algún texto antes de animar.'); return; }
     setReelInitialProject(proj);
     setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null);
+    setShowAnimPicker(false);
     setShowReels(true);
   };
 
@@ -1312,6 +1326,37 @@ const App: React.FC = () => {
           />
         )
       )}
+
+      {/* Selector de estilo de animación al "Animar" un diseño */}
+      {showAnimPicker && (
+        <div className="fixed inset-0 z-[96] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAnimPicker(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-8 h-8 rounded-xl grid place-items-center text-white" style={{ background: 'linear-gradient(140deg,#EA5B25,#f0814f)' }}><i className="fa-solid fa-clapperboard text-xs"></i></span>
+              <h3 className="text-base font-black text-slate-900">¿Cómo querés animar los textos?</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 font-semibold mb-4">Se lleva tu diseño al editor de reels. Después podés ajustar cada texto a mano.</p>
+            <div className="space-y-2">
+              {([
+                { id: 'suave', label: 'Suave', desc: 'Aparecen con un fundido elegante', icon: 'fa-wind' },
+                { id: 'dinamico', label: 'Dinámico', desc: 'Entran deslizándose + palabras reveladas', icon: 'fa-bolt' },
+                { id: 'viral', label: 'Viral', desc: 'Zoom + resaltado palabra por palabra (karaoke)', icon: 'fa-fire' },
+                { id: 'none', label: 'Sin animación', desc: 'Solo llevar los textos, los animo yo', icon: 'fa-ban' },
+              ] as { id: AnimStyle; label: string; desc: string; icon: string }[]).map(o => (
+                <button key={o.id} onClick={() => animateDesign(o.id)} className="w-full text-left p-3 rounded-2xl border border-slate-100 hover:border-[#EA5B25] hover:bg-orange-50/40 transition-all flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl grid place-items-center bg-slate-900 text-white shrink-0"><i className={`fa-solid ${o.icon} text-xs`}></i></span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-black text-slate-900">{o.label}</span>
+                    <span className="block text-[11px] text-slate-400 font-semibold leading-tight">{o.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowAnimPicker(false)} className="w-full mt-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">Cancelar</button>
+          </div>
+        </div>
+      )}
+
       {showBrand && user && (
         <BrandSettings
           profile={profile}
@@ -1532,7 +1577,7 @@ const App: React.FC = () => {
                 <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Story (9:16)</span>
                 <div className="flex gap-2">
                   <button onClick={() => saveProject('story-canvas')} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-200" title="Guardar Proyecto"><i className="fa-solid fa-floppy-disk"></i></button>
-                  <button onClick={animateDesign} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Abrir en el editor de reels para animar los textos"><i className="fa-solid fa-clapperboard"></i> Animar</button>
+                  <button onClick={() => setShowAnimPicker(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel animado"><i className="fa-solid fa-clapperboard"></i> Animar</button>
                   <button onClick={() => exportLayout('story-canvas', 'story.png')} className={`bg-[#EA5B25] text-white px-7 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 ${exportingId === 'story-canvas' ? 'opacity-50 cursor-wait' : ''}`}>{exportingId === 'story-canvas' ? 'Exportando...' : 'Exportar'}</button>
                 </div>
               </div>
