@@ -302,11 +302,17 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     if (!sw || !sh) continue;
     if (track.kind === 'video') {
       // Pista base: por defecto LLENA el formato (cover, sin bordes negros); "Completo" (contain) solo si se elige.
+      // Movimiento "Ken Burns": zoom lento (1.0 → 1.12) a lo largo del clip para que la imagen no quede estática.
+      let kb = 1;
+      if ((media as any).kenBurns) {
+        const localK = Math.max(0, Math.min(media.duration, t - media.start));
+        kb = 1 + 0.12 * (media.duration > 0 ? localK / media.duration : 0);
+      }
       ctx.save();
       if (slideX || slideY) ctx.translate(slideX, slideY);
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
-      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale);
+      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb);
+      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb);
       ctx.restore();
       if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {

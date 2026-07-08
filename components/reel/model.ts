@@ -56,7 +56,7 @@ interface BaseElement {
   audioFadeOut?: number;  // fade de volumen al final (s)
 }
 export interface VideoElement extends BaseElement { type: 'video'; mediaId?: string; url: string; transform: Transform; volume: number; muted: boolean; fit?: 'cover' | 'contain' }
-export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain' }
+export interface ImageElement extends BaseElement { type: 'image'; mediaId?: string; url: string; transform: Transform; fit?: 'cover' | 'contain'; kenBurns?: boolean }
 export interface TextElement extends BaseElement { type: 'text'; text: string; transform: Transform; style: TextStyle }
 export interface AudioElement extends BaseElement { type: 'audio'; mediaId?: string; url: string; volume: number; loop: boolean }
 export type ReelElement = VideoElement | ImageElement | TextElement | AudioElement;

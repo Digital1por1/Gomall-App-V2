@@ -982,7 +982,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} onSyncAll={syncTextStyle} />
             ))}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
-              <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} />
+              <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} onKenBurns={(v) => patchSel({ kenBurns: v } as any)} />
             )}
             {selected && selected.type === 'audio' && (
               <AudioProps el={selected as AudioElement} onVolume={(v) => patchSel({ volume: v } as any)} onLoop={(l) => patchSel({ loop: l } as any)} onAudioFade={(p) => patchSel(p as any)} />
@@ -1241,7 +1241,7 @@ const StickerProps: React.FC<{ el: TextElement; onStyle: (s: Partial<TextElement
   </div>
 );
 
-const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void; onFit: (f: 'cover' | 'contain') => void; onAudioFade: (p: { audioFadeIn?: number; audioFadeOut?: number }) => void }> = ({ el, isBase, onTransform, onVolume, onFit, onAudioFade }) => (
+const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; onTransform: (t: Partial<VideoElement['transform']>) => void; onVolume: (v: number) => void; onFit: (f: 'cover' | 'contain') => void; onAudioFade: (p: { audioFadeIn?: number; audioFadeOut?: number }) => void; onKenBurns: (v: boolean) => void }> = ({ el, isBase, onTransform, onVolume, onFit, onAudioFade, onKenBurns }) => (
   <div className="space-y-4">
     {isBase && (
       <Row label="Encuadre">
@@ -1249,6 +1249,11 @@ const VisualProps: React.FC<{ el: VideoElement | ImageElement; isBase: boolean; 
           <button onClick={() => onFit('cover')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={(el.fit || 'cover') === 'cover' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Llenar formato</button>
           <button onClick={() => onFit('contain')} className="flex-1 py-1.5 rounded-lg text-xs font-semibold border" style={el.fit === 'contain' ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>Completo (con bordes)</button>
         </div>
+      </Row>
+    )}
+    {isBase && el.type === 'image' && (
+      <Row label="Movimiento">
+        <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={!!(el as ImageElement).kenBurns} onChange={(e) => onKenBurns(e.target.checked)} /> Zoom lento (Ken Burns)</label>
       </Row>
     )}
     <Row label={`Tamaño: ${Math.round(el.transform.scale)}%`}><Slider min={10} max={200} value={el.transform.scale} onChange={(v) => onTransform({ scale: v })} /></Row>

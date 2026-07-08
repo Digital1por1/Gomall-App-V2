@@ -162,14 +162,15 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
   if (!bgUrl && !hasText) return null;
 
   const SIZE_FACTOR = 0.158; // t.size (px al display 9:16, con ×0.9) → % de la altura del reel (calibrado a ~320px de ancho)
-  // Cómo entra/anima cada texto según el estilo elegido.
+  // Efecto de ENTRADA de cada texto (como bloque, no subtítulo palabra por palabra).
   const TA = {
-    suave:    { transition: 'fade'    as TransitionKind, transitionDur: 0.5, anim: 'none'    as const, fadeIn: 0.5 },
-    dinamico: { transition: 'slideup' as TransitionKind, transitionDur: 0.5, anim: 'reveal'  as const, fadeIn: 0 },
-    viral:    { transition: 'zoom'    as TransitionKind, transitionDur: 0.4, anim: 'karaoke' as const, fadeIn: 0 },
-    none:     { transition: 'none'    as TransitionKind, transitionDur: 0,   anim: 'none'    as const, fadeIn: 0 },
+    suave:    { transition: 'fade'    as TransitionKind, transitionDur: 0.6,  fadeIn: 0.5 },
+    dinamico: { transition: 'slideup' as TransitionKind, transitionDur: 0.5,  fadeIn: 0 },
+    viral:    { transition: 'zoom'    as TransitionKind, transitionDur: 0.45, fadeIn: 0 },
+    none:     { transition: 'none'    as TransitionKind, transitionDur: 0,    fadeIn: 0 },
   }[animStyle];
   const mediaFade = animStyle === 'none' ? 0 : 0.4;
+  const bgKen = animStyle !== 'none'; // movimiento (zoom lento) en la imagen de fondo
 
   let p = createReelProject('9:16');
 
@@ -177,7 +178,7 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
     const vtrack = p.tracks.find(t => t.kind === 'video')!;
     const scale = Math.max(50, Math.round((state.storyBackgroundConfig?.scale || 1) * 100));
     p = addReelElement(p, vtrack.id, makeReelImage(bgUrl, {
-      name: 'Fondo', start: 0, duration: 5,
+      name: 'Fondo', start: 0, duration: 5, kenBurns: bgKen,
       transform: { x: 50, y: 50, scale, rotation: 0, opacity: 100 }, fit: 'cover',
     }));
   }
@@ -213,8 +214,8 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
         bg,
         stroke: !bg,
         align: layer.align || 'center',
-        anim: TA.anim,
-        karaoke: TA.anim === 'karaoke',
+        anim: 'none',
+        karaoke: false,
         upper: false,
         accent: '#FFE600',
       },
@@ -1338,10 +1339,10 @@ const App: React.FC = () => {
             <p className="text-[11px] text-slate-400 font-semibold mb-4">Se lleva tu diseño al editor de reels. Después podés ajustar cada texto a mano.</p>
             <div className="space-y-2">
               {([
-                { id: 'suave', label: 'Suave', desc: 'Aparecen con un fundido elegante', icon: 'fa-wind' },
-                { id: 'dinamico', label: 'Dinámico', desc: 'Entran deslizándose + palabras reveladas', icon: 'fa-bolt' },
-                { id: 'viral', label: 'Viral', desc: 'Zoom + resaltado palabra por palabra (karaoke)', icon: 'fa-fire' },
-                { id: 'none', label: 'Sin animación', desc: 'Solo llevar los textos, los animo yo', icon: 'fa-ban' },
+                { id: 'suave', label: 'Suave', desc: 'Textos con fundido + zoom lento en la imagen', icon: 'fa-wind' },
+                { id: 'dinamico', label: 'Dinámico', desc: 'Textos entran deslizándose + zoom en la imagen', icon: 'fa-bolt' },
+                { id: 'viral', label: 'Viral', desc: 'Textos con zoom de impacto + movimiento en la imagen', icon: 'fa-fire' },
+                { id: 'none', label: 'Sin efectos', desc: 'Solo llevar el diseño, los animo yo', icon: 'fa-ban' },
               ] as { id: AnimStyle; label: string; desc: string; icon: string }[]).map(o => (
                 <button key={o.id} onClick={() => animateDesign(o.id)} className="w-full text-left p-3 rounded-2xl border border-slate-100 hover:border-[#EA5B25] hover:bg-orange-50/40 transition-all flex items-center gap-3">
                   <span className="w-9 h-9 rounded-xl grid place-items-center bg-slate-900 text-white shrink-0"><i className={`fa-solid ${o.icon} text-xs`}></i></span>
