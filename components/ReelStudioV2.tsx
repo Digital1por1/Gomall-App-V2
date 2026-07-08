@@ -5,7 +5,7 @@
 // Pendiente para próximas iteraciones: subtítulos karaoke, transiciones, stickers, persistencia, snapping.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { UserProfile } from '../types';
+import { UserProfile, CustomFont } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
   AspectId, ASPECTS, createProject, canvasSize, projectDuration, findElement,
@@ -208,6 +208,30 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
   // Marca la mezcla de audio como desactualizada ante cualquier cambio del proyecto (se reconstruye al reproducir).
   useEffect(() => { mixDirtyRef.current = true; }, [project]);
+
+  // Registra las fuentes propias del perfil como @font-face para que el canvas del reel las pueda usar.
+  useEffect(() => {
+    (profile?.customFonts || []).forEach((f: CustomFont) => {
+      if (!f.url || !f.family) return;
+      const id = `reel-font-${f.family}`;
+      if (!document.getElementById(id)) {
+        const s = document.createElement('style'); s.id = id;
+        s.textContent = `@font-face{font-family:'${f.family}';src:url('${f.url}');font-display:swap;}`;
+        document.head.appendChild(s);
+      }
+    });
+  }, [profile]);
+
+  // El canvas dibuja texto con la fuente ya cargada: precarga las fuentes usadas y re-dibuja cuando están listas.
+  useEffect(() => {
+    const fonts = new Set<string>();
+    for (const t of project.tracks) for (const el of t.elements) if (el.type === 'text') fonts.add((el as TextElement).style.font);
+    const fd = (document as any).fonts;
+    if (!fonts.size || !fd?.load) return;
+    Promise.all([...fonts].map(f => fd.load(`700 48px "${f}"`).catch(() => {})))
+      .then(() => { if (!playingRef.current) renderStatic(currentTime); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   // Genera una miniatura (un frame representativo) por cada video, para pintarla en los bloques de la timeline.
   useEffect(() => {

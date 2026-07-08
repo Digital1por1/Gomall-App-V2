@@ -186,7 +186,8 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
   const opa = (v?: number) => (v == null ? 100 : v <= 1 ? Math.round(v * 100) : Math.round(v));
 
   // Cada overlay va en su propia pista (addOverlayElement) para moverlo/animarlo por separado.
-  if (state.resource?.url) {
+  // No duplicar: si el recurso es el mismo archivo que el logo, se omite (evita dos logos iguales).
+  if (state.resource?.url && state.resource.url !== state.logo?.url) {
     const rp = state.resource.storyPosition || { x: 50, y: 50 };
     p = addReelOverlay(p, makeReelImage(state.resource.url, {
       name: 'Recurso', start: 0, duration: 5, fadeIn: mediaFade,
