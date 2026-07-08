@@ -9,6 +9,7 @@ import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
 import ReelStudioV2 from './components/ReelStudioV2';
+import { ReelProject, createProject as createReelProject, addElement as addReelElement, makeImageElement as makeReelImage, makeTextElement as makeReelText } from './components/reel/model';
 // Editor de reels V2 (multi-track) por defecto. Salida de emergencia al editor anterior: ?editor=legacy
 const USE_REELS_V2 = typeof window === 'undefined' ? true : new URLSearchParams(window.location.search).get('editor') !== 'legacy';
 import BrandSettings from './components/BrandSettings';
@@ -149,6 +150,55 @@ const DEFAULT_STATE: ProjectState = {
   layersOrder: ['background', 'resource', 'cta', 'additional', 'description', 'headline', 'logo']
 };
 
+// Convierte un diseño (fondo IA + capas de texto) en un ReelProject 9:16 para "Animar": el fondo va como clip
+// y cada texto como capa editable/animable. Usa las posiciones de STORY (9:16) que ya son x/y en % del centro
+// (misma convención que el reel). El tamaño se calibra de px-display a % de altura del reel.
+function buildReelFromDesign(state: ProjectState): ReelProject | null {
+  const bgUrl = state.imageVariants?.[state.selectedVariantIndex]?.url;
+  const layers = state.textLayers;
+  const keys: ('headline' | 'description' | 'additional' | 'cta')[] = ['headline', 'description', 'additional', 'cta'];
+  const hasText = keys.some(k => layers?.[k]?.content?.trim());
+  if (!bgUrl && !hasText) return null;
+
+  const SIZE_FACTOR = 0.158; // t.size (px al display 9:16, con ×0.9) → % de la altura del reel (calibrado a ~320px de ancho)
+  let p = createReelProject('9:16');
+
+  if (bgUrl) {
+    const vtrack = p.tracks.find(t => t.kind === 'video')!;
+    const scale = Math.max(50, Math.round((state.storyBackgroundConfig?.scale || 1) * 100));
+    p = addReelElement(p, vtrack.id, makeReelImage(bgUrl, {
+      name: 'Fondo', start: 0, duration: 5,
+      transform: { x: 50, y: 50, scale, rotation: 0, opacity: 100 }, fit: 'cover',
+    }));
+  }
+
+  const overlay = p.tracks.find(t => t.kind === 'overlay')!;
+  for (const k of keys) {
+    const layer = layers?.[k];
+    if (!layer || !layer.content?.trim()) continue;
+    const pos = layer.storyPosition || { x: 50, y: 50 };
+    const bg = k === 'cta'
+      ? (state.showCtaBg ? (state.ctaBgColor || null) : null)
+      : (layer.backgroundColor && layer.backgroundColor !== 'transparent' ? layer.backgroundColor : null);
+    p = addReelElement(p, overlay.id, makeReelText(layer.content, {
+      name: 'Texto', start: 0, duration: 5,
+      transform: { x: pos.x, y: pos.y, scale: 100, rotation: 0, opacity: 100 },
+      style: {
+        font: layer.font || 'Inter',
+        color: layer.color || '#FFFFFF',
+        size: Math.max(3, Math.round(layer.size * SIZE_FACTOR * 10) / 10),
+        weight: layer.bold ? 800 : 600,
+        italic: !!layer.italic,
+        bg,
+        stroke: !bg,
+        align: layer.align || 'center',
+        anim: 'none', karaoke: false, upper: false,
+      },
+    }));
+  }
+  return p;
+}
+
 const App: React.FC = () => {
   const [user, setUser] = useState<firebase.User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -173,6 +223,7 @@ const App: React.FC = () => {
   const [showProductAd, setShowProductAd] = useState(false);
   const [reelCopy, setReelCopy] = useState<string | null>(null);
   const [reelPieceId, setReelPieceId] = useState<string | null>(null); // pieza de campaña que originó el reel (para adjuntarle el asset)
+  const [reelInitialProject, setReelInitialProject] = useState<ReelProject | null>(null); // proyecto pre-armado al "Animar" un diseño
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [pendingImprove, setPendingImprove] = useState<{ image: string; prompt: string } | null>(null);
 
@@ -628,6 +679,15 @@ const App: React.FC = () => {
     setAppView('editor');
   };
 
+  // "Animar": arma un reel desde el diseño actual (fondo + textos) y abre el editor de reels.
+  const animateDesign = () => {
+    const proj = buildReelFromDesign(state);
+    if (!proj) { alert('Generá una imagen o agregá algún texto antes de animar.'); return; }
+    setReelInitialProject(proj);
+    setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null);
+    setShowReels(true);
+  };
+
   const handleProductAd = (imageUrl: string, prompt: string) => {
     setState(prev => ({
       ...prev,
@@ -684,6 +744,7 @@ const App: React.FC = () => {
     if (piece.type === 'reel') {
       setReelCopy(piece.copy || null);
       setReelPieceId(piece.id);
+      setReelInitialProject(null);
       setShowCampaigns(false);
       setShowReels(true);
       return;
@@ -1218,6 +1279,7 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setShowReels(false)}
             initialCopy={reelCopy}
+            initialProject={reelInitialProject}
             onSaveCloud={saveReelToCloud}
             campaignName={returnCampaignId ? (campaignDraft?.name || null) : null}
           />
@@ -1276,7 +1338,7 @@ const App: React.FC = () => {
           designsCount={savedProjects.length}
           onNewDesign={startNewDesign}
           onNewCampaign={() => { setCampaignInitial(null); setOpenCampaignId(null); setShowCampaigns(true); }}
-          onOpenReels={() => { setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null); setShowReels(true); }}
+          onOpenReels={() => { setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null); setReelInitialProject(null); setShowReels(true); }}
           onOpenProductAd={() => setShowProductAd(true)}
           onEditBrand={() => setShowBrand(true)}
           onOpenDesigns={() => { setActiveTab('editor'); setOpenSection('PROJECTS'); setReturnCampaignId(null); setAppView('editor'); }}
@@ -1449,6 +1511,7 @@ const App: React.FC = () => {
                 <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Story (9:16)</span>
                 <div className="flex gap-2">
                   <button onClick={() => saveProject('story-canvas')} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-200" title="Guardar Proyecto"><i className="fa-solid fa-floppy-disk"></i></button>
+                  <button onClick={animateDesign} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Abrir en el editor de reels para animar los textos"><i className="fa-solid fa-clapperboard"></i> Animar</button>
                   <button onClick={() => exportLayout('story-canvas', 'story.png')} className={`bg-[#EA5B25] text-white px-7 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 ${exportingId === 'story-canvas' ? 'opacity-50 cursor-wait' : ''}`}>{exportingId === 'story-canvas' ? 'Exportando...' : 'Exportar'}</button>
                 </div>
               </div>

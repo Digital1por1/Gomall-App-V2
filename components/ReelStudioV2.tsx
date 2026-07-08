@@ -60,6 +60,7 @@ interface Props {
   profile: UserProfile | null;
   onClose: () => void;
   initialCopy?: string | null;
+  initialProject?: ReelProject | null; // proyecto pre-armado (ej: "Animar" un diseño de campaña)
   onSaveCloud?: (a: { blob: Blob; thumbBlob: Blob | null; name: string; ext: string }) => Promise<{ url: string } | void>;
   campaignName?: string | null;
 }
@@ -88,9 +89,9 @@ type DragState =
   | { mode: 'playhead'; }
   | null;
 
-const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, onSaveCloud, campaignName }) => {
+const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialProject, onSaveCloud, campaignName }) => {
   const kit = profile?.brandKits?.[0];
-  const [project, setProject] = useState<ReelProject>(() => createProject('9:16'));
+  const [project, setProject] = useState<ReelProject>(() => initialProject || createProject('9:16'));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -740,6 +741,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, onSaveCl
   }, [project]);
 
   useEffect(() => {
+    // Si vino un proyecto pre-armado (ej: "Animar" un diseño), no restaurar el reel guardado.
+    if (initialProject) { hydratedRef.current = true; return; }
     (async () => {
       try {
         const saved: any = await getProjectAt(V2_KEY);
