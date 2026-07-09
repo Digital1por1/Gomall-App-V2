@@ -30,6 +30,9 @@ const STICKERS = [
 // Tipografías disponibles (cargadas en index.html).
 const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Anton', 'Playfair Display', 'Roboto', 'Open Sans', 'Ubuntu', 'Lora', 'Cinzel', 'Permanent Marker', 'Pacifico', 'Dancing Script'];
 
+// Margen (px) a la izquierda de la timeline: deja aire antes de 0s para agarrar el cabezal cómodo.
+const TL_PAD = 16;
+
 // Presets de subtítulos/texto, agrupados por tipo. group: viral (animados/llamativos) | sobrio (limpios) | marca.
 const PRESET_GROUPS: { id: 'viral' | 'sobrio' | 'marca'; label: string }[] = [
   { id: 'viral', label: 'Virales' },
@@ -632,7 +635,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     const el = timelineRef.current; if (!el) return;
     const rect = el.getBoundingClientRect();
     const x = (e as any).clientX - rect.left + el.scrollLeft;
-    const t = Math.max(0, Math.min(totalDur || 0, x / pxPerSec));
+    const t = Math.max(0, Math.min(totalDur || 0, (x - TL_PAD) / pxPerSec));
     setCurrentTime(t);
   };
 
@@ -1085,7 +1088,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             {selected && selected.type === 'text' && ((selected as TextElement).name === 'Sticker' ? (
               <StickerProps el={selected as TextElement} onStyle={patchTextStyle} onTransform={patchTransform} />
             ) : (
-              <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} onSyncAll={syncTextStyle} />
+              <TextProps el={selected as TextElement} onText={(text) => patchSel({ text } as any)} onStyle={patchTextStyle} onTransform={patchTransform} onSyncAll={syncTextStyle} customFonts={profile?.customFonts} />
             ))}
             {selected && (selected.type === 'video' || selected.type === 'image') && (
               <VisualProps el={selected as VideoElement | ImageElement} isBase={findElement(project, selected.id)?.track.kind === 'video'} onTransform={patchTransform} onVolume={(v) => patchSel({ volume: v } as any)} onFit={(f) => patchSel({ fit: f } as any)} onAudioFade={(p) => patchSel(p as any)} onKenBurns={(v) => patchSel({ kenBurns: v } as any)} />
@@ -1149,12 +1152,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
         </div>
         <div ref={timelineRef} className="flex-1 overflow-auto relative"
           onPointerMove={onTimelinePointerMove} onPointerUp={onTimelinePointerUp} onPointerLeave={onTimelinePointerUp}>
-          <div style={{ width: Math.max(600, (totalDur + 4) * pxPerSec), minWidth: '100%' }} className="cursor-pointer"
+          <div style={{ width: Math.max(600, (totalDur + 4) * pxPerSec + TL_PAD), minWidth: '100%' }} className="cursor-pointer"
             onPointerDown={(e) => { if (playing) pause(); dragRef.current = { mode: 'playhead' }; scrubTo(e); }}>
             {/* Regla (clic/arrastre en cualquier lado mueve el cabezal) */}
             <div className="h-8 relative border-b border-white/10">
               {Array.from({ length: Math.ceil((totalDur + 4)) + 1 }).map((_, s) => (
-                <div key={s} className="absolute top-0 bottom-0 border-l border-white/10" style={{ left: s * pxPerSec }}>
+                <div key={s} className="absolute top-0 bottom-0 border-l border-white/10" style={{ left: s * pxPerSec + TL_PAD }}>
                   <span className="absolute top-1.5 left-1 text-[9px] text-white/40 tabular-nums">{s}s</span>
                 </div>
               ))}
@@ -1164,7 +1167,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <div key={track.id} className="h-14 relative border-b border-white/5">
                 <div className="absolute left-0 top-0 bottom-0 w-0 z-10" />
                 {track.elements.map(el => {
-                  const left = el.start * pxPerSec, width = Math.max(14, el.duration * pxPerSec);
+                  const left = el.start * pxPerSec + TL_PAD, width = Math.max(14, el.duration * pxPerSec);
                   const isSel = el.id === selectedId;
                   const bg = el.type === 'video' ? 'linear-gradient(160deg,#f6935a,#c8481f)'
                     : el.type === 'image' ? 'linear-gradient(160deg,#5c7cfa,#3b3b98)'
@@ -1192,7 +1195,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </div>
             ))}
             {/* Cabezal (playhead) con manija */}
-            <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{ left: currentTime * pxPerSec }}>
+            <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{ left: currentTime * pxPerSec + TL_PAD }}>
               <div className="absolute top-0 bottom-0" style={{ left: -1, width: 2, background: BRAND }} />
               <div className="absolute -top-0.5" style={{ left: -7, width: 0, height: 0, borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderTop: `9px solid ${BRAND}` }} />
             </div>
@@ -1233,7 +1236,7 @@ const Slider: React.FC<{ min: number; max: number; step?: number; value: number;
   <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-[color:var(--b)]" style={{ ['--b' as any]: BRAND }} />
 );
 
-const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void; onSyncAll: () => void }> = ({ el, onText, onStyle, onTransform, onSyncAll }) => (
+const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyle: (s: Partial<TextElement['style']>) => void; onTransform: (t: Partial<TextElement['transform']>) => void; onSyncAll: () => void; customFonts?: CustomFont[] }> = ({ el, onText, onStyle, onTransform, onSyncAll, customFonts }) => (
   <div className="space-y-4">
     <Row label="Texto"><textarea value={el.text} onChange={(e) => onText(e.target.value)} rows={2} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white resize-none outline-none focus:border-white/30" /></Row>
     <Row label="Estilo (preset)">
@@ -1252,7 +1255,8 @@ const TextProps: React.FC<{ el: TextElement; onText: (t: string) => void; onStyl
     </Row>
     <Row label="Tipografía">
       <select value={el.style.font} onChange={(e) => onStyle({ font: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
-        {FONTS.map(f => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+        <optgroup label="Sistema">{FONTS.map(f => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}</optgroup>
+        {customFonts && customFonts.length > 0 && <optgroup label="Mis Tipografías">{customFonts.map(f => <option key={f.family} value={f.family} style={{ fontFamily: f.family }}>{f.name}</option>)}</optgroup>}
       </select>
     </Row>
     <Row label="Formato">
