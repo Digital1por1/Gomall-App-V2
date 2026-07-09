@@ -544,10 +544,14 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     if (!selectedId) return;
     commit(updateElement(project, selectedId, { transition: kind, transitionDur: kind === 'none' ? 0 : 0.5 } as any));
   };
-  // Aplica el mismo efecto de entrada a TODOS los textos.
-  const applyAnimAllTexts = (kind: TransitionKind) => {
+  // Copia la animación del elemento seleccionado (entrada + énfasis) a TODOS los textos.
+  const applyAnimAllTexts = () => {
+    if (!selectedId) return;
+    const src = findElement(project, selectedId)?.el as any;
+    if (!src) return;
+    const patch = { transition: src.transition || 'none', transitionDur: src.transitionDur || 0, emphasis: src.emphasis || 'none' };
     let p = project;
-    for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text') p = updateElement(p, el.id, { transition: kind, transitionDur: kind === 'none' ? 0 : 0.5 } as any);
+    for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text') p = updateElement(p, el.id, patch as any);
     commit(p);
   };
   // Aplica un efecto de ÉNFASIS (continuo) al elemento seleccionado.
@@ -721,7 +725,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const { blob, ext } = await buildExportBlob();
       const url = URL.createObjectURL(blob);
       setExportedUrl(url);
-      const a = document.createElement('a'); a.href = url; a.download = `reel-gomall.${ext}`; a.click();
+      const safeName = (project.name || '').trim().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-') || 'reel-gomall';
+      const a = document.createElement('a'); a.href = url; a.download = `${safeName}.${ext}`; a.click();
     } catch (e: any) {
       console.error('[export v2]', e);
       alert('No se pudo exportar: ' + (e?.message || 'error'));
@@ -1015,8 +1020,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   <label className="flex items-center gap-2 text-xs text-white/70 pt-1"><input type="checkbox" checked={!!(selected as any).kenBurns} onChange={(e) => patchSel({ kenBurns: e.target.checked } as any)} /> Zoom lento en la imagen (Ken Burns)</label>
                 )}
                 {selected && selected.type === 'text' && (
-                  <button onClick={() => applyAnimAllTexts(((selected as any).transition as TransitionKind) || 'fade')} className="w-full py-2.5 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
-                    <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar la entrada a TODOS los textos
+                  <button onClick={applyAnimAllTexts} className="w-full py-2.5 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                    <i className="fa-solid fa-wand-sparkles mr-2" />Aplicar estos efectos a TODOS los textos
                   </button>
                 )}
               </div>
