@@ -18,7 +18,6 @@ import { transcribe } from './reel/whisper';
 import { computePeaks, detectBeats, silenceBounds } from './reel/analyze';
 import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
 
-const V2_KEY = 'reel_v2';
 
 const BRAND = '#EA5B25';
 const STICKERS = [
@@ -66,6 +65,7 @@ interface Props {
   initialProject?: ReelProject | null; // proyecto pre-armado (ej: "Animar" un diseño de campaña)
   onSaveCloud?: (a: { blob: Blob; thumbBlob: Blob | null; name: string; ext: string }) => Promise<{ url: string } | void>;
   campaignName?: string | null;
+  userId?: string | null; // para que el reel guardado localmente sea POR usuario (no se mezcle entre cuentas)
 }
 
 // Mide la duración de un archivo de media.
@@ -92,8 +92,10 @@ type DragState =
   | { mode: 'playhead'; }
   | null;
 
-const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialProject, onSaveCloud, campaignName }) => {
+const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialProject, onSaveCloud, campaignName, userId }) => {
   const kit = profile?.brandKits?.[0];
+  // Clave de guardado local POR usuario: evita que el reel de una cuenta aparezca en otra en el mismo navegador.
+  const V2_KEY = userId ? `reel_v2_${userId}` : 'reel_v2';
   const [project, setProject] = useState<ReelProject>(() => initialProject || createProject('9:16'));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -1020,7 +1022,15 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </div>
             )}
             {tab === 'ajustes' && (<>
-              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Reel ({project.aspect})</b></div>
+              <label className="text-[11px] text-white/50 font-semibold block mb-1.5"><i className="fa-solid fa-mobile-screen mr-1" /> Formato del reel</label>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                {([['9:16', 'Reel / Story'], ['4:5', 'Feed'], ['1:1', 'Cuadrado']] as [AspectId, string][]).map(([a, lbl]) => (
+                  <button key={a} onClick={() => commit({ ...project, aspect: a })} className="py-2 rounded-lg text-xs font-semibold border flex flex-col items-center gap-0.5"
+                    style={project.aspect === a ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>
+                    <span className="font-bold">{a}</span><span className="text-[9px] opacity-70">{lbl}</span>
+                  </button>
+                ))}
+              </div>
 
               <div className="pt-4 mt-2 border-t border-white/5 space-y-3">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>

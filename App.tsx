@@ -402,6 +402,7 @@ const App: React.FC = () => {
         setProfile(null);
         setProfileLoading(false);
         setSavedProjects([]);
+        setState(DEFAULT_STATE); // limpia el diseño en cualquier cierre de sesión (no bleedea a la próxima cuenta)
       }
       setAuthLoading(false);
     });
@@ -1318,6 +1319,7 @@ const App: React.FC = () => {
             initialProject={reelInitialProject}
             onSaveCloud={saveReelToCloud}
             campaignName={returnCampaignId ? (campaignDraft?.name || null) : null}
+            userId={user?.uid || null}
           />
         ) : (
           <ReelStudio
