@@ -840,7 +840,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   ];
 
   return (
-    <div className="fixed inset-0 z-[95] bg-[#313137] text-[#f3eeec] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
+    <div className="fixed inset-0 z-[200] bg-[#313137] text-[#f3eeec] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Top bar */}
       <header className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 h-14 border-b border-white/10 bg-[#3b3b42]">
         <div className="w-8 h-8 rounded-lg grid place-items-center text-white font-black shrink-0" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>G</div>
