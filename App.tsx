@@ -211,13 +211,15 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
       transition: TA.transition, transitionDur: TA.transitionDur, fadeIn: TA.fadeIn,
       transform: { x: pos.x, y: pos.y, scale: 100, rotation: 0, opacity: 100 },
       style: {
+        // Respetar el diseño: peso real (no forzar 800/600, que sintetiza faux-bold en fuentes propias)
+        // y SIN contorno (el diseño no tiene stroke; agregarlo engrosaba el texto).
         font: layer.font || 'Inter',
         color: layer.color || '#FFFFFF',
         size: Math.max(3, Math.round(layer.size * SIZE_FACTOR * 10) / 10),
-        weight: layer.bold ? 800 : 600,
+        weight: layer.bold ? 700 : 400,
         italic: !!layer.italic,
         bg,
-        stroke: !bg,
+        stroke: false,
         align: layer.align || 'center',
         anim: 'none',
         karaoke: false,
