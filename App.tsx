@@ -1326,6 +1326,7 @@ const App: React.FC = () => {
             profile={profile}
             onClose={() => setShowReels(false)}
             initialCopy={reelCopy}
+            userId={user?.uid || null}
           />
         )
       )}

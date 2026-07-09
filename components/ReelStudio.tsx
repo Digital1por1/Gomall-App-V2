@@ -6,7 +6,7 @@ import {
 } from 'mediabunny';
 import { UserProfile } from '../types';
 import { recordUsage } from './usageTracker';
-import { putMedia, getMedia, putProject, getProject, clearProject, pruneMedia, newMediaId } from './reelStorage';
+import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, pruneMedia, newMediaId } from './reelStorage';
 
 // Estilos de subtítulo predeterminados (incluye look CapCut)
 interface SubStyle { label: string; y: number; size: number; weight: number; box: boolean; outline: number; outlineColor: string; shadow: boolean; upper: boolean; def: string; }
@@ -126,6 +126,7 @@ interface ReelStudioProps {
   onClose: () => void;
   initialPrompt?: string | null;
   initialCopy?: string | null;
+  userId?: string | null; // guardado local POR usuario (evita bleed entre cuentas)
 }
 
 interface Subtitle {
@@ -156,7 +157,9 @@ const fmt = (s: number) => {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 };
 
-const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }) => {
+const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy, userId }) => {
+  // Clave de guardado local POR usuario (no se mezcla entre cuentas en el mismo navegador).
+  const V1_KEY = userId ? `reel_v1_${userId}` : 'reel_v1';
   const kit = profile?.brandKits?.[0];
 
   const [clips, setClips] = useState<Clip[]>([]);
@@ -1567,7 +1570,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   };
   const persistNow = async () => {
     const snap = captureState();
-    if (!snap.clips.length) { try { await clearProject(); await pruneMedia(new Set()); } catch {} setSaveState('idle'); return; }
+    if (!snap.clips.length) { try { await clearProjectAt(V1_KEY); await pruneMedia(new Set()); } catch {} setSaveState('idle'); return; }
     try {
       const clipIds: (string | null)[] = [];
       for (const c of snap.clips) clipIds.push(await persistUrl(c.url));
@@ -1585,7 +1588,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
         transition: snap.transition, transDur: snap.transDur,
         reelDur: snap.reelDur, trimDead: snap.trimDead, beatSync: snap.beatSync, beats: snap.beats,
       };
-      await putProject(project);
+      await putProjectAt(V1_KEY, project);
       const keep = new Set<string>();
       clipIds.forEach(id => { if (id) keep.add(id); });
       if (musicId) keep.add(musicId);
@@ -1612,7 +1615,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   useEffect(() => {
     (async () => {
       try {
-        const p: any = await getProject();
+        const p: any = await getProjectAt(V1_KEY);
         if (p && Array.isArray(p.clips) && p.clips.length) {
           const urlFor = async (mediaId: string | null | undefined): Promise<string | null> => {
             if (!mediaId) return null;
@@ -1662,7 +1665,7 @@ const ReelStudio: React.FC<ReelStudioProps> = ({ profile, onClose, initialCopy }
   // Empieza un reel nuevo (borra el guardado local).
   const newReel = async () => {
     if (clips.length && !confirm('¿Empezar un reel nuevo? Se borrará el reel guardado actual.')) return;
-    try { await clearProject(); await pruneMedia(new Set()); } catch {}
+    try { await clearProjectAt(V1_KEY); await pruneMedia(new Set()); } catch {}
     mediaIdRef.current.clear();
     applyState({
       clips: [], activeIdx: 0, videoVolume: 1, musicUrl: null, musicName: '', musicVolume: 0.8,
