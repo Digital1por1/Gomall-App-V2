@@ -1077,7 +1077,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             </button>
             <div className="flex-1" />
             {isMobile && selected && <button onClick={() => setMobileSheet('props')} className="h-8 px-3 rounded-lg bg-white/10 text-white/80 text-[11px] font-bold"><i className="fa-solid fa-sliders mr-1" />Editar</button>}
-            <span className="text-[11px] font-bold px-2 py-1 rounded border" style={{ color: BRAND, borderColor: BRAND }}>{project.aspect}</span>
+            <div className="flex items-center gap-1">
+              {(['9:16', '4:5', '1:1'] as AspectId[]).map(a => (
+                <button key={a} onClick={() => commit({ ...project, aspect: a })} title={`Formato ${a}`}
+                  className="text-[11px] font-bold px-2 py-1 rounded border transition-colors"
+                  style={project.aspect === a ? { color: '#fff', background: BRAND, borderColor: BRAND } : { color: 'rgba(255,255,255,.5)', borderColor: 'rgba(255,255,255,.15)' }}>{a}</button>
+              ))}
+            </div>
           </div>
         </section>
 
