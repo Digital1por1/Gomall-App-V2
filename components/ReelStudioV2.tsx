@@ -810,7 +810,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             }
             tracks.push({ ...track, elements: els });
           }
-          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks, aspect: '9:16' }); setSaveState('saved'); }
+          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks, aspect: saved.aspect || '9:16' }); setSaveState('saved'); }
         }
       } catch (e) { console.warn('[reel v2] no se pudo restaurar', e); }
       finally { hydratedRef.current = true; }
@@ -1020,7 +1020,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </div>
             )}
             {tab === 'ajustes' && (<>
-              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Reel (9:16)</b></div>
+              <div className="flex items-center gap-2 text-xs text-white/50 mb-2"><i className="fa-solid fa-mobile-screen" /> Formato: <b className="text-white">Reel ({project.aspect})</b></div>
 
               <div className="pt-4 mt-2 border-t border-white/5 space-y-3">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>

@@ -9,7 +9,7 @@ import BrandOnboarding from './components/BrandOnboarding';
 import CampaignStudio from './components/CampaignStudio';
 import ReelStudio from './components/ReelStudio';
 import ReelStudioV2 from './components/ReelStudioV2';
-import { ReelProject, TransitionKind, createProject as createReelProject, addElement as addReelElement, addOverlayElement as addReelOverlay, makeImageElement as makeReelImage, makeTextElement as makeReelText } from './components/reel/model';
+import { ReelProject, createProject as createReelProject, addElement as addReelElement, addOverlayElement as addReelOverlay, makeImageElement as makeReelImage, makeTextElement as makeReelText } from './components/reel/model';
 // Editor de reels V2 (multi-track) por defecto. Salida de emergencia al editor anterior: ?editor=legacy
 const USE_REELS_V2 = typeof window === 'undefined' ? true : new URLSearchParams(window.location.search).get('editor') !== 'legacy';
 import BrandSettings from './components/BrandSettings';
@@ -153,33 +153,29 @@ const DEFAULT_STATE: ProjectState = {
 // Convierte un diseño (fondo IA + capas de texto) en un ReelProject 9:16 para "Animar": el fondo va como clip
 // y cada texto como capa editable/animable. Usa las posiciones de STORY (9:16) que ya son x/y en % del centro
 // (misma convención que el reel). El tamaño se calibra de px-display a % de altura del reel.
-type AnimStyle = 'suave' | 'dinamico' | 'viral' | 'none';
-function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinamico'): ReelProject | null {
+// Convierte un diseño en un ReelProject para "Animar", según el layout: story → 9:16, feed → 4:5.
+// Usa las posiciones (feed/story) y el tamaño calibrado a cada formato. Sin efectos: se animan en el editor.
+function buildReelFromDesign(state: ProjectState, layout: 'feed' | 'story' = 'story'): ReelProject | null {
   const bgUrl = state.imageVariants?.[state.selectedVariantIndex]?.url;
   const layers = state.textLayers;
   const keys: ('headline' | 'description' | 'additional' | 'cta')[] = ['headline', 'description', 'additional', 'cta'];
   const hasText = keys.some(k => layers?.[k]?.content?.trim());
   if (!bgUrl && !hasText) return null;
 
-  const SIZE_FACTOR = 0.158; // t.size (px al display 9:16, con ×0.9) → % de la altura del reel (calibrado a ~320px de ancho)
-  // Efecto de ENTRADA de cada texto (como bloque, no subtítulo palabra por palabra).
-  const TA = {
-    suave:    { transition: 'fade'    as TransitionKind, transitionDur: 0.6,  fadeIn: 0.5 },
-    dinamico: { transition: 'slideup' as TransitionKind, transitionDur: 0.5,  fadeIn: 0 },
-    viral:    { transition: 'zoom'    as TransitionKind, transitionDur: 0.45, fadeIn: 0 },
-    none:     { transition: 'none'    as TransitionKind, transitionDur: 0,    fadeIn: 0 },
-  }[animStyle];
-  const mediaFade = animStyle === 'none' ? 0 : 0.4;
-  const bgKen = animStyle !== 'none'; // movimiento (zoom lento) en la imagen de fondo
+  const isStory = layout === 'story';
+  const aspect = isStory ? '9:16' : '4:5';
+  // t.size (px al display) → % de la altura del reel. Calibrado por formato (story ×0.9 sobre 9:16 / feed sobre 4:5).
+  const SIZE_FACTOR = isStory ? 0.158 : 0.25;
+  const posOf = (o: { feedPosition?: { x: number; y: number }; storyPosition?: { x: number; y: number } }, fb: { x: number; y: number }) => (isStory ? o.storyPosition : o.feedPosition) || fb;
+  const bgScale = Math.max(50, Math.round(((isStory ? state.storyBackgroundConfig : state.feedBackgroundConfig)?.scale || 1) * 100));
 
-  let p = createReelProject('9:16');
+  let p = createReelProject(aspect);
 
   if (bgUrl) {
     const vtrack = p.tracks.find(t => t.kind === 'video')!;
-    const scale = Math.max(50, Math.round((state.storyBackgroundConfig?.scale || 1) * 100));
     p = addReelElement(p, vtrack.id, makeReelImage(bgUrl, {
-      name: 'Fondo', start: 0, duration: 5, kenBurns: bgKen,
-      transform: { x: 50, y: 50, scale, rotation: 0, opacity: 100 }, fit: 'cover',
+      name: 'Fondo', start: 0, duration: 5,
+      transform: { x: 50, y: 50, scale: bgScale, rotation: 0, opacity: 100 }, fit: 'cover',
     }));
   }
 
@@ -188,9 +184,9 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
   // Cada overlay va en su propia pista (addOverlayElement) para moverlo/animarlo por separado.
   // No duplicar: si el recurso es el mismo archivo que el logo, se omite (evita dos logos iguales).
   if (state.resource?.url && state.resource.url !== state.logo?.url) {
-    const rp = state.resource.storyPosition || { x: 50, y: 50 };
+    const rp = posOf(state.resource, { x: 50, y: 50 });
     p = addReelOverlay(p, makeReelImage(state.resource.url, {
-      name: 'Recurso', start: 0, duration: 5, fadeIn: mediaFade,
+      name: 'Recurso', start: 0, duration: 5,
       transform: { x: rp.x, y: rp.y, scale: Math.max(5, state.resource.size || 30), rotation: 0, opacity: opa(state.resource.opacity) },
     }));
   }
@@ -202,17 +198,15 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
     const dedupKey = layer.content.trim().toLowerCase();
     if (seenText.has(dedupKey)) continue; // no duplicar el mismo texto (ej: descripción repetida en otra capa)
     seenText.add(dedupKey);
-    const pos = layer.storyPosition || { x: 50, y: 50 };
+    const pos = posOf(layer, { x: 50, y: 50 });
     const bg = k === 'cta'
       ? (state.showCtaBg ? (state.ctaBgColor || null) : null)
       : (layer.backgroundColor && layer.backgroundColor !== 'transparent' ? layer.backgroundColor : null);
     p = addReelOverlay(p, makeReelText(layer.content, {
       name: 'Texto', start: 0, duration: 5,
-      transition: TA.transition, transitionDur: TA.transitionDur, fadeIn: TA.fadeIn,
       transform: { x: pos.x, y: pos.y, scale: 100, rotation: 0, opacity: 100 },
       style: {
-        // Respetar el diseño: peso real (no forzar 800/600, que sintetiza faux-bold en fuentes propias)
-        // y SIN contorno (el diseño no tiene stroke; agregarlo engrosaba el texto).
+        // Respetar el diseño: peso real (no forzar, que sintetiza faux-bold) y SIN contorno (el diseño no tiene).
         font: layer.font || 'Inter',
         color: layer.color || '#FFFFFF',
         size: Math.max(3, Math.round(layer.size * SIZE_FACTOR * 10) / 10),
@@ -230,9 +224,9 @@ function buildReelFromDesign(state: ProjectState, animStyle: AnimStyle = 'dinami
   }
 
   if (state.logo?.url) {
-    const lp = state.logo.storyPosition || { x: 82, y: 12 };
+    const lp = posOf(state.logo, { x: 82, y: 12 });
     p = addReelOverlay(p, makeReelImage(state.logo.url, {
-      name: 'Logo', start: 0, duration: 5, fadeIn: mediaFade,
+      name: 'Logo', start: 0, duration: 5,
       transform: { x: lp.x, y: lp.y, scale: Math.max(5, state.logo.size || 18), rotation: 0, opacity: opa(state.logo.opacity) },
     }));
   }
@@ -721,9 +715,9 @@ const App: React.FC = () => {
   };
 
   // "Animar": arma un reel desde el diseño actual (fondo + textos + logo, sin efectos) y abre el editor de reels.
-  // Las animaciones se eligen adentro del editor (pestaña "Animación").
-  const animateDesign = () => {
-    const proj = buildReelFromDesign(state, 'none');
+  // layout 'story' → reel 9:16 ; 'feed' → reel 4:5. Las animaciones se eligen en la pestaña "Animación".
+  const animateDesign = (layout: 'feed' | 'story') => {
+    const proj = buildReelFromDesign(state, layout);
     if (!proj) { alert('Generá una imagen o agregá algún texto antes de animar.'); return; }
     setReelInitialProject(proj);
     setReelCopy(null); setReelPieceId(null); setReturnCampaignId(null);
@@ -1544,6 +1538,7 @@ const App: React.FC = () => {
                 <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Feed (4:5)</span>
                 <div className="flex gap-2">
                   <button onClick={() => saveProject('feed-canvas')} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-200" title="Guardar Proyecto"><i className="fa-solid fa-floppy-disk"></i></button>
+                  <button onClick={() => animateDesign('feed')} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel 4:5 y animarlo"><i className="fa-solid fa-clapperboard"></i> Animar</button>
                   <button onClick={() => exportLayout('feed-canvas', 'feed.png')} className={`bg-[#EA5B25] text-white px-7 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 ${exportingId === 'feed-canvas' ? 'opacity-50 cursor-wait' : ''}`}>{exportingId === 'feed-canvas' ? 'Exportando...' : 'Exportar'}</button>
                 </div>
               </div>
@@ -1554,7 +1549,7 @@ const App: React.FC = () => {
                 <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">Story (9:16)</span>
                 <div className="flex gap-2">
                   <button onClick={() => saveProject('story-canvas')} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-200" title="Guardar Proyecto"><i className="fa-solid fa-floppy-disk"></i></button>
-                  <button onClick={animateDesign} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel y animarlo en el editor"><i className="fa-solid fa-clapperboard"></i> Animar</button>
+                  <button onClick={() => animateDesign('story')} className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 hover:bg-slate-800 flex items-center gap-1.5" title="Convertir el diseño en un reel 9:16 y animarlo"><i className="fa-solid fa-clapperboard"></i> Animar</button>
                   <button onClick={() => exportLayout('story-canvas', 'story.png')} className={`bg-[#EA5B25] text-white px-7 py-2.5 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 ${exportingId === 'story-canvas' ? 'opacity-50 cursor-wait' : ''}`}>{exportingId === 'story-canvas' ? 'Exportando...' : 'Exportar'}</button>
                 </div>
               </div>
