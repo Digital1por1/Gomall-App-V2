@@ -3,7 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { UserProfile } from '../types';
 import { MONTHLY_TOKEN_LIMIT } from '../App';
-import { PLANS, planForProfile } from './plans';
+import { PLANS, planForProfile, IMAGE_COST, tokensToImages } from './plans';
 
 interface AdminDashboardProps {
   onClose: () => void;
@@ -515,7 +515,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                         {/* Consumo + Costo */}
                         <td className="px-4 py-3 min-w-[180px]">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-bold text-slate-700">{used.toLocaleString()} / {limit.toLocaleString()}</span>
+                            <span className="text-xs font-bold text-slate-700">{tokensToImages(used)} / {Math.round(limit / IMAGE_COST)} <span className="text-slate-400 font-medium">img</span></span>
                             <span className={`text-[10px] font-black ${percent >= 100 ? 'text-red-500' : percent >= 80 ? 'text-orange-500' : 'text-slate-400'}`}>
                               {percent}%
                             </span>
@@ -566,19 +566,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                         <td className="px-6 py-4 text-right">
                           {isEditingThis ? (
                             <div className="flex items-center justify-end gap-2">
-                              <input
-                                ref={editInputRef}
-                                type="number"
-                                value={editingLimit.value}
-                                onChange={e => setEditingLimit({ id: u.id, value: e.target.value })}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') handleUpdateLimit(u.id, Number(editingLimit.value));
-                                  if (e.key === 'Escape') setEditingLimit(null);
-                                }}
-                                className="w-28 bg-slate-50 border border-orange-300 rounded-lg px-3 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-orange-200 text-right"
-                              />
+                              <div className="relative">
+                                <input
+                                  ref={editInputRef}
+                                  type="number"
+                                  value={editingLimit.value}
+                                  onChange={e => setEditingLimit({ id: u.id, value: e.target.value })}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleUpdateLimit(u.id, Number(editingLimit.value) * IMAGE_COST);
+                                    if (e.key === 'Escape') setEditingLimit(null);
+                                  }}
+                                  className="w-28 bg-slate-50 border border-orange-300 rounded-lg pl-3 pr-9 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-orange-200 text-right"
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">img</span>
+                              </div>
                               <button
-                                onClick={() => handleUpdateLimit(u.id, Number(editingLimit.value))}
+                                onClick={() => handleUpdateLimit(u.id, Number(editingLimit.value) * IMAGE_COST)}
                                 className="w-8 h-8 rounded-lg bg-[#EA5B25] text-white flex items-center justify-center hover:bg-orange-600 transition-colors"
                                 title="Guardar"
                               >
@@ -595,9 +598,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                           ) : (
                             <div className="flex items-center justify-end gap-2">
                               <button
-                                onClick={() => setEditingLimit({ id: u.id, value: limit.toString() })}
+                                onClick={() => setEditingLimit({ id: u.id, value: Math.round(limit / IMAGE_COST).toString() })}
                                 className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition-colors flex items-center justify-center"
-                                title="Editar Límite"
+                                title="Editar límite (imágenes/mes)"
                               >
                                 <i className="fa-solid fa-pen-to-square text-xs"></i>
                               </button>

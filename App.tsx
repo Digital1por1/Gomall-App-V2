@@ -17,6 +17,7 @@ import CalendarStudio from './components/CalendarStudio';
 import ProductAdStudio from './components/ProductAdStudio';
 import Home from './components/Home';
 import Landing from './components/Landing';
+import { IMAGE_COST, DEFAULT_PLAN_ID, planById, tokensToImages } from './components/plans';
 import { persistImage, persistBlob } from './components/storage';
 import * as htmlToImage from 'html-to-image';
 import { CampaignPiece, Campaign } from './types';
@@ -63,7 +64,8 @@ if (typeof window !== 'undefined' && !(window as any).__apiAuthPatched) {
   };
 }
 
-export const MONTHLY_TOKEN_LIMIT = 500000; 
+// Límite por defecto (fallback) = plan Gratis. En tokens internos; el usuario lo ve en imágenes.
+export const MONTHLY_TOKEN_LIMIT = planById(DEFAULT_PLAN_ID)?.credits || 300000;
 
 /** 
  * CONSTANTES DE SEGURIDAD (SAFE ZONES) ACTUALIZADAS
@@ -309,10 +311,13 @@ const App: React.FC = () => {
 
   const currentUserLimit = profile?.tokenLimit || MONTHLY_TOKEN_LIMIT;
 
-  const tokensPercent = profile?.usage?.tokensUsed 
-    ? Math.min(100, (profile.usage.tokensUsed / currentUserLimit) * 100) 
+  const tokensPercent = profile?.usage?.tokensUsed
+    ? Math.min(100, (profile.usage.tokensUsed / currentUserLimit) * 100)
     : 0;
-  
+  // Todo se muestra al usuario en IMÁGENES (el medidor interno sigue en tokens).
+  const imagesLimit = Math.round(currentUserLimit / IMAGE_COST);
+  const imagesUsed = Math.min(imagesLimit, tokensToImages(profile?.usage?.tokensUsed));
+
   const isBlocked = tokensPercent >= 100 || profile?.isBlocked === true;
 
   useEffect(() => {
@@ -589,7 +594,8 @@ const App: React.FC = () => {
       setIsSaving(true);
       try {
         const initialUsage = { tokensUsed: 0, lastReset: Date.now() };
-        const tokenLimit = isComercio ? 1000000 : 2000000;
+        // Todos arrancan en el plan Gratis (20 imágenes/mes). El admin sube a Comercio/Marca a mano desde el panel.
+        const tokenLimit = planById(DEFAULT_PLAN_ID)?.credits || MONTHLY_TOKEN_LIMIT;
 
         await db.collection('profiles').doc(user.uid).set({
           name: tempProfile.name,
@@ -598,6 +604,7 @@ const App: React.FC = () => {
           type: tempProfile.type,
           email: user.email,
           usage: initialUsage,
+          plan: DEFAULT_PLAN_ID,
           tokenLimit: tokenLimit,
           logoLibrary: [],
           resourceLibrary: [],
@@ -1349,13 +1356,13 @@ const App: React.FC = () => {
                  {profile?.isBlocked ? (
                    <>Cuenta<br/><span className="text-[#EA5B25]">Suspendida</span></>
                  ) : (
-                   <>Has alcanzado tu<br/><span className="text-[#EA5B25]">límite de tokens</span></>
+                   <>Has alcanzado tu<br/><span className="text-[#EA5B25]">límite de imágenes</span></>
                  )}
                </h2>
                <p className="text-slate-500 text-sm font-medium leading-relaxed px-10">
-                 {profile?.isBlocked 
+                 {profile?.isBlocked
                    ? "Tu cuenta ha sido suspendida administrativamente. Por favor, contacta con soporte para más información."
-                   : "Tu cuota mensual de generación con IA se ha completado. Podrás seguir creando contenido cuando se reinicie tu ciclo de tokens."}
+                   : "Usaste todas las imágenes IA de tu plan este mes. Tu cuota se renueva al reiniciar el ciclo, o podés pasar a un plan con más imágenes."}
                </p>
             </div>
             {!profile?.isBlocked && (
@@ -1409,7 +1416,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 truncate max-w-[120px] sm:max-w-[180px]">{user?.email && ADMIN_EMAILS.includes(user.email) ? 'GOMALL STUDIO' : (profile?.industry || 'GOMALL STUDIO')}</span>
               <span className="text-slate-200 text-[8px] hidden sm:inline">•</span>
-              <span className="text-[8px] sm:text-[9px] font-black text-[#EA5B25] uppercase tracking-tight whitespace-nowrap">{Math.round(tokensPercent)}% USADO</span>
+              <span className="text-[8px] sm:text-[9px] font-black text-[#EA5B25] uppercase tracking-tight whitespace-nowrap">{imagesUsed}/{imagesLimit} IMÁGENES</span>
               <span className="text-[8px] sm:text-[9px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap hidden md:flex items-center gap-1">· Renueva <span className="text-slate-600">{formatResetTime()}</span></span>
             </div>
           </div>
