@@ -11,7 +11,8 @@ service cloud.firestore {
     function billingUnchanged() {
       return request.resource.data.plan == resource.data.plan
           && request.resource.data.tokenLimit == resource.data.tokenLimit
-          && request.resource.data.usage == resource.data.usage;
+          && request.resource.data.usage == resource.data.usage
+          && request.resource.data.get('isBlocked', false) == resource.data.get('isBlocked', false);
     }
 
     // Perfiles: el dueño lee/crea/actualiza el suyo, PERO no puede tocar plan/tokenLimit. Admin, todo.
