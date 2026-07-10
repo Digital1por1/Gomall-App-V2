@@ -5,11 +5,13 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null && request.auth.token.email in ['digital@1por1.com.ar'];
     }
-    // El cliente NO puede cambiar su plan ni su límite de tokens (eso solo lo hace el admin o el
-    // servidor con el Admin SDK, que ignora estas reglas). Evita el auto-upgrade a un plan pago.
+    // El cliente NO puede cambiar su plan, su límite NI su consumo (usage). Eso solo lo hace el admin
+    // o el servidor con el Admin SDK (que ignora estas reglas). Evita el auto-upgrade a un plan pago
+    // y que un usuario técnico resetee su propio consumo para generar de más.
     function billingUnchanged() {
       return request.resource.data.plan == resource.data.plan
-          && request.resource.data.tokenLimit == resource.data.tokenLimit;
+          && request.resource.data.tokenLimit == resource.data.tokenLimit
+          && request.resource.data.usage == resource.data.usage;
     }
 
     // Perfiles: el dueño lee/crea/actualiza el suyo, PERO no puede tocar plan/tokenLimit. Admin, todo.

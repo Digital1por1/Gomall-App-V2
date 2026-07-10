@@ -628,33 +628,10 @@ const App: React.FC = () => {
     }
   };
 
-  const updateUsage = async (tokens: number) => {
-    if (!user || !profile) return;
-    
-    try {
-      const currentTokens = profile.usage?.tokensUsed || 0;
-      const newTotal = currentTokens + tokens;
-      const currentLimit = profile.tokenLimit || MONTHLY_TOKEN_LIMIT;
-      
-      if (newTotal >= currentLimit && currentTokens < currentLimit) {
-        await db.collection('alerts').add({
-          type: 'LIMIT_REACHED',
-          userId: user.uid,
-          business: profile.business,
-          mall: profile.mall,
-          email: user.email,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-
-      await db.collection('profiles').doc(user.uid).update({
-        'usage.tokensUsed': newTotal,
-        'usage.lastUsed': Date.now()
-      });
-    } catch (e) {
-      console.error("Error updating usage:", e);
-    }
-  };
+  // El consumo lo cobra y lo escribe EL SERVIDOR (fuente de verdad, vía Admin SDK) en cada generación.
+  // El cliente ya no lo escribe —las reglas lo bloquean para que nadie pueda resetear su propio consumo—.
+  // La barra de "imágenes usadas" se actualiza sola porque el perfil se lee con onSnapshot (tiempo real).
+  const updateUsage = async (_tokens: number) => { /* no-op: el servidor es la fuente de verdad */ };
 
   const updateState = useCallback((updates: Partial<ProjectState>) => {
     if (isBlocked) return;
