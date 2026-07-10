@@ -131,6 +131,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [autoBeat, setAutoBeat] = useState(false);
   const [autoZoomBusy, setAutoZoomBusy] = useState(false);
   const [autoZoomSrc, setAutoZoomSrc] = useState<'' | 'voz' | 'música' | 'fijo'>('');
+  const [beatMarks, setBeatMarks] = useState<number[]>([]); // beats (s, timeline) marcados en la línea de tiempo
+  const [beatsBusy, setBeatsBusy] = useState(false);
   const [autoTrim, setAutoTrim] = useState(false);
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
@@ -685,6 +687,21 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     };
     previewRafRef.current = requestAnimationFrame(loop);
   };
+  // Muestra/oculta los beats de la música como marcas en la línea de tiempo (guía para acomodar clips a mano).
+  const toggleBeatMarks = async () => {
+    if (beatMarks.length) { setBeatMarks([]); return; }
+    const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
+    if (!music) { alert('Agregá música o un audio con ritmo para detectar los beats.'); return; }
+    setBeatsBusy(true);
+    try {
+      const raw = await detectBeats(music.url);
+      const marks = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0)));
+      if (!marks.length) alert('No se detectaron beats claros en el audio.');
+      setBeatMarks(marks);
+    } catch { alert('No se pudieron detectar los beats.'); }
+    finally { setBeatsBusy(false); }
+  };
+
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
     if (!selectedId) return;
@@ -716,7 +733,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const snapValue = (p: ReelProject, excludeId: string, raw: number, elDuration: number): number => {
     if (!snap) return Math.max(0, raw);
     const thr = 9 / pxPerSec;
-    const points = [0, currentTime];
+    const points = [0, currentTime, ...beatMarks]; // también imanta a los beats marcados
     for (const t of p.tracks) for (const el of t.elements) { if (el.id === excludeId) continue; points.push(el.start, el.start + el.duration); }
     let best = raw, bestD = thr;
     for (const pt of points) {
@@ -1383,6 +1400,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
           <div className="w-px h-5 bg-white/10 mx-1" />
           <button onClick={() => moveSelTrack(-1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Subir la pista del elemento seleccionado"><i className="fa-solid fa-arrow-up text-xs" /></button>
           <button onClick={() => moveSelTrack(1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Bajar la pista del elemento seleccionado"><i className="fa-solid fa-arrow-down text-xs" /></button>
+          <button onClick={toggleBeatMarks} disabled={beatsBusy} title="Mostrar los beats de la música en la línea de tiempo (los clips se pegan a ellos)"
+            className="h-8 px-2.5 grid place-items-center rounded-lg text-xs font-bold gap-1.5 flex items-center disabled:opacity-50"
+            style={beatMarks.length ? { background: '#22D3EE22', color: '#22D3EE' } : { color: 'rgba(255,255,255,.55)' }}>
+            {beatsBusy ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-wave-square" />}
+            <span className="hidden sm:inline">{beatMarks.length ? `${beatMarks.length} beats` : 'Beats'}</span>
+          </button>
           <div className="flex-1" />
           <span className="text-xs text-white/40 hidden sm:inline">Zoom</span>
           <input type="range" min={20} max={160} value={pxPerSec} onChange={(e) => setPxPerSec(Number(e.target.value))} className="w-16 sm:w-28 accent-[color:var(--b)]" style={{ ['--b' as any]: BRAND }} />
@@ -1429,6 +1452,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     </div>
                   );
                 })}
+              </div>
+            ))}
+            {/* Marcas de beats (guía para acomodar los clips al ritmo). No bloquean el arrastre. */}
+            {beatMarks.map((b, i) => (
+              <div key={`beat-${i}`} className="absolute top-8 bottom-0 z-[15] pointer-events-none" style={{ left: b * pxPerSec + TL_PAD, width: 1, background: 'rgba(34,211,238,.45)' }}>
+                <div className="absolute -top-2 -left-1 w-2 h-2 rounded-full" style={{ background: '#22D3EE' }} />
               </div>
             ))}
             {/* Cabezal (playhead) con manija */}
