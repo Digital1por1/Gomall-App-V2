@@ -133,6 +133,9 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
     }
   }
   const accent = s.accent || '#FFE600';
+  // Palabra clave (captions con IA): se resalta SIEMPRE en el color de acento. Normalizamos sin puntuación/acentos.
+  const normWord = (x: string) => x.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+  const hlNorm = s.hlWord ? normWord(s.hlWord) : '';
   let wordCounter = 0;
 
   const drawStroke = (text: string, x: number, yy: number, align: CanvasTextAlign) => {
@@ -185,6 +188,8 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
           if (mode === 'karaoke' || mode === 'pop') fill = (isPast || isActive) ? accent : s.color;
           else if (mode === 'highlight' && isActive) fill = accent;
           else if (mode === 'wordbox' && isActive) fill = '#111111';
+          // Palabra clave (captions con IA): siempre en color de acento (salvo cuando ya es la caja activa).
+          if (hlNorm && normWord(w) === hlNorm && !(mode === 'wordbox' && isActive)) fill = accent;
           ctx.fillStyle = fill;
           ctx.fillText(w, x, y);
           ctx.restore();

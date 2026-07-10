@@ -35,6 +35,7 @@ export interface TextStyle {
   accent?: string;         // color del resaltado
   glow?: boolean;          // resplandor (para estilo neón)
   upper?: boolean;         // MAYÚSCULAS (look tipo Submagic/Hormozi)
+  hlWord?: string;         // palabra clave que va SIEMPRE resaltada (captions con IA, fase 2)
 }
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   font: 'Inter', color: '#FFFFFF', size: 7, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: '#FFE600',

@@ -126,6 +126,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   }, []);
   const [transcribing, setTranscribing] = useState(false);
   const [subMsg, setSubMsg] = useState('');
+  const [aiCaptions, setAiCaptions] = useState(true); // captions con IA: emojis + palabra clave destacada
   const [autoTarget, setAutoTarget] = useState<'auto' | 15 | 30 | 60>('auto');
   const [autoBeat, setAutoBeat] = useState(false);
   const [autoTrim, setAutoTrim] = useState(false);
@@ -508,13 +509,28 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     if (!srcUrl) { alert('Agregá una voz en off, un audio o un video con voz para generar subtítulos.'); return; }
     setTranscribing(true); setSubMsg('');
     try {
-      const segs = await transcribe(srcUrl, setSubMsg);
+      let segs: { text: string; start: number; end: number; hlWord?: string }[] = await transcribe(srcUrl, setSubMsg);
       if (!segs.length) { alert('No se detectó voz en el audio.'); return; }
-      const mkSub = (s: { text: string; start: number; end: number }) => makeTextElement(s.text, {
+      // Captions con IA (fase 1: emoji · fase 2: palabra clave destacada). Si falla, seguimos sin enriquecer.
+      if (aiCaptions) {
+        setSubMsg('Agregando emojis y destaques…');
+        try {
+          const res = await fetch('/api/enrich-captions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: segs.map(s => s.text) }) });
+          const data = await res.json().catch(() => null);
+          const items: any[] = Array.isArray(data?.items) ? data.items : [];
+          segs = segs.map((s, i) => {
+            const it = items[i] || {};
+            const emoji = String(it.emoji || '').trim();
+            const keyword = String(it.keyword || '').trim();
+            return { ...s, text: emoji ? `${s.text} ${emoji}` : s.text, hlWord: keyword || undefined };
+          });
+        } catch (e) { console.warn('[captions IA] no se pudo enriquecer, sigo sin emojis', e); }
+      }
+      const mkSub = (s: { text: string; start: number; end: number; hlWord?: string }) => makeTextElement(s.text, {
         start: s.start, duration: Math.max(0.4, s.end - s.start),
         name: 'Subtítulo',
         transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
-        style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600' },
+        style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600', ...(s.hlWord ? { hlWord: s.hlWord } : {}) },
       });
       let p = project;
       // Los subtítulos van a una pista de overlay DEDICADA (una vacía, o una nueva) para no pisar logo/textos.
@@ -987,6 +1003,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
                 {transcribing ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{subMsg || 'Transcribiendo…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Subtítulos automáticos (IA)</>}
               </button>
+              <label className="flex items-center gap-2 text-[11px] text-white/70 px-1 cursor-pointer">
+                <input type="checkbox" checked={aiCaptions} onChange={(e) => setAiCaptions(e.target.checked)} />
+                <span><i className="fa-solid fa-icons mr-1" style={{ color: BRAND }} />Captions con IA — agrega <b className="text-white">emojis</b> y destaca la <b className="text-white">palabra clave</b></span>
+              </label>
               <p className="text-[11px] text-white/40 leading-relaxed">"Agregar texto" crea un texto en el cabezal. "Subtítulos automáticos" transcribe la voz del audio/video y crea un texto por frase (la 1ª vez baja el modelo).</p>
             </>)}
             {tab === 'marca' && (

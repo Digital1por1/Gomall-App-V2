@@ -507,6 +507,49 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
     }
   });
 
+  // Captions con IA: por cada línea de subtítulo devuelve un emoji relevante y la palabra clave a resaltar.
+  app.post("/api/enrich-captions", async (req, res) => {
+    try {
+      const g = await guard(req, res); if (!g.ok) return; // texto: no descuenta cuota (solo verifica identidad)
+      const lines: string[] = Array.isArray(req.body?.lines) ? req.body.lines.map((l: any) => String(l || '')) : [];
+      if (!lines.length) return res.status(400).json({ error: "Faltan las líneas de subtítulo." });
+      const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text:
+`Sos editor de captions para reels tipo Submagic. Para CADA línea de subtítulo, devolvé:
+- "emoji": UN (1) emoji que refuerce la idea de esa línea, o "" si ninguno encaja bien. No fuerces: usá emoji solo cuando suma (más o menos en 1 de cada 2 líneas).
+- "keyword": la palabra MÁS importante de esa línea para resaltar (una sola palabra, tal cual aparece en la línea), o "" si ninguna se destaca.
+Devolvé "items" con EXACTAMENTE ${lines.length} objetos, en el MISMO orden que las líneas. Solo JSON.
+
+Líneas:
+${numbered}` }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              items: {
+                type: Type.ARRAY,
+                items: { type: Type.OBJECT, properties: { emoji: { type: Type.STRING }, keyword: { type: Type.STRING } }, required: ["emoji", "keyword"] },
+              },
+            },
+            required: ["items"],
+          },
+        },
+      });
+      let text = "";
+      if (typeof response?.text === "string") text = response.text;
+      else text = (response?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      let items: any[] = [];
+      try { items = (JSON.parse(text)?.items) || []; } catch { items = []; }
+      res.json({ items, usage: extractUsage(response) });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error al enriquecer los subtítulos" });
+    }
+  });
+
   // Eliminar una cuenta POR COMPLETO (solo admin). Borra Auth + perfil + subcolecciones + Storage.
   app.post("/api/admin/delete-user", async (req, res) => {
     try {
