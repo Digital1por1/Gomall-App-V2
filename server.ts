@@ -470,7 +470,13 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
       });
       const parts = response?.candidates?.[0]?.content?.parts || [];
       const inline = parts.find((p: any) => p?.inlineData?.data)?.inlineData;
-      if (!inline?.data) return res.status(502).json({ error: "Gemini no devolvió audio. Verificá que el modelo TTS esté habilitado para tu clave." });
+      if (!inline?.data) {
+        const cand: any = response?.candidates?.[0];
+        const reason = cand?.finishReason || (response as any)?.promptFeedback?.blockReason || "sin audio";
+        const textOut = (parts.find((p: any) => p?.text)?.text) || "";
+        console.error("[tts] sin audio · motivo:", reason, "· resp:", JSON.stringify(response).slice(0, 800));
+        return res.status(502).json({ error: `Gemini no devolvió audio (motivo: ${reason}).${textOut ? " Dijo: " + textOut.slice(0, 200) : " Puede que el modelo TTS no esté habilitado para tu clave/región."}` });
+      }
       const rateM = /rate=(\d+)/.exec(inline.mimeType || "");
       const rate = rateM ? Number(rateM[1]) : 24000;
       const wav = pcm16ToWav(Buffer.from(inline.data, "base64"), rate, 1);
