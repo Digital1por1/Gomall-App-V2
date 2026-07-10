@@ -13,6 +13,7 @@ interface SidebarProps {
   updateState: (updates: Partial<ProjectState>) => void;
   profile: UserProfile | null;
   updateUsage: (tokens: number) => Promise<void>;
+  guardImageQuota?: () => boolean;
   openSection: string | null;
   setOpenSection: (section: string | null) => void;
   selectedField: string | null;
@@ -69,7 +70,7 @@ const Accordion: React.FC<{
 };
 
 const SidebarModules: React.FC<SidebarProps> = ({
-  state, updateState, profile, updateUsage, openSection, setOpenSection,
+  state, updateState, profile, updateUsage, guardImageQuota, openSection, setOpenSection,
   selectedField, activeLayout = 'feed', onApplyTemplate,
   savedProjects = [], onLoadProject, onDeleteProject,
   githubToken, onGithubConnect, onGithubDisconnect,
@@ -214,6 +215,8 @@ const SidebarModules: React.FC<SidebarProps> = ({
       alert('Por favor, selecciona una imagen a mejorar o describe los cambios.');
       return;
     }
+    // Cuota de imágenes: solo aplica a generar/mejorar imágenes (el copy es ilimitado).
+    if ((genType === 'image' || genType === 'improve') && guardImageQuota && !guardImageQuota()) return;
 
     setGenStatus('generating');
     try {
@@ -317,7 +320,7 @@ const SidebarModules: React.FC<SidebarProps> = ({
           const cleanText = String(responseText).replace(/```json|```/g, '').trim();
           const copiesResult = JSON.parse(cleanText);
           if (Array.isArray(copiesResult) && copiesResult.length > 0) {
-            await updateUsage(2000);
+            // Copy ilimitado: no descuenta de la cuota de imágenes (solo registramos consumo real).
             recordUsage('copy', data.usage);
             const newCopies = [...state.copies, String(copiesResult[0])];
             updateState({ 

@@ -134,7 +134,7 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
         productImage: briefImages[0] || undefined,
       };
 
-      await updateUsage(4000);
+      // El plan de campaña es texto (ilimitado): no descuenta cuota. Las imágenes de cada pieza sí, al generarlas.
       recordUsage('campana', data.usage);
       setActiveCampaign(campaign);
       setIsSaved(false);

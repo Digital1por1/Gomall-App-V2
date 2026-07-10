@@ -6,6 +6,7 @@ interface ProductAdStudioProps {
   profile: UserProfile | null;
   onClose: () => void;
   updateUsage: (tokens: number) => Promise<void>;
+  guardImageQuota?: () => boolean;
   onUseImage: (imageUrl: string, prompt: string) => void;
   compressBase64Image: (base64Str: string, maxWidth?: number, quality?: number, preserveAlpha?: boolean) => Promise<string>;
 }
@@ -19,7 +20,7 @@ const STYLES = [
   { id: 'festivo', label: 'Festivo', prompt: 'ambientación festiva y celebratoria, props de temporada sutiles, iluminación cálida y alegre' },
 ];
 
-const ProductAdStudio: React.FC<ProductAdStudioProps> = ({ profile, onClose, updateUsage, onUseImage, compressBase64Image }) => {
+const ProductAdStudio: React.FC<ProductAdStudioProps> = ({ profile, onClose, updateUsage, guardImageQuota, onUseImage, compressBase64Image }) => {
   const [productImg, setProductImg] = useState<string | null>(null);
   const [style, setStyle] = useState('estudio');
   const [extra, setExtra] = useState('');
@@ -41,6 +42,7 @@ const ProductAdStudio: React.FC<ProductAdStudioProps> = ({ profile, onClose, upd
 
   const generate = async () => {
     if (!productImg) return;
+    if (guardImageQuota && !guardImageQuota()) return;
     setGenerating(true);
     setResult(null);
     try {

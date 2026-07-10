@@ -311,14 +311,21 @@ const App: React.FC = () => {
 
   const currentUserLimit = profile?.tokenLimit || MONTHLY_TOKEN_LIMIT;
 
-  const tokensPercent = profile?.usage?.tokensUsed
-    ? Math.min(100, (profile.usage.tokensUsed / currentUserLimit) * 100)
-    : 0;
   // Todo se muestra al usuario en IMÁGENES (el medidor interno sigue en tokens).
   const imagesLimit = Math.round(currentUserLimit / IMAGE_COST);
   const imagesUsed = Math.min(imagesLimit, tokensToImages(profile?.usage?.tokensUsed));
 
-  const isBlocked = tokensPercent >= 100 || profile?.isBlocked === true;
+  // Bloqueo TOTAL solo si el admin suspendió la cuenta. Agotar las imágenes NO bloquea la app:
+  // solo corta generar imágenes; reels, copys, campañas, voz y edición siguen disponibles.
+  const isBlocked = profile?.isBlocked === true;
+  const imageQuotaReached = !isBlocked && imagesLimit > 0 && imagesUsed >= imagesLimit;
+  const guardImageQuota = useCallback((): boolean => {
+    if (imageQuotaReached) {
+      alert(`Llegaste al límite de ${imagesLimit} imágenes IA de tu plan este mes.\n\nEl resto (reels, copys, campañas y voz en off) sigue disponible. Para generar más imágenes, esperá la renovación del ciclo o pasá a un plan con más imágenes.`);
+      return false;
+    }
+    return true;
+  }, [imageQuotaReached, imagesLimit]);
 
   useEffect(() => {
     if (!profile?.usage?.lastReset) return;
@@ -1313,6 +1320,7 @@ const App: React.FC = () => {
           profile={profile}
           onClose={() => setShowProductAd(false)}
           updateUsage={updateUsage}
+          guardImageQuota={guardImageQuota}
           onUseImage={handleProductAd}
           compressBase64Image={compressBase64Image}
         />
@@ -1352,27 +1360,9 @@ const App: React.FC = () => {
           <div className="max-w-lg w-full space-y-12">
             <div className="space-y-4">
                <div className="w-24 h-24 bg-orange-50 text-[#EA5B25] rounded-[40px] flex items-center justify-center mx-auto shadow-2xl shadow-orange-100 animate-bounce"><i className="fa-solid fa-triangle-exclamation text-4xl"></i></div>
-               <h2 className="text-3xl font-[900] text-slate-900 uppercase tracking-tight leading-tight">
-                 {profile?.isBlocked ? (
-                   <>Cuenta<br/><span className="text-[#EA5B25]">Suspendida</span></>
-                 ) : (
-                   <>Has alcanzado tu<br/><span className="text-[#EA5B25]">límite de imágenes</span></>
-                 )}
-               </h2>
-               <p className="text-slate-500 text-sm font-medium leading-relaxed px-10">
-                 {profile?.isBlocked
-                   ? "Tu cuenta ha sido suspendida administrativamente. Por favor, contacta con soporte para más información."
-                   : "Usaste todas las imágenes IA de tu plan este mes. Tu cuota se renueva al reiniciar el ciclo, o podés pasar a un plan con más imágenes."}
-               </p>
+               <h2 className="text-3xl font-[900] text-slate-900 uppercase tracking-tight leading-tight">Cuenta<br/><span className="text-[#EA5B25]">Suspendida</span></h2>
+               <p className="text-slate-500 text-sm font-medium leading-relaxed px-10">Tu cuenta ha sido suspendida administrativamente. Por favor, contacta con soporte para más información.</p>
             </div>
-            {!profile?.isBlocked && (
-              <div className="grid grid-cols-4 gap-3 md:gap-4">
-                <div className="bg-white border border-slate-100 rounded-[24px] p-4 shadow-sm"><span className="block text-2xl font-black text-slate-900 tabular-nums">{timeUntilReset.days}</span><span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Días</span></div>
-                <div className="bg-white border border-slate-100 rounded-[24px] p-4 shadow-sm"><span className="block text-2xl font-black text-slate-900 tabular-nums">{timeUntilReset.hours}</span><span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Horas</span></div>
-                <div className="bg-white border border-slate-100 rounded-[24px] p-4 shadow-sm"><span className="block text-2xl font-black text-slate-900 tabular-nums">{timeUntilReset.mins}</span><span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Mins</span></div>
-                <div className="bg-white border border-slate-100 rounded-[24px] p-4 shadow-sm"><span className="block text-2xl font-black text-slate-900 tabular-nums">{timeUntilReset.secs}</span><span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Segs</span></div>
-              </div>
-            )}
             <button onClick={handleLogout} className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] hover:text-[#EA5B25] transition-colors">Cerrar Sesión</button>
           </div>
         </div>
@@ -1442,9 +1432,10 @@ const App: React.FC = () => {
           <SidebarModules 
             state={state} 
             updateState={updateState} 
-            profile={profile} 
-            updateUsage={updateUsage} 
-            openSection={openSection} 
+            profile={profile}
+            updateUsage={updateUsage}
+            guardImageQuota={guardImageQuota}
+            openSection={openSection}
             setOpenSection={setOpenSection} 
             activeLayout={activeLayout}
             selectedField={selectedField}
