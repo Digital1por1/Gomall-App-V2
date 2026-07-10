@@ -245,17 +245,38 @@ function exitTransitionState(el: ReelElement, t: number): { type: string; p: num
   return { type, p: 1 - remaining / dur };
 }
 
-// Efecto continuo (énfasis) en t: multiplicador de escala, rotación (°) y desplazamiento vertical (px).
-function emphasisAt(el: ReelElement, t: number, H: number): { scale: number; rot: number; dy: number } {
+// Efecto continuo (énfasis) en t: escala, rotación (°), desplazamiento (px) y opacidad (0..1).
+function emphasisAt(el: ReelElement, t: number, H: number): { scale: number; rot: number; dy: number; dx: number; alpha: number } {
   const kind = (el as any).emphasis as string | undefined;
-  if (!kind || kind === 'none') return { scale: 1, rot: 0, dy: 0 };
+  const base = { scale: 1, rot: 0, dy: 0, dx: 0, alpha: 1 };
+  if (!kind || kind === 'none') return base;
   const local = Math.max(0, t - el.start);
   const TAU = Math.PI * 2;
-  if (kind === 'pulse') return { scale: 1 + 0.06 * Math.sin(local * TAU * 1.4), rot: 0, dy: 0 };
-  if (kind === 'breathe') return { scale: 1 + 0.035 * Math.sin(local * TAU * 0.5), rot: 0, dy: 0 };
-  if (kind === 'wiggle') return { scale: 1, rot: 3 * Math.sin(local * TAU * 1.8), dy: 0 };
-  if (kind === 'float') return { scale: 1, rot: 0, dy: 0.02 * H * Math.sin(local * TAU * 0.6) };
-  return { scale: 1, rot: 0, dy: 0 };
+  if (kind === 'pulse') return { ...base, scale: 1 + 0.06 * Math.sin(local * TAU * 1.4) };
+  if (kind === 'breathe') return { ...base, scale: 1 + 0.035 * Math.sin(local * TAU * 0.5) };
+  if (kind === 'wiggle') return { ...base, rot: 3 * Math.sin(local * TAU * 1.8) };
+  if (kind === 'float') return { ...base, dy: 0.02 * H * Math.sin(local * TAU * 0.6) };
+  // Sacudida horizontal rápida (bueno para CTA / llamados a la acción).
+  if (kind === 'shake') return { ...base, dx: 0.012 * H * Math.sin(local * TAU * 9), rot: 1.2 * Math.sin(local * TAU * 9) };
+  // "Tada": destaca con escala + rotación combinadas (estilo Canva/animate.css).
+  if (kind === 'tada') return { ...base, scale: 1 + 0.09 * Math.abs(Math.sin(local * TAU * 0.6)), rot: 3.5 * Math.sin(local * TAU * 1.2) };
+  // Parpadeo suave de opacidad.
+  if (kind === 'blink') return { ...base, alpha: 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(local * TAU * 1.4)) };
+  // Balanceo / péndulo (rotación amplia y lenta).
+  if (kind === 'swing') return { ...base, rot: 6 * Math.sin(local * TAU * 0.9) };
+  // Salto vertical (rebote hacia arriba con |sin|).
+  if (kind === 'jump') return { ...base, dy: -Math.abs(Math.sin(local * TAU * 0.9)) * 0.05 * H };
+  return base;
+}
+
+// Aceleraciones para las transiciones de entrada con "vida".
+function easeOutBack(x: number): number { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); }
+function easeOutBounce(x: number): number {
+  const n1 = 7.5625, d1 = 2.75;
+  if (x < 1 / d1) return n1 * x * x;
+  if (x < 2 / d1) { x -= 1.5 / d1; return n1 * x * x + 0.75; }
+  if (x < 2.5 / d1) { x -= 2.25 / d1; return n1 * x * x + 0.9375; }
+  x -= 2.625 / d1; return n1 * x * x + 0.984375;
 }
 
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
@@ -279,7 +300,7 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
     const tr = transitionState(el, t);
     const ex = exitTransitionState(el, t);
     // Efectos de las transiciones de entrada y salida.
-    let alpha = fa, extraScale = 1, slideX = 0, slideY = 0, whiteA = 0, blurPx = 0;
+    let alpha = fa, extraScale = 1, slideX = 0, slideY = 0, whiteA = 0, blurPx = 0, extraRot = 0, flipScaleX = 1;
     if (tr) {
       if (tr.type === 'fade') alpha *= (1 - tr.p);
       else if (tr.type === 'zoom') extraScale = 1 + 0.25 * tr.p;
@@ -288,26 +309,34 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
       else if (tr.type === 'slidedown') slideY = -tr.p * H;
       else if (tr.type === 'blur') blurPx = tr.p * 24;
       else if (tr.type === 'white') whiteA = tr.p;
+      // Nuevos: aparición con vida (usan p: 1→0 conforme entra; e = progreso 0→1).
+      else if (tr.type === 'pop') { const e = 1 - tr.p; extraScale = Math.max(0.01, easeOutBack(e)); alpha *= Math.min(1, e * 2); }
+      else if (tr.type === 'flip') { const e = 1 - tr.p; flipScaleX = Math.max(0.01, e); alpha *= Math.min(1, e * 1.6); }
+      else if (tr.type === 'spin') { extraRot = -200 * tr.p; extraScale = 1 - 0.5 * tr.p; alpha *= (1 - tr.p); }
+      else if (tr.type === 'bounce') { const e = 1 - tr.p; slideY = -(1 - easeOutBounce(e)) * 0.35 * H; }
     }
     if (ex) {
       if (ex.type === 'fade') alpha *= (1 - ex.p);
-      else if (ex.type === 'zoom') extraScale *= (1 + 0.25 * ex.p);
+      else if (ex.type === 'zoom' || ex.type === 'pop') extraScale *= (1 + 0.25 * ex.p);
       else if (ex.type === 'slide') slideX -= ex.p * W;
-      else if (ex.type === 'slideup') slideY -= ex.p * H;
+      else if (ex.type === 'slideup' || ex.type === 'bounce') slideY -= ex.p * H;
       else if (ex.type === 'slidedown') slideY += ex.p * H;
       else if (ex.type === 'blur') blurPx = Math.max(blurPx, ex.p * 24);
       else if (ex.type === 'white') whiteA = Math.max(whiteA, ex.p);
+      else if (ex.type === 'flip') flipScaleX = Math.min(flipScaleX, 1 - ex.p);
+      else if (ex.type === 'spin') { extraRot += 200 * ex.p; extraScale *= (1 - 0.5 * ex.p); }
     }
     const em = emphasisAt(el, t, H); // efecto continuo (pulso/vaivén/flotar…)
     if (el.type === 'text') {
       const te = el as TextElement;
       const cx = (te.transform.x / 100) * W, cy = (te.transform.y / 100) * H;
       const sc = extraScale * em.scale;
+      const rot = em.rot + extraRot;
       ctx.save();
-      if (slideX || slideY || em.dy) ctx.translate(slideX, slideY + em.dy);
+      if (slideX || slideY || em.dy || em.dx) ctx.translate(slideX + em.dx, slideY + em.dy);
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      if (sc !== 1 || em.rot) { ctx.translate(cx, cy); if (em.rot) ctx.rotate((em.rot * Math.PI) / 180); if (sc !== 1) ctx.scale(sc, sc); ctx.translate(-cx, -cy); }
-      drawTextEl(ctx, te, W, H, t, alpha);
+      if (sc !== 1 || rot || flipScaleX !== 1) { ctx.translate(cx, cy); if (rot) ctx.rotate((rot * Math.PI) / 180); if (sc !== 1 || flipScaleX !== 1) ctx.scale(sc * flipScaleX, sc); ctx.translate(-cx, -cy); }
+      drawTextEl(ctx, te, W, H, t, alpha * em.alpha);
       ctx.restore();
       continue;
     }
@@ -324,20 +353,23 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
         const localK = Math.max(0, Math.min(media.duration, t - media.start));
         kb = 1 + 0.12 * (media.duration > 0 ? localK / media.duration : 0);
       }
+      const rot = em.rot + extraRot;
       ctx.save();
-      if (slideX || slideY || em.dy) ctx.translate(slideX, slideY + em.dy);
+      if (slideX || slideY || em.dy || em.dx) ctx.translate(slideX + em.dx, slideY + em.dy);
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb * em.scale);
-      else drawCover(ctx, src, sw, sh, W, H, media.transform.opacity * alpha, media.transform.scale * extraScale * kb * em.scale);
+      if (rot || flipScaleX !== 1) { ctx.translate(W / 2, H / 2); if (rot) ctx.rotate((rot * Math.PI) / 180); if (flipScaleX !== 1) ctx.scale(flipScaleX, 1); ctx.translate(-W / 2, -H / 2); }
+      const baseOpacity = media.transform.opacity * alpha * em.alpha;
+      if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale);
+      else drawCover(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale);
       ctx.restore();
       if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {
       // Overlay (logo/recurso/imagen): también responde a transiciones de entrada/salida y al énfasis.
       ctx.save();
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
-      const ox = media.transform.x + (slideX / W) * 100;
+      const ox = media.transform.x + ((slideX + em.dx) / W) * 100;
       const oy = media.transform.y + ((slideY + em.dy) / H) * 100;
-      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, x: ox, y: oy, rotation: media.transform.rotation + em.rot, opacity: media.transform.opacity * alpha, scale: media.transform.scale * extraScale * em.scale });
+      drawOverlayMedia(ctx, src, sw, sh, W, H, { ...media.transform, x: ox, y: oy, rotation: media.transform.rotation + em.rot + extraRot, opacity: media.transform.opacity * alpha * em.alpha, scale: media.transform.scale * extraScale * em.scale * flipScaleX });
       ctx.restore();
     }
   }

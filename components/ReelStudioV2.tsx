@@ -982,6 +982,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       { id: 'zoom', label: 'Zoom', icon: 'fa-magnifying-glass-plus' },
                       { id: 'blur', label: 'Desenfoque', icon: 'fa-droplet' },
                       { id: 'white', label: 'Flash', icon: 'fa-bolt' },
+                      { id: 'pop', label: 'Estallido', icon: 'fa-burst' },
+                      { id: 'flip', label: 'Voltear', icon: 'fa-clone' },
+                      { id: 'spin', label: 'Girar', icon: 'fa-arrows-spin' },
+                      { id: 'bounce', label: 'Rebote', icon: 'fa-angles-down' },
                       { id: 'none', label: 'Ninguna', icon: 'fa-ban' },
                     ] as { id: TransitionKind; label: string; icon: string }[]).map(a => {
                       const active = !!selected && ((selected as any).transition || 'none') === a.id;
@@ -1003,6 +1007,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       { id: 'breathe', label: 'Latido', icon: 'fa-expand' },
                       { id: 'wiggle', label: 'Vaivén', icon: 'fa-arrows-left-right' },
                       { id: 'float', label: 'Flotar', icon: 'fa-arrows-up-down' },
+                      { id: 'shake', label: 'Sacudir', icon: 'fa-wave-square' },
+                      { id: 'tada', label: 'Tada', icon: 'fa-star' },
+                      { id: 'blink', label: 'Parpadeo', icon: 'fa-eye' },
+                      { id: 'swing', label: 'Balanceo', icon: 'fa-life-ring' },
+                      { id: 'jump', label: 'Saltar', icon: 'fa-angle-up' },
                       { id: 'none', label: 'Ninguno', icon: 'fa-ban' },
                     ] as { id: EmphasisKind; label: string; icon: string }[]).map(a => {
                       const active = !!selected && ((selected as any).emphasis || 'none') === a.id;
