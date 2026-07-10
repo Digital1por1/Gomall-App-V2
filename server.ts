@@ -457,23 +457,34 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
   app.post("/api/tts", async (req, res) => {
     try {
       const g = await guard(req, res); if (!g.ok) return; meter(g, res);
-      const { text, voice } = req.body;
+      const { text, voice, accent } = req.body;
       const script = String(text || "").trim();
       if (!script) return res.status(400).json({ error: "Falta el texto de la narración." });
-      const response = await ai.models.generateContent({
+      const styleAccent = typeof accent === "string" ? accent.trim() : "";
+
+      const synth = (input: string) => ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ role: "user", parts: [{ text: script.slice(0, 5000) }] }],
+        contents: [{ role: "user", parts: [{ text: input.slice(0, 5000) }] }],
         config: {
           responseModalities: ["AUDIO"],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
         } as any,
       });
-      const parts = response?.candidates?.[0]?.content?.parts || [];
-      const inline = parts.find((p: any) => p?.inlineData?.data)?.inlineData;
+      const audioOf = (r: any) => (r?.candidates?.[0]?.content?.parts || []).find((p: any) => p?.inlineData?.data)?.inlineData;
+
+      // 1) Intento con acento (si lo eligió). 2) Si no devuelve audio, reintento SIN acento (el prefijo de estilo
+      //    a veces hace que el modelo se "trabe" con finishReason OTHER); así la narración nunca se rompe.
+      let response = await synth(styleAccent ? `${styleAccent}: ${script}` : script);
+      let inline = audioOf(response);
+      if (!inline?.data && styleAccent) {
+        console.warn("[tts] sin audio con acento, reintento sin acento");
+        response = await synth(script);
+        inline = audioOf(response);
+      }
       if (!inline?.data) {
         const cand: any = response?.candidates?.[0];
         const reason = cand?.finishReason || (response as any)?.promptFeedback?.blockReason || "sin audio";
-        const textOut = (parts.find((p: any) => p?.text)?.text) || "";
+        const textOut = ((response?.candidates?.[0]?.content?.parts || []).find((p: any) => p?.text)?.text) || "";
         console.error("[tts] sin audio · motivo:", reason, "· resp:", JSON.stringify(response).slice(0, 800));
         return res.status(502).json({ error: `Gemini no devolvió audio (motivo: ${reason}).${textOut ? " Dijo: " + textOut.slice(0, 200) : " Puede que el modelo TTS no esté habilitado para tu clave/región."}` });
       }

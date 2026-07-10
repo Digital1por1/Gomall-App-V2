@@ -452,14 +452,13 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const generateNarration = async () => {
     const script = ttsText.trim();
     if (!script) { alert('Escribí el texto de la narración.'); return; }
-    // Instrucción de acento/país: Gemini la interpreta como dirección de estilo, no la pronuncia.
-    const prompt = ttsAccent ? `${ttsAccent}: ${script}` : script;
     setTtsBusy(true);
     try {
+      // El acento va como campo aparte: el server arma la instrucción de estilo y, si falla, reintenta sin acento.
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: prompt, voice: ttsVoice }),
+        body: JSON.stringify({ text: script, voice: ttsVoice, accent: ttsAccent || undefined }),
       });
       let json: any = null;
       try { json = await res.json(); } catch { throw new Error('El servidor no respondió (¿falta el deploy con /api/tts?).'); }
@@ -1052,12 +1051,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 </select>
                 <select value={ttsAccent} onChange={(e) => setTtsAccent(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
                   <option value="">Acento neutro (Latinoamérica)</option>
-                  <option value="Narrá en español rioplatense de Argentina, con tono natural y cercano">Argentina (rioplatense)</option>
-                  <option value="Narrá en español de México con tono natural">México</option>
-                  <option value="Narrá en español de España (castellano), tono natural">España (castellano)</option>
-                  <option value="Narrá en español de Colombia, tono neutro y claro">Colombia</option>
-                  <option value="Narrá en español de Chile con tono natural">Chile</option>
-                  <option value="Read in a natural US English accent">Inglés (EE.UU.)</option>
+                  <option value="Hablá con acento argentino rioplatense">Argentina (rioplatense)</option>
+                  <option value="Hablá con acento mexicano">México</option>
+                  <option value="Hablá con acento español de España">España (castellano)</option>
+                  <option value="Hablá con acento colombiano neutro">Colombia</option>
+                  <option value="Hablá con acento chileno">Chile</option>
+                  <option value="Speak with a US English accent">Inglés (EE.UU.)</option>
                 </select>
                 <button onClick={generateNarration} disabled={ttsBusy} className="w-full py-3 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
                   {ttsBusy ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Generando…</> : <><i className="fa-solid fa-microphone-lines mr-2" />Generar narración</>}
