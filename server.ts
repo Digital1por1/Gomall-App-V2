@@ -13,6 +13,27 @@ function extractUsage(response: any) {
   };
 }
 
+// Envuelve PCM 16-bit crudo (lo que devuelve Gemini TTS) en un contenedor WAV reproducible/decodable.
+function pcm16ToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
+  const blockAlign = channels * 2;
+  const byteRate = sampleRate * blockAlign;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);            // PCM
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(16, 34);           // bits por muestra
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3005;
@@ -428,6 +449,35 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: error.message || "Error al transcribir el audio" });
+    }
+  });
+
+  // Narración con IA (texto → voz) usando Gemini TTS. Misma API key, sin proveedor nuevo.
+  // Devuelve un WAV en base64 (Gemini entrega PCM crudo, acá lo envolvemos en contenedor WAV).
+  app.post("/api/tts", async (req, res) => {
+    try {
+      const g = await guard(req, res); if (!g.ok) return; meter(g, res);
+      const { text, voice } = req.body;
+      const script = String(text || "").trim();
+      if (!script) return res.status(400).json({ error: "Falta el texto de la narración." });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ role: "user", parts: [{ text: script.slice(0, 5000) }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
+        } as any,
+      });
+      const parts = response?.candidates?.[0]?.content?.parts || [];
+      const inline = parts.find((p: any) => p?.inlineData?.data)?.inlineData;
+      if (!inline?.data) return res.status(502).json({ error: "Gemini no devolvió audio. Verificá que el modelo TTS esté habilitado para tu clave." });
+      const rateM = /rate=(\d+)/.exec(inline.mimeType || "");
+      const rate = rateM ? Number(rateM[1]) : 24000;
+      const wav = pcm16ToWav(Buffer.from(inline.data, "base64"), rate, 1);
+      res.json({ audioBase64: wav.toString("base64"), mime: "audio/wav", usage: extractUsage(response) });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error al generar la narración" });
     }
   });
 

@@ -104,6 +104,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [snap, setSnap] = useState(true);
   const [tab, setTab] = useState<'media' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
+  const [ttsText, setTtsText] = useState('');
+  const [ttsVoice, setTtsVoice] = useState('Kore');
+  const [ttsBusy, setTtsBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportedUrl, setExportedUrl] = useState<string | null>(null);
@@ -443,6 +446,35 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } catch { alert('No se pudo acceder al micrófono. Revisá los permisos del navegador.'); }
   };
   const stopRec = () => { micRef.current?.stop(); setRecording(false); };
+
+  // ---------- narración con IA (Gemini TTS, server) ----------
+  const generateNarration = async () => {
+    const script = ttsText.trim();
+    if (!script) { alert('Escribí el texto de la narración.'); return; }
+    setTtsBusy(true);
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: script, voice: ttsVoice }),
+      });
+      let json: any = null;
+      try { json = await res.json(); } catch { throw new Error('El servidor no respondió (¿falta el deploy con /api/tts?).'); }
+      if (!res.ok || !json?.audioBase64) throw new Error(json?.error || 'No se pudo generar la narración.');
+      // base64 WAV → Blob → objectURL (mismo flujo que la grabación de micrófono).
+      const bin = atob(json.audioBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: json.mime || 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const dur = await probeDuration(url, 'audio');
+      commit(addAudioElement(project, makeAudioElement(url, dur, { name: 'Narración', start: currentTime, volume: 1 })));
+    } catch (e: any) {
+      alert(e?.message || 'Error al generar la narración.');
+    } finally {
+      setTtsBusy(false);
+    }
+  };
 
   // Aplica el estilo (tipografía/tamaño/color/animación) Y la posición del texto seleccionado a TODOS los textos.
   const syncTextStyle = () => {
@@ -992,7 +1024,34 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <button onClick={recording ? stopRec : startRec} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: recording ? '#dc2626' : `linear-gradient(135deg,${BRAND},#f0814f)` }}>
                 {recording ? <><i className="fa-solid fa-stop mr-2" />Detener grabación</> : <><i className="fa-solid fa-microphone mr-2" />Grabar voz en off</>}
               </button>
-              <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio desde el inicio. La grabación pide permiso del micrófono.</p>
+              <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio. La grabación pide permiso del micrófono.</p>
+
+              {/* Narración con IA (Gemini TTS) */}
+              <div className="pt-3 mt-1 border-t border-white/10 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40"><i className="fa-solid fa-wand-magic-sparkles mr-1" />Narración con IA</div>
+                  <button
+                    onClick={() => {
+                      const txt = project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text').map(e => (e as TextElement).text).join('. ').trim();
+                      if (txt) setTtsText(txt);
+                    }}
+                    className="text-[10px] text-white/50 hover:text-white underline underline-offset-2">Usar textos del reel</button>
+                </div>
+                <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)} rows={3} placeholder="Escribí el guion de la voz…"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30 resize-none" />
+                <select value={ttsVoice} onChange={(e) => setTtsVoice(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-white/30">
+                  <option value="Kore">Kore — femenina, neutra</option>
+                  <option value="Aoede">Aoede — femenina, cálida</option>
+                  <option value="Leda">Leda — femenina, juvenil</option>
+                  <option value="Puck">Puck — masculina, enérgica</option>
+                  <option value="Charon">Charon — masculina, grave</option>
+                  <option value="Fenrir">Fenrir — masculina, intensa</option>
+                </select>
+                <button onClick={generateNarration} disabled={ttsBusy} className="w-full py-3 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  {ttsBusy ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Generando…</> : <><i className="fa-solid fa-microphone-lines mr-2" />Generar narración</>}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">Se agrega como pista de audio en la posición del cursor. Usa tu misma clave de Gemini (consume tokens del plan).</p>
+              </div>
             </>)}
             {tab === 'animacion' && (
               <div className="space-y-4">
