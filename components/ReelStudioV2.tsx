@@ -129,6 +129,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [aiCaptions, setAiCaptions] = useState(true); // captions con IA: emojis + palabra clave destacada
   const [autoTarget, setAutoTarget] = useState<'auto' | 15 | 30 | 60>('auto');
   const [autoBeat, setAutoBeat] = useState(false);
+  const [autoZoomBusy, setAutoZoomBusy] = useState(false);
   const [autoTrim, setAutoTrim] = useState(false);
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
@@ -580,6 +581,27 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       setCurrentTime(0);
     } catch (e) { console.error('[auto]', e); alert('No se pudo compaginar automáticamente.'); }
     finally { setCompaginating(false); setAutoMsg(''); }
+  };
+
+  // Auto-zoom dinámico (punch-in estilo Submagic). Al encenderlo, detecta los beats de la música
+  // (si hay) para que los zooms caigan en el ritmo; sin música, usa un ritmo fijo.
+  const toggleAutoZoom = async () => {
+    if (project.autoZoom) { commit({ ...project, autoZoom: false }); return; }
+    setAutoZoomBusy(true);
+    try {
+      const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
+      let zoomBeats: number[] = [];
+      if (music) {
+        const raw = await detectBeats(music.url);
+        const mapped = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0)));
+        // Si hay muchísimos, tomamos 1 de cada 2 para que el zoom no maree.
+        zoomBeats = mapped.length > 45 ? mapped.filter((_, i) => i % 2 === 0) : mapped;
+      }
+      commit({ ...project, autoZoom: true, zoomBeats });
+    } catch (e) {
+      console.warn('[auto-zoom] sin beats, uso ritmo fijo', e);
+      commit({ ...project, autoZoom: true, zoomBeats: [] });
+    } finally { setAutoZoomBusy(false); }
   };
 
   // ---------- edición de elementos ----------
@@ -1188,6 +1210,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     <span className="font-bold">{a}</span><span className="text-[9px] opacity-70">{lbl}</span>
                   </button>
                 ))}
+              </div>
+
+              <div className="pt-4 mt-2 border-t border-white/5 space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Dinamismo</div>
+                <button onClick={toggleAutoZoom} disabled={autoZoomBusy}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={project.autoZoom ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff', borderColor: BRAND } : { borderColor: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.75)' }}>
+                  {autoZoomBusy ? <><i className="fa-solid fa-circle-notch fa-spin" />Detectando beats…</> : <><i className="fa-solid fa-magnifying-glass-plus" />Auto-zoom {project.autoZoom ? 'activado' : 'dinámico'}</>}
+                </button>
+                {project.autoZoom
+                  ? <p className="text-[11px] text-white/40 leading-relaxed">{project.zoomBeats && project.zoomBeats.length
+                      ? <><i className="fa-solid fa-music mr-1" style={{ color: BRAND }} />{project.zoomBeats.length} zooms sincronizados al beat de la música.</>
+                      : 'Sin música con beat claro → zooms en ritmo fijo (cada ~2,2s).'}</p>
+                  : <p className="text-[11px] text-white/40 leading-relaxed">Suma punch-ins de zoom al video para darle dinamismo. Si hay música, caen en el ritmo.</p>}
               </div>
 
               <div className="pt-4 mt-2 border-t border-white/5 space-y-3">

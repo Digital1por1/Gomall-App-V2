@@ -81,6 +81,8 @@ export interface ReelProject {
   aspect: AspectId;
   fps: number;
   tracks: Track[];       // orden de composición: índice 0 = pista de más abajo (fondo)
+  autoZoom?: boolean;    // punch-in de zoom dinámico sobre la pista de video (estilo Submagic)
+  zoomBeats?: number[];  // tiempos (s, en la timeline) donde cae cada punch-in; vacío = ritmo fijo
 }
 
 // ---------- ids ----------

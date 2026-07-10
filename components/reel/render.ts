@@ -284,6 +284,24 @@ function easeOutBounce(x: number): number {
   x -= 2.625 / d1; return n1 * x * x + 0.984375;
 }
 
+// Auto-zoom (punch-in dinámico estilo Submagic): en cada "punto" (beat de la música, o ritmo fijo si no hay),
+// el video hace un zoom rápido y se asienta. Devuelve el multiplicador de escala en el instante t.
+function autoZoomScale(t: number, points: number[] | undefined, intensity: number): number {
+  const ATTACK = 0.12, DECAY = 0.85; // s: sube rápido, baja suave
+  let p: number;
+  if (points && points.length) {
+    // Último punto <= t (búsqueda lineal simple; la lista suele ser corta).
+    p = -Infinity;
+    for (let i = 0; i < points.length; i++) { if (points[i] <= t) p = points[i]; else break; }
+    if (p === -Infinity) return 1;
+  } else {
+    p = Math.floor(t / 2.2) * 2.2; // sin beats → cada 2,2 s
+  }
+  const dt = t - p;
+  if (dt < ATTACK) return 1 + intensity * (dt / ATTACK);
+  return 1 + intensity * Math.max(0, 1 - (dt - ATTACK) / DECAY);
+}
+
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
 export function sourceTime(el: VideoElement | ImageElement, t: number): number {
   const local = t - el.start;
@@ -364,8 +382,10 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
       if (blurPx) ctx.filter = `blur(${blurPx}px)`;
       if (rot || flipScaleX !== 1) { ctx.translate(W / 2, H / 2); if (rot) ctx.rotate((rot * Math.PI) / 180); if (flipScaleX !== 1) ctx.scale(flipScaleX, 1); ctx.translate(-W / 2, -H / 2); }
       const baseOpacity = media.transform.opacity * alpha * em.alpha;
+      // Auto-zoom dinámico (punch-in): solo sobre la pista base y con "cover" (para no mostrar bordes al ampliar).
+      const az = project.autoZoom ? autoZoomScale(t, project.zoomBeats, 0.1) : 1;
       if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale);
-      else drawCover(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale);
+      else drawCover(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale * az);
       ctx.restore();
       if (whiteA > 0) { ctx.save(); ctx.globalAlpha = whiteA; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
     } else {
