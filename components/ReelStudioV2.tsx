@@ -470,7 +470,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const blob = new Blob([bytes], { type: json.mime || 'audio/wav' });
       const url = URL.createObjectURL(blob);
       const dur = await probeDuration(url, 'audio');
-      commit(addAudioElement(project, makeAudioElement(url, dur, { name: 'Narración', start: currentTime, volume: 1 })));
+      // Arranca en 0 (igual que la grabación de voz) para que se escuche desde el inicio; se puede mover en el timeline.
+      commit(addAudioElement(project, makeAudioElement(url, dur, { name: 'Narración', start: 0, volume: 1 })));
     } catch (e: any) {
       alert(e?.message || 'Error al generar la narración.');
     } finally {
