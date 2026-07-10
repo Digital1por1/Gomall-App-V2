@@ -102,6 +102,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [playing, setPlaying] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(60);
   const [snap, setSnap] = useState(true);
+  // Guías magnéticas del canvas: muestran las líneas de centro cuando el elemento arrastrado se alinea.
+  const [guides, setGuides] = useState<{ x: boolean; y: boolean }>({ x: false, y: false });
   const [tab, setTab] = useState<'media' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [ttsText, setTtsText] = useState('');
@@ -736,10 +738,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     const rect = c.getBoundingClientRect();
     const dxPct = ((e.clientX - d.startX) / rect.width) * 100;
     const dyPct = ((e.clientY - d.startY) / rect.height) * 100;
+    let nx = Math.max(0, Math.min(100, d.origX + dxPct));
+    let ny = Math.max(0, Math.min(100, d.origY + dyPct));
+    // Imán: se pega al centro (50%) en cada eje si está cerca, y muestra la guía correspondiente.
+    let gx = false, gy = false;
+    if (snap) {
+      const TH = 2.2; // umbral en % del canvas
+      if (Math.abs(nx - 50) < TH) { nx = 50; gx = true; }
+      if (Math.abs(ny - 50) < TH) { ny = 50; gy = true; }
+    }
+    setGuides(g => (g.x === gx && g.y === gy ? g : { x: gx, y: gy }));
     setProject(p => {
       const f = findElement(p, d.id); if (!f) return p;
       const tr = (f.el as any).transform;
-      return updateElement(p, d.id, { transform: { ...tr, x: Math.max(0, Math.min(100, d.origX + dxPct)), y: Math.max(0, Math.min(100, d.origY + dyPct)) } } as any);
+      return updateElement(p, d.id, { transform: { ...tr, x: nx, y: ny } } as any);
     });
   };
   const onCanvasPointerUp = () => {
@@ -747,6 +759,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       setProject(p => { histRef.current.past.push(p); if (histRef.current.past.length > 60) histRef.current.past.shift(); histRef.current.future = []; setCanUndo(true); setCanRedo(false); return p; });
     }
     canvasDragRef.current = null;
+    if (guides.x || guides.y) setGuides({ x: false, y: false });
   };
 
   // Atajos de teclado.
@@ -1183,6 +1196,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}
                 className="rounded-xl shadow-2xl block w-full h-full"
                 style={{ background: '#000', cursor: canDragOnCanvas() ? 'move' : 'default', touchAction: 'none' }} />
+              {/* Guías magnéticas: líneas de centro cuando el elemento arrastrado se alinea */}
+              {guides.x && <div className="absolute top-0 bottom-0" style={{ left: '50%', width: 1.5, transform: 'translateX(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
+              {guides.y && <div className="absolute left-0 right-0" style={{ top: '50%', height: 1.5, transform: 'translateY(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
               {/* Handles para escalar/rotar el sticker seleccionado directo en el preview */}
               {selected && selected.type === 'text' && (selected as TextElement).name === 'Sticker' && currentTime >= selected.start && currentTime < selected.start + selected.duration && (
                 <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
