@@ -383,9 +383,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     commit(p);
   };
   const addText = () => {
-    const overlay = project.tracks.find(t => t.kind === 'overlay')!;
     const el = makeTextElement(initialCopy?.split('\n')[0]?.slice(0, 40) || 'Tu texto acá', { start: currentTime, duration: 3 });
-    commit(addElement(project, overlay.id, el));
+    commit(addOverlayElement(project, el)); // pista de overlay libre o nueva → no se superpone con otros textos/logos
     setSelectedId(el.id);
     setTab('texto');
   };
@@ -413,9 +412,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     const logo = kit?.logoUrls?.[0];
     const hasLogo = p.tracks.some(t => t.elements.some(e => e.name === 'Logo'));
     if (logo && !hasLogo) {
-      const overlay = p.tracks.find(t => t.kind === 'overlay')!;
       const el = makeImageElement(logo, { name: 'Logo', start: 0, duration: Math.max(4, totalDur || 4), transform: { x: 82, y: 12, scale: 18, rotation: 0, opacity: 100 } });
-      p = addElement(p, overlay.id, el);
+      p = addOverlayElement(p, el); // pista de overlay propia (libre o nueva) → no se superpone con los subtítulos
       commit(p);
       setSelectedId(el.id); // queda seleccionado → se puede mover arrastrándolo en el preview
       return;
@@ -425,9 +423,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
   // ---------- logo (subir cualquier logo) ----------
   const addLogoImage = (url: string) => {
-    const overlay = project.tracks.find(t => t.kind === 'overlay')!;
     const el = makeImageElement(url, { name: 'Logo', start: 0, duration: Math.max(4, totalDur || 4), transform: { x: 82, y: 12, scale: 18, rotation: 0, opacity: 100 } });
-    commit(addElement(project, overlay.id, el));
+    commit(addOverlayElement(project, el)); // pista de overlay propia → no pisa los subtítulos en el timeline
     setSelectedId(el.id);
   };
   const addLogo = () => fileLogoRef.current?.click(); // siempre deja subir un logo propio
@@ -513,17 +510,23 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     try {
       const segs = await transcribe(srcUrl, setSubMsg);
       if (!segs.length) { alert('No se detectó voz en el audio.'); return; }
-      const overlay = project.tracks.find(t => t.kind === 'overlay')!;
+      const mkSub = (s: { text: string; start: number; end: number }) => makeTextElement(s.text, {
+        start: s.start, duration: Math.max(0.4, s.end - s.start),
+        name: 'Subtítulo',
+        transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
+        style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600' },
+      });
       let p = project;
-      for (const s of segs) {
-        const el = makeTextElement(s.text, {
-          start: s.start, duration: Math.max(0.4, s.end - s.start),
-          name: 'Subtítulo',
-          transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
-          style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600' },
-        });
-        p = addElement(p, overlay.id, el);
+      // Los subtítulos van a una pista de overlay DEDICADA (una vacía, o una nueva) para no pisar logo/textos.
+      let subTrackId = p.tracks.find(t => t.kind === 'overlay' && t.elements.length === 0)?.id;
+      let rest = segs;
+      if (!subTrackId) {
+        const first = mkSub(segs[0]);
+        p = addOverlayElement(p, first);            // crea/usa una pista de overlay libre
+        subTrackId = findElement(p, first.id)!.track.id;
+        rest = segs.slice(1);
       }
+      for (const s of rest) p = addElement(p, subTrackId, mkSub(s));
       commit(p);
     } catch (e: any) {
       console.error('[subtitulos v2]', e);
