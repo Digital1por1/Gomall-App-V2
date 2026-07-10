@@ -211,13 +211,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   };
 
   const handleDeleteUser = async (userId: string, name: string) => {
-    if (!window.confirm(`⚠️ ¿Eliminar el perfil de "${name}"? Esto no borra su cuenta de Google.`)) return;
+    const u = users.find(x => x.id === userId);
+    if (!window.confirm(`⚠️ ¿Eliminar la cuenta de "${name}" POR COMPLETO?\n\nSe borran su acceso (login), su perfil, sus diseños y sus archivos. Es IRREVERSIBLE.`)) return;
+    if (!window.confirm(`Última confirmación: esto NO se puede deshacer.\n¿Eliminar definitivamente a "${name}"?`)) return;
     try {
-      await firebase.firestore().collection('profiles').doc(userId).delete();
-      setUsers(users.filter(u => u.id !== userId));
+      const res = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: userId, email: u?.email }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'No se pudo eliminar la cuenta.');
+      setUsers(prev => prev.filter(x => x.id !== userId));
       setStats(prev => ({ ...prev, totalUsers: prev.totalUsers - 1 }));
-    } catch (error) {
-      alert("Error al eliminar usuario");
+    } catch (error: any) {
+      alert(error?.message || "Error al eliminar la cuenta");
     }
   };
 

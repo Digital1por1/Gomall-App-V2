@@ -62,6 +62,8 @@ async function startServer() {
   }
   const MONTH_MS = 30 * 24 * 3600 * 1000;
   const IMAGE_COST = 15000; // créditos por imagen — MISMA unidad que los planes (tokenLimit = imágenes × 15000)
+  const ADMIN_EMAILS = ['digital@1por1.com.ar'];
+  const STORAGE_BUCKET = process.env.FIREBASE_STORAGE_BUCKET || 'gomall-studio-v2.firebasestorage.app';
   const isImageGen = (req) => {
     const gt = req.body && req.body.genType;
     return gt === 'image' || gt === 'improve' || gt === 'simple_image';
@@ -499,6 +501,41 @@ ${Array.isArray(brief.images) && brief.images.length ? '6. IMÁGENES ADJUNTAS: t
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: error.message || "Error al generar la narración" });
+    }
+  });
+
+  // Eliminar una cuenta POR COMPLETO (solo admin). Borra Auth + perfil + subcolecciones + Storage.
+  app.post("/api/admin/delete-user", async (req, res) => {
+    try {
+      if (!adminDb) return res.status(503).json({ error: "El enforcement del servidor no está activo (falta FIREBASE_SERVICE_ACCOUNT)." });
+      const m = String(req.headers.authorization || '').match(/^Bearer (.+)$/);
+      if (!m) return res.status(401).json({ error: "No autenticado." });
+      let decoded;
+      try { decoded = await adminDb.admin.auth().verifyIdToken(m[1]); }
+      catch { return res.status(401).json({ error: "Sesión inválida." }); }
+      if (!ADMIN_EMAILS.includes(String(decoded.email || '').toLowerCase())) {
+        return res.status(403).json({ error: "Solo un administrador puede eliminar cuentas." });
+      }
+      const uid = String((req.body && req.body.uid) || '').trim();
+      if (!uid) return res.status(400).json({ error: "Falta el uid del usuario." });
+      if (ADMIN_EMAILS.includes(String((req.body && req.body.email) || '').toLowerCase())) {
+        return res.status(400).json({ error: "No se puede eliminar una cuenta de administrador." });
+      }
+
+      const deleted = { auth: false, profile: false, disenos: false, storage: false };
+      try { await adminDb.admin.auth().deleteUser(uid); deleted.auth = true; }
+      catch (e) { if (e && e.code === 'auth/user-not-found') deleted.auth = true; else console.error('[del] auth:', e && e.message); }
+      try { await adminDb.db.recursiveDelete(adminDb.db.collection('profiles').doc(uid)); deleted.profile = true; }
+      catch (e) { console.error('[del] profile:', e && e.message); }
+      try { await adminDb.db.recursiveDelete(adminDb.db.collection('usuarios').doc(uid)); deleted.disenos = true; }
+      catch (e) { console.error('[del] disenos:', e && e.message); }
+      try { await adminDb.admin.storage().bucket(STORAGE_BUCKET).deleteFiles({ prefix: `assets/${uid}/` }); deleted.storage = true; }
+      catch (e) { console.error('[del] storage:', e && e.message); }
+
+      res.json({ ok: true, deleted });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error al eliminar la cuenta" });
     }
   });
 
