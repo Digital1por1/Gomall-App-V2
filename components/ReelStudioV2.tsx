@@ -296,14 +296,18 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   };
 
   // Reproducción: reloj por rAF; reproduce/pausa los videos activos y compone cada frame.
-  const play = () => {
+  const play = async () => {
     if (playing) return;
     const startAt = currentTime >= totalDur ? 0 : currentTime;
     if (currentTime >= totalDur) setCurrentTime(0);
     setPlaying(true);
     playingRef.current = true;
+    // Prepara la mezcla y arranca el audio ANTES de largar el reloj visual. Sin esto, un reel corto
+    // podía terminar antes de que la mezcla asíncrona estuviera lista y el audio nunca sonaba en el preview
+    // (en el export sí, porque ahí no hay reloj en tiempo real).
+    await startAudio(startAt);
+    if (!playingRef.current) return; // se pausó mientras se preparaba el audio
     clockRef.current = { base: performance.now() - startAt * 1000 };
-    startAudio(startAt);
     const loop = () => {
       const c = canvasRef.current; if (!c) { setPlaying(false); return; }
       const ctx = c.getContext('2d'); if (!ctx) { setPlaying(false); return; }
