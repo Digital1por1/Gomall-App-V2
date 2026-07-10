@@ -341,10 +341,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
 
           <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
             <div className="flex items-center gap-3 mb-1">
-              <div className="w-9 h-9 bg-orange-50 text-[#EA5B25] rounded-xl flex items-center justify-center shrink-0"><i className="fa-solid fa-coins text-sm"></i></div>
-              <span className="text-3xl font-black text-slate-900 leading-none">{(stats.totalTokens / 1000000).toFixed(1)}M</span>
+              <div className="w-9 h-9 bg-orange-50 text-[#EA5B25] rounded-xl flex items-center justify-center shrink-0"><i className="fa-solid fa-image text-sm"></i></div>
+              <span className="text-3xl font-black text-slate-900 leading-none tabular-nums">{realUsage.imageCalls.toLocaleString()}</span>
             </div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tokens Consumidos</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Imágenes generadas</span>
           </div>
 
           <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
@@ -358,7 +358,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
             <div className="flex items-center gap-3 mb-1">
               <div className="w-9 h-9 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center shrink-0"><i className="fa-solid fa-dollar-sign text-sm"></i></div>
-              <span className="text-3xl font-black text-slate-900 leading-none">${stats.totalCost.toFixed(2)}</span>
+              <span className="text-3xl font-black text-slate-900 leading-none tabular-nums">${(realUsage.imageCalls * 0.04).toFixed(2)}</span>
             </div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Costo Total USD</span>
           </div>
@@ -368,7 +368,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-sm font-black uppercase tracking-widest text-slate-700"><i className="fa-solid fa-gauge-high text-[#EA5B25] mr-2"></i>Consumo real de IA</h2>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tokens reales · todos los clientes</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Uso real · todos los clientes</span>
           </div>
           {(() => {
             const LABELS: Record<string, { label: string; img: boolean }> = {
@@ -388,23 +388,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             if (rows.length === 0) return <p className="text-sm text-slate-400 font-medium">Todavía no hay consumo real registrado. Aparecerá cuando los usuarios generen contenido.</p>;
             return (
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {rows.map(r => (
-                    <div key={r.key} className="flex items-center justify-between text-sm">
+                    <div key={r.key} className="flex items-center justify-between text-sm py-1.5 border-b border-slate-50 last:border-0">
                       <span className="font-bold text-slate-600"><i className={`fa-solid ${r.img ? 'fa-image text-[#EA5B25]' : 'fa-font text-slate-300'} mr-2 text-xs`}></i>{r.label}</span>
-                      <span className="font-black text-slate-800 tabular-nums">{r.calls} <span className="text-slate-300">·</span> {r.tokens.toLocaleString()} tk</span>
+                      <span className="font-black text-slate-800 tabular-nums">{r.calls.toLocaleString()} <span className="text-slate-400 font-medium text-xs">{r.calls === 1 ? 'vez' : 'veces'}</span></span>
                     </div>
                   ))}
                 </div>
                 <div className="flex flex-col gap-3">
                   <div className="bg-slate-50 rounded-2xl p-4 flex items-center justify-between">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tokens reales totales</span>
-                    <span className="text-xl font-black text-slate-900 tabular-nums">{realUsage.totalTokens.toLocaleString()}</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Imágenes generadas</span>
+                    <span className="text-xl font-black text-slate-900 tabular-nums">{realUsage.imageCalls.toLocaleString()}</span>
                   </div>
                   <div className="bg-orange-50 rounded-2xl p-4 text-center">
                     <p className="text-[10px] font-black text-[#EA5B25] uppercase tracking-widest">Costo real estimado</p>
                     <p className="text-3xl font-black text-slate-900">≈ US$ {estCost.toFixed(2)}</p>
-                    <p className="text-[9px] text-slate-400 font-bold mt-1">{realUsage.imageCalls} imágenes · ~US$0,04 c/u (las imágenes son el costo dominante)</p>
+                    <p className="text-[9px] text-slate-400 font-bold mt-1">{realUsage.imageCalls} imágenes · ~US$0,04 c/u · el resto no tiene costo relevante</p>
                   </div>
                 </div>
               </div>

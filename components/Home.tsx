@@ -14,13 +14,14 @@ interface HomeProps {
   onOpenDesigns: () => void;
   onOpenCampaigns: () => void;
   onOpenCalendar: () => void;
+  onOpenAdmin?: () => void;
   onLogout: () => void;
 }
 
 const Home: React.FC<HomeProps> = ({
   profile, isAdmin, designsCount,
   onNewDesign, onNewCampaign, onOpenReels, onOpenProductAd,
-  onEditBrand, onOpenDesigns, onOpenCampaigns, onOpenCalendar, onLogout,
+  onEditBrand, onOpenDesigns, onOpenCampaigns, onOpenCalendar, onOpenAdmin, onLogout,
 }) => {
   const kit = profile?.brandKits?.[0];
   const colors = kit?.brandColors || [];
@@ -68,6 +69,18 @@ const Home: React.FC<HomeProps> = ({
             );
           })()}
         </div>
+
+        {/* Acceso admin: ver todas las cuentas */}
+        {isAdmin && onOpenAdmin && (
+          <button onClick={onOpenAdmin} className="w-full bg-slate-900 text-white rounded-[28px] p-5 sm:p-6 shadow-lg shadow-slate-300/40 flex items-center gap-4 hover:bg-slate-800 transition-all text-left group">
+            <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0"><i className="fa-solid fa-shield-halved text-lg"></i></div>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-base">Panel de administración</p>
+              <p className="text-white/60 text-sm font-medium">Ver todas las cuentas, su consumo y sus planes</p>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-white/50 group-hover:text-white transition-colors shrink-0">Abrir <i className="fa-solid fa-chevron-right text-[8px] ml-1"></i></span>
+          </button>
+        )}
 
         {/* 1 · Tu marca */}
         <section className="space-y-3">

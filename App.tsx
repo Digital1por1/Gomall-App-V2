@@ -1381,6 +1381,7 @@ const App: React.FC = () => {
           onOpenDesigns={() => { setActiveTab('editor'); setOpenSection('PROJECTS'); setReturnCampaignId(null); setAppView('editor'); }}
           onOpenCampaigns={() => { setOpenCampaignId(null); setCampaignInitial(null); setShowCampaigns(true); }}
           onOpenCalendar={() => setShowCalendar(true)}
+          onOpenAdmin={() => setShowAdmin(true)}
           onLogout={handleLogout}
         />
       )}
