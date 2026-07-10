@@ -135,6 +135,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const saveTimerRef = useRef<number | null>(null);
   const poolRef = useRef<MediaPool>(new MediaPool());
   const rafRef = useRef<number | null>(null);
+  const previewRafRef = useRef<number | null>(null);  // RAF de la vista previa de efectos (hover)
   const clockRef = useRef<{ base: number } | null>(null);
   // Audio del preview: se reproduce la mezcla completa (buildMixedAudio) sincronizada al reloj.
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -199,6 +200,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   useEffect(() => () => {
     poolRef.current.dispose();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (previewRafRef.current) cancelAnimationFrame(previewRafRef.current);
     if (mixSrcRef.current) { try { mixSrcRef.current.stop(); } catch { /* noop */ } }
     if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch { /* noop */ } }
   }, []);
@@ -558,6 +560,33 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const applyEmphasis = (kind: EmphasisKind) => {
     if (!selectedId) return;
     commit(updateElement(project, selectedId, { emphasis: kind } as any));
+  };
+
+  // Vista previa al pasar el mouse: anima el elemento seleccionado con el efecto en cuestión
+  // SIN modificar el proyecto (se dibuja una copia temporal en un loop propio).
+  const stopEffectPreview = () => {
+    if (previewRafRef.current) { cancelAnimationFrame(previewRafRef.current); previewRafRef.current = null; }
+    if (!playingRef.current) renderStatic(currentTime);
+  };
+  const startEffectPreview = (mode: 'entrada' | 'enfasis', kind: string) => {
+    if (!selectedId || playingRef.current || kind === 'none') return;
+    const found = findElement(project, selectedId);
+    if (!found) return;
+    const patch = mode === 'entrada' ? { transition: kind, transitionDur: 0.6 } : { emphasis: kind };
+    const temp = updateElement(project, selectedId, patch as any);
+    const el0 = found.el.start;
+    // Ventana de animación: para "entrada" mostramos ~1.4s desde el inicio del clip; para "énfasis", 2s de loop.
+    const win = mode === 'entrada' ? 1.4 : 2.0;
+    if (previewRafRef.current) cancelAnimationFrame(previewRafRef.current);
+    const base = performance.now();
+    const c = canvasRef.current; if (!c) return;
+    const ctx = c.getContext('2d'); if (!ctx) return;
+    const loop = () => {
+      const local = ((performance.now() - base) / 1000) % win;
+      drawReelFrame(ctx, temp, el0 + local, poolRef.current);
+      previewRafRef.current = requestAnimationFrame(loop);
+    };
+    previewRafRef.current = requestAnimationFrame(loop);
   };
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
@@ -990,7 +1019,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     ] as { id: TransitionKind; label: string; icon: string }[]).map(a => {
                       const active = !!selected && ((selected as any).transition || 'none') === a.id;
                       return (
-                        <button key={a.id} disabled={!selected} onClick={() => applyAnim(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
+                        <button key={a.id} disabled={!selected} onClick={() => applyAnim(a.id)}
+                          onMouseEnter={() => startEffectPreview('entrada', a.id)} onMouseLeave={stopEffectPreview}
+                          className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
                           style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
                           <i className={`fa-solid ${a.icon}`} /> {a.label}
                         </button>
@@ -1016,7 +1047,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     ] as { id: EmphasisKind; label: string; icon: string }[]).map(a => {
                       const active = !!selected && ((selected as any).emphasis || 'none') === a.id;
                       return (
-                        <button key={a.id} disabled={!selected} onClick={() => applyEmphasis(a.id)} className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
+                        <button key={a.id} disabled={!selected} onClick={() => applyEmphasis(a.id)}
+                          onMouseEnter={() => startEffectPreview('enfasis', a.id)} onMouseLeave={stopEffectPreview}
+                          className="py-2.5 rounded-xl border text-[11px] font-semibold flex flex-col items-center gap-1 disabled:opacity-40"
                           style={active ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.7)' }}>
                           <i className={`fa-solid ${a.icon}`} /> {a.label}
                         </button>
@@ -1139,6 +1172,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     <option value="slideup">Deslizar ▲</option>
                     <option value="slidedown">Deslizar ▼</option>
                     <option value="blur">Desenfoque</option>
+                    <option value="pop">Estallido</option>
+                    <option value="flip">Voltear</option>
+                    <option value="spin">Girar</option>
+                    <option value="bounce">Rebote</option>
                   </select>
                 </Row>
                 {(selected as any).transition && (selected as any).transition !== 'none' && (
@@ -1154,6 +1191,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     <option value="slideup">Deslizar ▲</option>
                     <option value="slidedown">Deslizar ▼</option>
                     <option value="blur">Desenfoque</option>
+                    <option value="pop">Estallido</option>
+                    <option value="flip">Voltear</option>
+                    <option value="spin">Girar</option>
+                    <option value="bounce">Rebote</option>
                   </select>
                 </Row>
                 {(selected as any).transitionOut && (selected as any).transitionOut !== 'none' && (
