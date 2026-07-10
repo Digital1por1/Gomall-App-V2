@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
+import { PLANS } from './plans';
 
 interface LandingProps {
   onLogin: () => void;
 }
+
+// Qué incluye cada plan en la landing (el precio y las imágenes salen de plans.ts).
+const PLAN_PERKS: Record<string, string[]> = {
+  free: ['20 imágenes con IA por mes', 'Reels y voz en off ilimitados', 'Copys y campañas ilimitados', 'Sin tarjeta para empezar'],
+  comercio: ['100 imágenes con IA por mes', 'Todo lo demás ilimitado', 'Kit de marca: logo, colores y tipografías', 'Sin marca de agua'],
+  marca: ['300 imágenes con IA por mes', 'Todo ilimitado + prioridad', 'Ideal para agencias y multi-marca', 'Soporte prioritario'],
+};
 
 const GoogleBtn: React.FC<{ onLogin: () => void; label: string; variant?: 'primary' | 'light' }> = ({ onLogin, label, variant = 'primary' }) => (
   <button
@@ -70,7 +78,10 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           </div>
           <span className="font-display text-lg text-slate-900">Gomall Studio</span>
         </div>
-        <button onClick={onLogin} className="text-[11px] font-black uppercase tracking-widest text-slate-500 hover:text-[#EA5B25] transition-colors">Iniciar sesión</button>
+        <div className="flex items-center gap-5">
+          <a href="#planes" className="hidden sm:inline text-[11px] font-black uppercase tracking-widest text-slate-500 hover:text-[#EA5B25] transition-colors">Planes</a>
+          <button onClick={onLogin} className="text-[11px] font-black uppercase tracking-widest text-slate-500 hover:text-[#EA5B25] transition-colors">Iniciar sesión</button>
+        </div>
       </nav>
 
       {/* Hero */}
@@ -151,6 +162,56 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Planes */}
+      <section id="planes" className="max-w-5xl mx-auto px-5 sm:px-8 py-12">
+        <div className="text-center mb-10 space-y-2">
+          <span className="text-[11px] font-black text-[#EA5B25] uppercase tracking-[0.2em]">Planes</span>
+          <h2 className="font-display text-2xl sm:text-3xl text-slate-900">Precios simples, medidos en imágenes</h2>
+          <p className="text-slate-500 text-sm font-medium max-w-xl mx-auto leading-relaxed">
+            Pagás solo por las imágenes con IA. Reels, copys, campañas, voz en off y subtítulos van <span className="font-bold text-slate-700">ilimitados</span> en todos los planes.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-5 items-stretch">
+          {PLANS.map((p) => {
+            const featured = p.id === 'comercio';
+            const perks = PLAN_PERKS[p.id] || [];
+            return (
+              <div key={p.id} className={`relative bg-white rounded-[28px] border p-7 shadow-sm flex flex-col ${featured ? 'border-[#EA5B25] shadow-xl shadow-orange-200/40 sm:-translate-y-2' : 'border-slate-100 shadow-slate-200/40'}`}>
+                {featured && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full shadow-lg shadow-orange-300/40">Más elegido</span>
+                )}
+                <h3 className="font-display text-xl text-slate-900">{p.name}</h3>
+                <div className="flex items-baseline gap-1 mt-2">
+                  <span className="text-sm font-bold text-slate-400">US$</span>
+                  <span className="font-display text-[40px] leading-none text-slate-900">{p.priceUsd}</span>
+                  {p.priceUsd > 0 && <span className="text-xs text-slate-400 font-bold">/mes</span>}
+                </div>
+                <span className="mt-3 inline-block self-start bg-orange-50 text-[#EA5B25] text-[11px] font-black px-3 py-1 rounded-lg">{p.images} imágenes IA / mes</span>
+                <ul className="mt-5 space-y-2.5 flex-1">
+                  {perks.map((perk) => (
+                    <li key={perk} className="flex items-start gap-2.5 text-sm text-slate-600 font-medium">
+                      <i className="fa-solid fa-check text-[#EA5B25] text-xs mt-1"></i>
+                      <span>{perk}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={onLogin}
+                  className={`mt-6 h-12 rounded-2xl flex items-center justify-center gap-2 font-black text-[11px] uppercase tracking-[0.15em] transition-all active:scale-95 ${
+                    featured
+                      ? 'bg-gradient-to-r from-[#EA5B25] to-[#f0814f] text-white shadow-lg shadow-orange-300/40 hover:shadow-xl'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:border-orange-200'
+                  }`}
+                >
+                  {p.priceUsd === 0 ? 'Empezar gratis' : `Elegir ${p.name}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-center text-[11px] text-slate-400 font-bold mt-7">Precios en USD · el pago se habilita muy pronto · empezás gratis sin tarjeta</p>
       </section>
 
       {/* CTA final */}
