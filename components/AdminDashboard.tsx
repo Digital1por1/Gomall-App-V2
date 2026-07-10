@@ -22,6 +22,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [sortConfig, setSortConfig] = useState<{ key: 'name' | 'mall' | 'usage' | 'cost' | 'lastUsed' | 'designs' | 'expires', direction: 'asc' | 'desc' }>({ key: 'usage', direction: 'desc' });
   const [editingLimit, setEditingLimit] = useState<{ id: string; value: string } | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  // Menú de acciones por fila (dropdown de posición fija para que no lo corte el scroll de la tabla).
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -527,7 +529,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                             />
                           </div>
                           <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md inline-block">
-                            ${(used * 0.000005).toFixed(2)} USD
+                            ${(tokensToImages(used) * 0.04).toFixed(2)} USD
                           </span>
                         </td>
 
@@ -596,36 +598,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                               </button>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => setEditingLimit({ id: u.id, value: Math.round(limit / IMAGE_COST).toString() })}
-                                className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition-colors flex items-center justify-center"
-                                title="Editar límite (imágenes/mes)"
-                              >
-                                <i className="fa-solid fa-pen-to-square text-xs"></i>
-                              </button>
-                              <button
-                                onClick={() => handleResetTokens(u.id)}
-                                className="w-8 h-8 rounded-lg bg-blue-50 text-blue-500 hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center"
-                                title="Reiniciar Consumo a 0"
-                              >
-                                <i className="fa-solid fa-rotate-left text-xs"></i>
-                              </button>
-                              <button
-                                onClick={() => handleToggleBlock(u.id, !!u.isBlocked)}
-                                className={`w-8 h-8 rounded-lg transition-colors flex items-center justify-center ${u.isBlocked ? 'bg-green-50 text-green-500 hover:bg-green-100' : 'bg-orange-50 text-orange-500 hover:bg-orange-100'}`}
-                                title={u.isBlocked ? 'Desbloquear' : 'Bloquear'}
-                              >
-                                <i className={`fa-solid ${u.isBlocked ? 'fa-unlock' : 'fa-lock'} text-xs`}></i>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(u.id, u.business || u.name)}
-                                className="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors flex items-center justify-center"
-                                title="Eliminar Perfil"
-                              >
-                                <i className="fa-solid fa-trash text-xs"></i>
-                              </button>
-                            </div>
+                            <button
+                              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu(menu?.id === u.id ? null : { id: u.id, x: r.right, y: r.bottom }); }}
+                              className={`w-8 h-8 rounded-lg transition-colors flex items-center justify-center ml-auto ${menu?.id === u.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
+                              title="Acciones"
+                            >
+                              <i className="fa-solid fa-ellipsis text-sm"></i>
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -703,6 +682,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         </div>
 
       </main>
+
+      {/* Menú de acciones de la fila (posición fija + overlay para cerrar) */}
+      {menu && (() => {
+        const mu = users.find(u => u.id === menu.id);
+        if (!mu) return null;
+        const mLimit = mu.tokenLimit || MONTHLY_TOKEN_LIMIT;
+        const item = 'w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-left transition-colors';
+        return (
+          <>
+            <div className="fixed inset-0 z-[290]" onClick={() => setMenu(null)} />
+            <div className="fixed z-[300] w-52 bg-white rounded-2xl border border-slate-100 shadow-2xl shadow-slate-400/25 overflow-hidden py-1.5" style={{ top: menu.y + 6, left: Math.max(8, menu.x - 208) }}>
+              <button onClick={() => { setEditingLimit({ id: mu.id, value: Math.round(mLimit / IMAGE_COST).toString() }); setMenu(null); }} className={`${item} text-slate-700 hover:bg-slate-50`}>
+                <i className="fa-solid fa-pen-to-square text-slate-400 w-4 text-center"></i> Editar límite
+              </button>
+              <button onClick={() => { handleResetTokens(mu.id); setMenu(null); }} className={`${item} text-slate-700 hover:bg-slate-50`}>
+                <i className="fa-solid fa-rotate-left text-blue-400 w-4 text-center"></i> Reiniciar consumo
+              </button>
+              <button onClick={() => { handleToggleBlock(mu.id, !!mu.isBlocked); setMenu(null); }} className={`${item} text-slate-700 hover:bg-slate-50`}>
+                <i className={`fa-solid ${mu.isBlocked ? 'fa-unlock text-green-500' : 'fa-lock text-orange-500'} w-4 text-center`}></i> {mu.isBlocked ? 'Desbloquear' : 'Bloquear'}
+              </button>
+              <div className="h-px bg-slate-100 my-1"></div>
+              <button onClick={() => { handleDeleteUser(mu.id, mu.business || mu.name); setMenu(null); }} className={`${item} text-red-600 hover:bg-red-50`}>
+                <i className="fa-solid fa-trash text-red-400 w-4 text-center"></i> Eliminar
+              </button>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 };
