@@ -130,6 +130,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [autoTarget, setAutoTarget] = useState<'auto' | 15 | 30 | 60>('auto');
   const [autoBeat, setAutoBeat] = useState(false);
   const [autoZoomBusy, setAutoZoomBusy] = useState(false);
+  const [autoZoomSrc, setAutoZoomSrc] = useState<'' | 'voz' | 'música' | 'fijo'>('');
   const [autoTrim, setAutoTrim] = useState(false);
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
@@ -583,23 +584,37 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     finally { setCompaginating(false); setAutoMsg(''); }
   };
 
-  // Auto-zoom dinámico (punch-in estilo Submagic). Al encenderlo, detecta los beats de la música
-  // (si hay) para que los zooms caigan en el ritmo; sin música, usa un ritmo fijo.
+  // Auto-zoom dinámico (punch-in estilo Submagic). Referencia, en orden de preferencia:
+  //   1) la VOZ → un zoom por frase (usa el inicio de cada subtítulo). Lo más natural.
+  //   2) la música → beats detectados.
+  //   3) sin nada → ritmo fijo.
+  // En todos los casos separa los zooms al menos 2,6s para que no se repita tanto.
   const toggleAutoZoom = async () => {
-    if (project.autoZoom) { commit({ ...project, autoZoom: false }); return; }
+    if (project.autoZoom) { commit({ ...project, autoZoom: false, zoomBeats: [] }); setAutoZoomSrc(''); return; }
     setAutoZoomBusy(true);
     try {
-      const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
-      let zoomBeats: number[] = [];
-      if (music) {
-        const raw = await detectBeats(music.url);
-        const mapped = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0)));
-        // Si hay muchísimos, tomamos 1 de cada 2 para que el zoom no maree.
-        zoomBeats = mapped.length > 45 ? mapped.filter((_, i) => i % 2 === 0) : mapped;
+      let points: number[] = [];
+      let src: 'voz' | 'música' | 'fijo' = 'fijo';
+      const subs = project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && (e as TextElement).name === 'Subtítulo');
+      if (subs.length) {
+        points = subs.map(s => s.start).sort((a, b) => a - b);
+        src = 'voz';
+      } else {
+        const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
+        if (music) {
+          const raw = await detectBeats(music.url);
+          points = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0))).sort((a, b) => a - b);
+          if (points.length) src = 'música';
+        }
       }
-      commit({ ...project, autoZoom: true, zoomBeats });
+      const MIN_GAP = 2.6;
+      const spaced: number[] = [];
+      for (const p of points) { if (!spaced.length || p - spaced[spaced.length - 1] >= MIN_GAP) spaced.push(p); }
+      setAutoZoomSrc(src);
+      commit({ ...project, autoZoom: true, zoomBeats: spaced });
     } catch (e) {
-      console.warn('[auto-zoom] sin beats, uso ritmo fijo', e);
+      console.warn('[auto-zoom]', e);
+      setAutoZoomSrc('fijo');
       commit({ ...project, autoZoom: true, zoomBeats: [] });
     } finally { setAutoZoomBusy(false); }
   };
@@ -1220,10 +1235,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   {autoZoomBusy ? <><i className="fa-solid fa-circle-notch fa-spin" />Detectando beats…</> : <><i className="fa-solid fa-magnifying-glass-plus" />Auto-zoom {project.autoZoom ? 'activado' : 'dinámico'}</>}
                 </button>
                 {project.autoZoom
-                  ? <p className="text-[11px] text-white/40 leading-relaxed">{project.zoomBeats && project.zoomBeats.length
-                      ? <><i className="fa-solid fa-music mr-1" style={{ color: BRAND }} />{project.zoomBeats.length} zooms sincronizados al beat de la música.</>
-                      : 'Sin música con beat claro → zooms en ritmo fijo (cada ~2,2s).'}</p>
-                  : <p className="text-[11px] text-white/40 leading-relaxed">Suma punch-ins de zoom al video para darle dinamismo. Si hay música, caen en el ritmo.</p>}
+                  ? <p className="text-[11px] text-white/40 leading-relaxed">{
+                      autoZoomSrc === 'voz' ? <><i className="fa-solid fa-microphone-lines mr-1" style={{ color: BRAND }} />{project.zoomBeats?.length || 0} zooms — uno por frase (según la voz).</>
+                      : autoZoomSrc === 'música' ? <><i className="fa-solid fa-music mr-1" style={{ color: BRAND }} />{project.zoomBeats?.length || 0} zooms al ritmo de la música.</>
+                      : 'Sin voz ni música → zooms en ritmo fijo (cada ~3s).'}</p>
+                  : <p className="text-[11px] text-white/40 leading-relaxed">Punch-ins de zoom para dar dinamismo. Toma como referencia la <b className="text-white/70">voz</b> (los subtítulos); si no hay, la música; si no, un ritmo fijo.</p>}
               </div>
 
               <div className="pt-4 mt-2 border-t border-white/5 space-y-3">

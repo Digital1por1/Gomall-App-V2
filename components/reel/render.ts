@@ -287,7 +287,7 @@ function easeOutBounce(x: number): number {
 // Auto-zoom (punch-in dinámico estilo Submagic): en cada "punto" (beat de la música, o ritmo fijo si no hay),
 // el video hace un zoom rápido y se asienta. Devuelve el multiplicador de escala en el instante t.
 function autoZoomScale(t: number, points: number[] | undefined, intensity: number): number {
-  const ATTACK = 0.12, DECAY = 0.85; // s: sube rápido, baja suave
+  const ATTACK = 0.18, DECAY = 1.3; // s: sube (algo más suave) y baja lento → menos "nervioso"
   let p: number;
   if (points && points.length) {
     // Último punto <= t (búsqueda lineal simple; la lista suele ser corta).
@@ -295,7 +295,7 @@ function autoZoomScale(t: number, points: number[] | undefined, intensity: numbe
     for (let i = 0; i < points.length; i++) { if (points[i] <= t) p = points[i]; else break; }
     if (p === -Infinity) return 1;
   } else {
-    p = Math.floor(t / 2.2) * 2.2; // sin beats → cada 2,2 s
+    p = Math.floor(t / 3.2) * 3.2; // sin voz ni música → cada 3,2 s
   }
   const dt = t - p;
   if (dt < ATTACK) return 1 + intensity * (dt / ATTACK);
