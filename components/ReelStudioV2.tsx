@@ -15,7 +15,7 @@ import {
 import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/render';
 import { exportProject, buildMixedAudio } from './reel/exporter';
 import { transcribe } from './reel/whisper';
-import { computePeaks, detectBeats, silenceBounds } from './reel/analyze';
+import { detectBeats } from './reel/analyze';
 import { SFX_LIST, SfxId, getSfx, previewSfx } from './reel/sfx';
 import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
 
@@ -189,7 +189,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [sfxBusy, setSfxBusy] = useState(false);
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
   const [viralMsg, setViralMsg] = useState('');
-  const [autoTrim, setAutoTrim] = useState(false);
+  // Cortes mágicos: elimina silencios (internos y de las puntas) transcribiendo la voz.
+  const [cutBusy, setCutBusy] = useState(false);
+  const [cutMsg, setCutMsg] = useState('');
+  const [cutGap, setCutGap] = useState(0.8);   // pausa mínima (s) que se considera silencio a cortar
+  const [cutInfo, setCutInfo] = useState('');  // resumen del último corte ("5 cortes, -3.2s")
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -616,7 +620,65 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } finally { setTranscribing(false); setSubMsg(''); }
   };
 
-  // Compaginado automático: opcional recorte de silencios + beat-sync + duración objetivo.
+  // Cortes mágicos (estilo Submagic): transcribe la voz de cada clip de video y elimina las pausas
+  // (internas y de las puntas) que superen cutGap. Reemplaza cada clip por sus tramos con voz,
+  // alterna un punch-in sutil para disimular los saltos y compacta la pista sin huecos.
+  const magicCut = async () => {
+    const vtrack = project.tracks.find(t => t.kind === 'video');
+    const vclips = vtrack ? vtrack.elements.filter(e => e.type === 'video' && !(e as VideoElement).muted) : [];
+    if (!vtrack || !vclips.length) { alert('Agregá un video con voz (no muteado) en la pista principal.'); return; }
+    setCutBusy(true); setCutMsg(''); setCutInfo('');
+    try {
+      const PAD = 0.15; // colchón alrededor de cada palabra para no cortar respiraciones al ras
+      const cache: Record<string, { start: number; end: number }[]> = {};
+      const newEls: ReelElement[] = [];
+      let cuts = 0, removed = 0;
+      for (const el of [...vtrack.elements].sort((a, b) => a.start - b.start)) {
+        if (el.type !== 'video' || (el as VideoElement).muted) { newEls.push(el); continue; }
+        const clip = el as VideoElement;
+        setCutMsg(`Analizando la voz de "${clip.name}"…`);
+        let segs = cache[clip.url];
+        if (!segs) { segs = await transcribe(clip.url, setCutMsg); cache[clip.url] = segs; }
+        const t0 = clip.trimStart || 0;
+        const t1 = clip.trimEnd ?? (clip.sourceDuration || t0 + clip.duration);
+        // Tramos CON voz dentro del recorte actual; pausas menores a cutGap se conservan (se fusionan).
+        const keeps: [number, number][] = [];
+        for (const s of segs) {
+          const a = Math.max(t0, s.start - PAD), b = Math.min(t1, s.end + PAD);
+          if (b <= a) continue;
+          if (keeps.length && a - keeps[keeps.length - 1][1] < cutGap) keeps[keeps.length - 1][1] = Math.max(keeps[keeps.length - 1][1], b);
+          else keeps.push([a, b]);
+        }
+        if (!keeps.length) { newEls.push(clip); continue; } // sin voz detectada (b-roll/música): no se toca
+        const baseScale = clip.transform?.scale ?? 100;
+        keeps.forEach(([a, b], i) => {
+          newEls.push({
+            ...clip,
+            id: i === 0 ? clip.id : genId('el'),
+            trimStart: a, trimEnd: b, duration: b - a,
+            // Punch-in alternado para disimular el salto del corte (solo si el clip no tiene zoom propio).
+            transform: baseScale === 100 ? { ...clip.transform, scale: i % 2 ? 106 : 100 } : clip.transform,
+            transition: i === 0 ? clip.transition : 'none',
+          } as VideoElement);
+        });
+        cuts += keeps.length - 1;
+        removed += (t1 - t0) - keeps.reduce((s, [a, b]) => s + (b - a), 0);
+      }
+      if (removed < 0.2) { setCutInfo('No encontré pausas para cortar con este nivel: probá "Agresivo" o revisá que el video tenga voz.'); return; }
+      // Re-compone la pista de video en fila, sin huecos.
+      let cursor = 0;
+      const placed = newEls.map(e => { const ne = { ...e, start: cursor } as ReelElement; cursor += e.duration; return ne; });
+      pause();
+      commit({ ...project, tracks: project.tracks.map(t => t.id === vtrack.id ? { ...t, elements: placed } : t) });
+      setCurrentTime(0);
+      setCutInfo(`Listo: ${cuts} corte${cuts === 1 ? '' : 's'}, se quitaron ${removed.toFixed(1)}s de silencio. Si algo quedó mal, deshacé con ⌘Z.`);
+    } catch (e: any) {
+      console.error('[cortes]', e);
+      alert(e?.message || 'No se pudieron cortar los silencios.');
+    } finally { setCutBusy(false); setCutMsg(''); }
+  };
+
+  // Compaginado automático: beat-sync + duración objetivo.
   const runAutoCompaginate = async () => {
     const vtrack = project.tracks.find(t => t.kind === 'video');
     const clips = vtrack ? vtrack.elements.filter(e => e.type === 'video' || e.type === 'image') : [];
@@ -624,16 +686,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     setCompaginating(true); setAutoMsg('');
     try {
       const boundsByEl: Record<string, [number, number]> = {};
-      if (autoTrim) {
-        setAutoMsg('Analizando silencios…');
-        for (const c of clips) {
-          const sd = (c as any).sourceDuration || c.duration;
-          if (c.type === 'video') {
-            const peaks = await computePeaks((c as VideoElement).url);
-            boundsByEl[c.id] = silenceBounds(peaks, sd);
-          } else { boundsByEl[c.id] = [0, sd]; }
-        }
-      }
       let beats: number[] = [];
       if (autoBeat) {
         setAutoMsg('Detectando beats…');
@@ -1475,7 +1527,24 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   : <p className="text-[11px] text-white/40 leading-relaxed">Punch-ins de zoom para dar dinamismo. Toma como referencia la <b className="text-white/70">voz</b> (los subtítulos); si no hay, la música; si no, un ritmo fijo.</p>}
               </Collapse>
 
-              <Collapse title="Auto-compaginado" icon="fa-scissors">
+              <Collapse title="Cortes mágicos" icon="fa-scissors">
+                <label className="text-[11px] text-white/50 font-semibold block">Qué pausas cortar</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([[0.5, 'Agresivo', '> 0,5s'], [0.8, 'Normal', '> 0,8s'], [1.2, 'Suave', '> 1,2s']] as [number, string, string][]).map(([val, lbl, sub]) => (
+                    <button key={val} onClick={() => setCutGap(val)} className="py-1.5 rounded-lg text-xs font-semibold border flex flex-col items-center gap-0.5"
+                      style={cutGap === val ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>
+                      {lbl}<span className="text-[9px] opacity-70">{sub}</span>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={magicCut} disabled={cutBusy} className="w-full py-2.5 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  {cutBusy ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{cutMsg || 'Cortando…'}</> : <><i className="fa-solid fa-scissors mr-2" />Cortar silencios (IA)</>}
+                </button>
+                {cutInfo && <p className="text-[11px] text-emerald-300/90 leading-relaxed"><i className="fa-solid fa-circle-check mr-1" />{cutInfo}</p>}
+                <p className="text-[11px] text-white/40 leading-relaxed">Transcribe la voz y elimina las pausas muertas de <b className="text-white/70">todo el video</b> (también las del medio), con un punch-in sutil que disimula cada salto. La música de fondo no se corta. Consejo: hacelo <b className="text-white/70">antes</b> de generar los subtítulos.</p>
+              </Collapse>
+
+              <Collapse title="Auto-compaginado" icon="fa-clock">
                 <label className="text-[11px] text-white/50 font-semibold block">Duración objetivo</label>
                 <div className="grid grid-cols-4 gap-2">
                   {([['auto', 'Auto'], [15, '15s'], [30, '30s'], [60, '60s']] as [ 'auto' | 15 | 30 | 60, string ][]).map(([val, lbl]) => (
@@ -1483,7 +1552,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       style={autoTarget === val ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>{lbl}</button>
                   ))}
                 </div>
-                <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={autoTrim} onChange={(e) => setAutoTrim(e.target.checked)} /> Recortar silencios (inicio/fin)</label>
                 <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={autoBeat} onChange={(e) => setAutoBeat(e.target.checked)} /> Cortar al ritmo de la música (beat-sync)</label>
                 <button onClick={runAutoCompaginate} disabled={compaginating} className="w-full py-2.5 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
                   {compaginating ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{autoMsg || 'Compaginando…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Compaginar automático</>}
