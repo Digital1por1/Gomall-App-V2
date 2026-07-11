@@ -16,6 +16,7 @@ import { MediaPool, drawReelFrame, seekVideosAt, sourceTime } from './reel/rende
 import { exportProject, buildMixedAudio } from './reel/exporter';
 import { transcribe } from './reel/whisper';
 import { computePeaks, detectBeats, silenceBounds } from './reel/analyze';
+import { SFX_LIST, SfxId, getSfx, previewSfx } from './reel/sfx';
 import { putMedia, getMedia, putProjectAt, getProjectAt, clearProjectAt, newMediaId } from './reelStorage';
 
 
@@ -57,6 +58,43 @@ const SUB_PRESETS: { id: string; label: string; group: 'viral' | 'sobrio' | 'mar
   { id: 'neon', label: 'Neón', group: 'marca', style: { color: '#FFE600', bg: null, stroke: true, weight: 900, size: 6.5, accent: '#FFE600', glow: true, anim: 'karaoke', karaoke: true, upper: false } },
 ];
 
+
+// Estilos virales 1-clic: cada uno orquesta subtítulos IA + hook + auto-zoom + SFX con una identidad propia.
+interface ViralStyle {
+  id: string; label: string; desc: string; chip: string;
+  capStyle: Partial<TextStyle>;     // estilo que se aplica a TODOS los subtítulos (conserva tipografía y palabra clave)
+  capEntrance: TransitionKind;      // transición de entrada de cada subtítulo
+  autoZoom: boolean;
+  sfx: boolean;
+  hookAccent: string;               // color del gancho de apertura
+  hookEmphasis: EmphasisKind;       // efecto continuo del gancho
+}
+const VIRAL_STYLES: ViralStyle[] = [
+  {
+    id: 'impacto', label: 'Impacto', chip: '#22C55E',
+    desc: 'Estilo Hormozi: palabras en caja verde, MAYÚSCULAS, zooms y golpe de apertura.',
+    capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#22C55E', glow: false, anim: 'wordbox', karaoke: false, upper: true },
+    capEntrance: 'none', autoZoom: true, sfx: true, hookAccent: '#22C55E', hookEmphasis: 'pulse',
+  },
+  {
+    id: 'viral', label: 'Viral', chip: '#FFE600',
+    desc: 'Karaoke amarillo con emojis, auto-zoom y whoosh en cada corte.',
+    capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: false },
+    capEntrance: 'none', autoZoom: true, sfx: true, hookAccent: '#FFE600', hookEmphasis: 'tada',
+  },
+  {
+    id: 'energia', label: 'Energía', chip: '#FF3B6B',
+    desc: 'MAYÚSCULAS que estallan palabra por palabra, pops y zooms al ritmo.',
+    capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: true },
+    capEntrance: 'pop', autoZoom: true, sfx: true, hookAccent: '#FF3B6B', hookEmphasis: 'shake',
+  },
+  {
+    id: 'pro', label: 'Pro', chip: '#5CC2DB',
+    desc: 'Sobrio para marcas: caja limpia, sin zooms ni efectos de sonido.',
+    capStyle: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, accent: '#5CC2DB', glow: false, anim: 'none', karaoke: false, upper: false },
+    capEntrance: 'fade', autoZoom: false, sfx: false, hookAccent: '#FFFFFF', hookEmphasis: 'none',
+  },
+];
 
 interface Props {
   profile: UserProfile | null;
@@ -104,7 +142,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [snap, setSnap] = useState(true);
   // Guías magnéticas del canvas: muestran las líneas de centro cuando el elemento arrastrado se alinea.
   const [guides, setGuides] = useState<{ x: boolean; y: boolean }>({ x: false, y: false });
-  const [tab, setTab] = useState<'media' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
+  const [tab, setTab] = useState<'media' | 'viral' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [ttsText, setTtsText] = useState('');
   const [ttsVoice, setTtsVoice] = useState('Kore');
@@ -133,6 +171,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [autoZoomSrc, setAutoZoomSrc] = useState<'' | 'voz' | 'música' | 'fijo'>('');
   const [beatMarks, setBeatMarks] = useState<number[]>([]); // beats (s, timeline) marcados en la línea de tiempo
   const [beatsBusy, setBeatsBusy] = useState(false);
+  const [sfxBusy, setSfxBusy] = useState(false);
+  const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
+  const [viralMsg, setViralMsg] = useState('');
   const [autoTrim, setAutoTrim] = useState(false);
   const [compaginating, setCompaginating] = useState(false);
   const [autoMsg, setAutoMsg] = useState('');
@@ -501,56 +542,62 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     commit(p);
   };
 
-  // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
-  const generateSubtitles = async () => {
+  // Construye los subtítulos sobre un proyecto dado y devuelve el proyecto nuevo (sin commit).
+  // Lo comparten el botón "Subtítulos automáticos" y los estilos virales 1-clic.
+  const buildSubtitles = async (p0: ReelProject, onMsg: (m: string) => void): Promise<ReelProject> => {
     // Preferimos la VOZ en off para transcribir (no la música). Heurística: nombre "voz/voice/off",
     // si no, el último audio agregado (la voz suele ir después de la música); si no hay audio, el video.
     const audios: AudioElement[] = [];
-    for (const t of project.tracks) for (const el of t.elements) if (el.type === 'audio') audios.push(el as AudioElement);
+    for (const t of p0.tracks) for (const el of t.elements) if (el.type === 'audio') audios.push(el as AudioElement);
     const voice = audios.find(a => /voz|voice|off|narrac/i.test(a.name)) || audios[audios.length - 1] || audios[0];
     let srcUrl: string | undefined = voice?.url;
-    if (!srcUrl) { for (const t of project.tracks) for (const el of t.elements) if (el.type === 'video') { srcUrl = (el as VideoElement).url; break; } }
-    if (!srcUrl) { alert('Agregá una voz en off, un audio o un video con voz para generar subtítulos.'); return; }
+    if (!srcUrl) { for (const t of p0.tracks) for (const el of t.elements) if (el.type === 'video') { srcUrl = (el as VideoElement).url; break; } }
+    if (!srcUrl) throw new Error('Agregá una voz en off, un audio o un video con voz para generar subtítulos.');
+    let segs: { text: string; start: number; end: number; hlWord?: string }[] = await transcribe(srcUrl, onMsg);
+    if (!segs.length) throw new Error('No se detectó voz en el audio.');
+    // Captions con IA (fase 1: emoji · fase 2: palabra clave destacada). Si falla, seguimos sin enriquecer.
+    if (aiCaptions) {
+      onMsg('Agregando emojis y destaques…');
+      try {
+        const res = await fetch('/api/enrich-captions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: segs.map(s => s.text) }) });
+        const data = await res.json().catch(() => null);
+        const items: any[] = Array.isArray(data?.items) ? data.items : [];
+        segs = segs.map((s, i) => {
+          const it = items[i] || {};
+          const emoji = String(it.emoji || '').trim();
+          const keyword = String(it.keyword || '').trim();
+          return { ...s, text: emoji ? `${s.text} ${emoji}` : s.text, hlWord: keyword || undefined };
+        });
+      } catch (e) { console.warn('[captions IA] no se pudo enriquecer, sigo sin emojis', e); }
+    }
+    const mkSub = (s: { text: string; start: number; end: number; hlWord?: string }) => makeTextElement(s.text, {
+      start: s.start, duration: Math.max(0.4, s.end - s.start),
+      name: 'Subtítulo',
+      transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
+      style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600', ...(s.hlWord ? { hlWord: s.hlWord } : {}) },
+    });
+    let p = p0;
+    // Los subtítulos van a una pista de overlay DEDICADA (una vacía, o una nueva) para no pisar logo/textos.
+    let subTrackId = p.tracks.find(t => t.kind === 'overlay' && t.elements.length === 0)?.id;
+    let rest = segs;
+    if (!subTrackId) {
+      const first = mkSub(segs[0]);
+      p = addOverlayElement(p, first);            // crea/usa una pista de overlay libre
+      subTrackId = findElement(p, first.id)!.track.id;
+      rest = segs.slice(1);
+    }
+    for (const s of rest) p = addElement(p, subTrackId, mkSub(s));
+    return p;
+  };
+
+  // Subtítulos automáticos con Whisper: transcribe la voz y crea un elemento de texto por segmento.
+  const generateSubtitles = async () => {
     setTranscribing(true); setSubMsg('');
     try {
-      let segs: { text: string; start: number; end: number; hlWord?: string }[] = await transcribe(srcUrl, setSubMsg);
-      if (!segs.length) { alert('No se detectó voz en el audio.'); return; }
-      // Captions con IA (fase 1: emoji · fase 2: palabra clave destacada). Si falla, seguimos sin enriquecer.
-      if (aiCaptions) {
-        setSubMsg('Agregando emojis y destaques…');
-        try {
-          const res = await fetch('/api/enrich-captions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: segs.map(s => s.text) }) });
-          const data = await res.json().catch(() => null);
-          const items: any[] = Array.isArray(data?.items) ? data.items : [];
-          segs = segs.map((s, i) => {
-            const it = items[i] || {};
-            const emoji = String(it.emoji || '').trim();
-            const keyword = String(it.keyword || '').trim();
-            return { ...s, text: emoji ? `${s.text} ${emoji}` : s.text, hlWord: keyword || undefined };
-          });
-        } catch (e) { console.warn('[captions IA] no se pudo enriquecer, sigo sin emojis', e); }
-      }
-      const mkSub = (s: { text: string; start: number; end: number; hlWord?: string }) => makeTextElement(s.text, {
-        start: s.start, duration: Math.max(0.4, s.end - s.start),
-        name: 'Subtítulo',
-        transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
-        style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600', ...(s.hlWord ? { hlWord: s.hlWord } : {}) },
-      });
-      let p = project;
-      // Los subtítulos van a una pista de overlay DEDICADA (una vacía, o una nueva) para no pisar logo/textos.
-      let subTrackId = p.tracks.find(t => t.kind === 'overlay' && t.elements.length === 0)?.id;
-      let rest = segs;
-      if (!subTrackId) {
-        const first = mkSub(segs[0]);
-        p = addOverlayElement(p, first);            // crea/usa una pista de overlay libre
-        subTrackId = findElement(p, first.id)!.track.id;
-        rest = segs.slice(1);
-      }
-      for (const s of rest) p = addElement(p, subTrackId, mkSub(s));
-      commit(p);
+      commit(await buildSubtitles(project, setSubMsg));
     } catch (e: any) {
       console.error('[subtitulos v2]', e);
-      alert('No se pudieron generar los subtítulos: ' + (e?.message || 'error'));
+      alert(e?.message || 'No se pudieron generar los subtítulos.');
     } finally { setTranscribing(false); setSubMsg(''); }
   };
 
@@ -591,29 +638,33 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   //   2) la música → beats detectados.
   //   3) sin nada → ritmo fijo.
   // En todos los casos separa los zooms al menos 2,6s para que no se repita tanto.
+  const computeZoomPoints = async (p: ReelProject): Promise<{ points: number[]; src: 'voz' | 'música' | 'fijo' }> => {
+    let points: number[] = [];
+    let src: 'voz' | 'música' | 'fijo' = 'fijo';
+    const subs = p.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && (e as TextElement).name === 'Subtítulo');
+    if (subs.length) {
+      points = subs.map(s => s.start).sort((a, b) => a - b);
+      src = 'voz';
+    } else {
+      const music = p.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
+      if (music) {
+        const raw = await detectBeats(music.url);
+        points = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0))).sort((a, b) => a - b);
+        if (points.length) src = 'música';
+      }
+    }
+    const MIN_GAP = 2.6;
+    const spaced: number[] = [];
+    for (const q of points) { if (!spaced.length || q - spaced[spaced.length - 1] >= MIN_GAP) spaced.push(q); }
+    return { points: spaced, src };
+  };
   const toggleAutoZoom = async () => {
     if (project.autoZoom) { commit({ ...project, autoZoom: false, zoomBeats: [] }); setAutoZoomSrc(''); return; }
     setAutoZoomBusy(true);
     try {
-      let points: number[] = [];
-      let src: 'voz' | 'música' | 'fijo' = 'fijo';
-      const subs = project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && (e as TextElement).name === 'Subtítulo');
-      if (subs.length) {
-        points = subs.map(s => s.start).sort((a, b) => a - b);
-        src = 'voz';
-      } else {
-        const music = project.tracks.flatMap(t => t.elements).find(e => e.type === 'audio') as AudioElement | undefined;
-        if (music) {
-          const raw = await detectBeats(music.url);
-          points = raw.map(b => music.start + Math.max(0, b - (music.trimStart || 0))).sort((a, b) => a - b);
-          if (points.length) src = 'música';
-        }
-      }
-      const MIN_GAP = 2.6;
-      const spaced: number[] = [];
-      for (const p of points) { if (!spaced.length || p - spaced[spaced.length - 1] >= MIN_GAP) spaced.push(p); }
+      const { points, src } = await computeZoomPoints(project);
       setAutoZoomSrc(src);
-      commit({ ...project, autoZoom: true, zoomBeats: spaced });
+      commit({ ...project, autoZoom: true, zoomBeats: points });
     } catch (e) {
       console.warn('[auto-zoom]', e);
       setAutoZoomSrc('fijo');
@@ -700,6 +751,128 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       setBeatMarks(marks);
     } catch { alert('No se pudieron detectar los beats.'); }
     finally { setBeatsBusy(false); }
+  };
+
+  // ---------- efectos de sonido (SFX sintetizados, $0) ----------
+  const hasSfx = project.tracks.some(t => t.elements.some(e => e.type === 'audio' && /^SFX/.test(e.name)));
+  // Quita todos los SFX (elementos "SFX …") y las pistas "SFX" que queden vacías.
+  const stripSfx = (p: ReelProject): ReelProject => ({
+    ...p,
+    tracks: p.tracks
+      .map(t => ({ ...t, elements: t.elements.filter(e => !(e.type === 'audio' && /^SFX/.test(e.name))) }))
+      .filter(t => !(t.kind === 'audio' && t.name === 'SFX' && t.elements.length === 0)),
+  });
+  // SFX automáticos estilo Submagic: whoosh en cada corte de video, pop en las palabras clave
+  // y un impacto grave bajo el hook de apertura. Van todos juntos en una pista "SFX".
+  const buildAutoSfx = async (p0: ReelProject): Promise<ReelProject> => {
+    const p = stripSfx(p0);
+    const els: AudioElement[] = [];
+    const vtrack = p.tracks.find(t => t.kind === 'video');
+    const clips = vtrack ? [...vtrack.elements].filter(e => e.type === 'video' || e.type === 'image').sort((a, b) => a.start - b.start) : [];
+    if (clips.length > 1) {
+      const whoosh = await getSfx('whoosh');
+      // El whoosh arranca un pelín antes del corte para que el "golpe" del barrido caiga justo en el cambio.
+      for (let i = 1; i < clips.length; i++) els.push(makeAudioElement(whoosh.url, whoosh.duration, { name: 'SFX Whoosh', start: Math.max(0, clips[i].start - 0.22), volume: 0.5 }));
+    }
+    const keySubs = p.tracks.flatMap(t => t.elements)
+      .filter(e => e.type === 'text' && e.name === 'Subtítulo' && (e as TextElement).style.hlWord)
+      .sort((a, b) => a.start - b.start);
+    if (keySubs.length) {
+      const pop = await getSfx('pop');
+      let last = -Infinity;
+      for (const s of keySubs) {
+        if (s.start - last >= 1.5) { els.push(makeAudioElement(pop.url, pop.duration, { name: 'SFX Pop', start: s.start, volume: 0.5 })); last = s.start; }
+      }
+    }
+    const hasHook = p.tracks.some(t => t.elements.some(e => e.type === 'text' && e.name === 'Hook'));
+    if (hasHook) {
+      const boom = await getSfx('boom');
+      els.push(makeAudioElement(boom.url, boom.duration, { name: 'SFX Impacto', start: 0, volume: 0.55 }));
+    }
+    if (!els.length) return p;
+    const track: Track = { id: genId('trk'), kind: 'audio', name: 'SFX', elements: els.sort((a, b) => a.start - b.start), muted: false, hidden: false, locked: false };
+    return { ...p, tracks: [...p.tracks, track] };
+  };
+  const toggleAutoSfx = async () => {
+    if (hasSfx) { commit(stripSfx(project)); return; }
+    setSfxBusy(true);
+    try {
+      const p = await buildAutoSfx(project);
+      if (!p.tracks.some(t => t.kind === 'audio' && t.name === 'SFX')) {
+        alert('No encontré dónde colocar efectos: agregá más de un clip (whoosh en los cortes) o generá los subtítulos con IA (pop en las palabras clave).');
+        return;
+      }
+      commit(p);
+    } catch (e) { console.warn('[sfx]', e); alert('No se pudieron generar los efectos de sonido.'); }
+    finally { setSfxBusy(false); }
+  };
+  // Inserta un SFX suelto en el cabezal (pista de audio libre o nueva).
+  const insertSfx = async (id: SfxId) => {
+    try {
+      const s = await getSfx(id);
+      const label = SFX_LIST.find(x => x.id === id)?.label || id;
+      commit(addAudioElement(project, makeAudioElement(s.url, s.duration, { name: `SFX ${label}`, start: currentTime, volume: 0.6 })));
+    } catch (e) { console.warn('[sfx]', e); }
+  };
+
+  // ---------- estilos virales 1-clic ----------
+  // Orquesta todo el look estilo Submagic: subtítulos IA (si faltan) → estilo de captions →
+  // hook de apertura con IA → auto-zoom → SFX. Cada paso que falla se salta sin romper el resto.
+  const applyViralStyle = async (vs: ViralStyle) => {
+    if (viralBusy) return;
+    setViralBusy(vs.id);
+    try {
+      let p = project;
+      let subs = p.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[];
+      if (!subs.length) {
+        setViralMsg('Transcribiendo la voz…');
+        p = await buildSubtitles(p, setViralMsg);
+        subs = p.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[];
+      }
+      setViralMsg('Aplicando el estilo…');
+      for (const s of subs) {
+        p = updateElement(p, s.id, {
+          style: { ...s.style, ...vs.capStyle },
+          transition: vs.capEntrance,
+          transitionDur: vs.capEntrance === 'none' ? 0 : 0.3,
+        } as any);
+      }
+      // Hook de apertura: borra el anterior (para re-aplicar sin duplicar) y genera uno nuevo con IA.
+      for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text' && el.name === 'Hook') p = removeElement(p, el.id);
+      setViralMsg('Generando el gancho de apertura…');
+      try {
+        const res = await fetch('/api/hook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: subs.map(s => s.text) }) });
+        const data = await res.json().catch(() => null);
+        const hookText = String(data?.hook || '').trim();
+        if (hookText) {
+          const base = makeTextElement(hookText, {
+            name: 'Hook', start: 0, duration: 2.6,
+            transform: { x: 50, y: 34, scale: 100, rotation: 0, opacity: 100 },
+            style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 9, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: vs.hookAccent, upper: true, anim: 'pop' },
+          });
+          p = addOverlayElement(p, { ...base, transition: 'pop' as TransitionKind, transitionDur: 0.45, emphasis: vs.hookEmphasis });
+        }
+      } catch (e) { console.warn('[viral] hook falló, sigo sin gancho', e); }
+      if (vs.autoZoom) {
+        setViralMsg('Calculando los zooms…');
+        const { points, src } = await computeZoomPoints(p);
+        p = { ...p, autoZoom: true, zoomBeats: points };
+        setAutoZoomSrc(src);
+      } else {
+        p = { ...p, autoZoom: false, zoomBeats: [] };
+        setAutoZoomSrc('');
+      }
+      p = stripSfx(p);
+      if (vs.sfx) {
+        setViralMsg('Agregando efectos de sonido…');
+        p = await buildAutoSfx(p);
+      }
+      commit(p);
+      setCurrentTime(0);
+    } catch (e: any) {
+      console.error('[viral]', e);
+      alert(e?.message || 'No se pudo aplicar el estilo.');
+    } finally { setViralBusy(''); setViralMsg(''); }
   };
 
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
@@ -992,6 +1165,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   // ---------- UI ----------
   const RAIL: { id: typeof tab; icon: string; label: string }[] = [
     { id: 'media', icon: 'fa-photo-film', label: 'Media' },
+    { id: 'viral', icon: 'fa-bolt', label: 'Estilos virales' },
     { id: 'texto', icon: 'fa-font', label: 'Texto' },
     { id: 'marca', icon: 'fa-crown', label: 'Marca' },
     { id: 'stickers', icon: 'fa-face-smile', label: 'Stickers' },
@@ -1052,6 +1226,30 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Subir logo</button>
               <p className="text-[11px] text-white/40 leading-relaxed">Los videos van en fila en la pista principal; imágenes y logo como overlay que reposicionás arrastrando en el preview.</p>
             </>)}
+            {tab === 'viral' && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-white/40 leading-relaxed">Un clic y el reel queda listo: <b className="text-white/70">subtítulos con IA</b>, <b className="text-white/70">gancho de apertura</b>, <b className="text-white/70">auto-zoom</b> y <b className="text-white/70">efectos de sonido</b>. Necesitás un video o audio con voz.</p>
+                {VIRAL_STYLES.map(vs => (
+                  <button key={vs.id} onClick={() => applyViralStyle(vs)} disabled={!!viralBusy}
+                    className="w-full text-left p-3 rounded-xl border transition-colors disabled:opacity-60"
+                    style={{ borderColor: viralBusy === vs.id ? vs.chip : 'rgba(255,255,255,.12)', background: viralBusy === vs.id ? `${vs.chip}14` : 'rgba(255,255,255,.03)' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: vs.chip }} />
+                      <b className="text-white text-sm">{vs.label}</b>
+                      {viralBusy === vs.id && <i className="fa-solid fa-circle-notch fa-spin ml-auto" style={{ color: vs.chip }} />}
+                    </div>
+                    <div className="text-[11px] text-white/45 mt-1 leading-relaxed">{vs.desc}</div>
+                    <div className="flex gap-1 mt-2 flex-wrap">
+                      {['Subtítulos IA', 'Hook IA', ...(vs.autoZoom ? ['Auto-zoom'] : []), ...(vs.sfx ? ['SFX'] : [])].map(chip => (
+                        <span key={chip} className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-white/60">{chip}</span>
+                      ))}
+                    </div>
+                  </button>
+                ))}
+                {viralBusy && <p className="text-[11px] text-white/60"><i className="fa-solid fa-circle-notch fa-spin mr-1.5" style={{ color: BRAND }} />{viralMsg || 'Aplicando…'}</p>}
+                <p className="text-[11px] text-white/40 leading-relaxed">Podés re-aplicar otro estilo cuando quieras: reemplaza el look sin duplicar nada. Después ajustá lo que quieras a mano.</p>
+              </div>
+            )}
             {tab === 'texto' && (<>
               <button onClick={addText} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}><i className="fa-solid fa-plus mr-2" />Agregar texto</button>
               <button onClick={generateSubtitles} disabled={transcribing} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
@@ -1122,6 +1320,26 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 {recording ? <><i className="fa-solid fa-stop mr-2" />Detener grabación</> : <><i className="fa-solid fa-microphone mr-2" />Grabar voz en off</>}
               </button>
               <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio. La grabación pide permiso del micrófono.</p>
+
+              {/* Efectos de sonido (sintetizados en el navegador, $0) */}
+              <div className="pt-3 mt-1 border-t border-white/10 space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40"><i className="fa-solid fa-volume-high mr-1" />Efectos de sonido</div>
+                <button onClick={toggleAutoSfx} disabled={sfxBusy}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={hasSfx ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff', borderColor: BRAND } : { borderColor: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.75)' }}>
+                  {sfxBusy ? <><i className="fa-solid fa-circle-notch fa-spin" />Colocando efectos…</> : <><i className="fa-solid fa-wand-magic-sparkles" />SFX automáticos {hasSfx ? 'activados' : ''}</>}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">Whoosh en cada <b className="text-white/70">corte</b>, pop en las <b className="text-white/70">palabras clave</b> de los subtítulos. Se apagan con el mismo botón.</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {SFX_LIST.map(s => (
+                    <button key={s.id} onClick={() => insertSfx(s.id)} onMouseEnter={() => { previewSfx(s.id); }} title={s.desc}
+                      className="py-2 rounded-lg border border-white/12 text-[10px] font-semibold text-white/70 hover:bg-white/5 flex flex-col items-center gap-1">
+                      <i className={`fa-solid ${s.icon}`} style={{ color: BRAND }} /> {s.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-white/40 leading-relaxed">Pasá el mouse para escucharlos; el clic lo inserta en el cabezal.</p>
+              </div>
 
               {/* Narración con IA (Gemini TTS) */}
               <div className="pt-3 mt-1 border-t border-white/10 space-y-2">

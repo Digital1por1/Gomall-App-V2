@@ -550,6 +550,40 @@ ${numbered}` }] }],
     }
   });
 
+  // Hook con IA: a partir de la transcripción del reel, devuelve un gancho de apertura corto y punchy.
+  app.post("/api/hook", async (req, res) => {
+    try {
+      const g = await guard(req, res); if (!g.ok) return; // texto: no descuenta cuota (solo verifica identidad)
+      const lines: string[] = Array.isArray(req.body?.lines) ? req.body.lines.map((l: any) => String(l || '')) : [];
+      if (!lines.length) return res.status(400).json({ error: "Falta la transcripción del reel." });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text:
+`Sos editor de reels virales. Con esta transcripción, escribí UN gancho ("hook") de apertura en español rioplatense: máximo 6 palabras, directo, que genere curiosidad o urgencia (estilo "Nadie te cuenta esto", "El error que todos cometen"). Sin comillas, sin emojis, sin punto final. Solo JSON.
+
+Transcripción:
+${lines.join('\n').slice(0, 2000)}` }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: { hook: { type: Type.STRING } },
+            required: ["hook"],
+          },
+        },
+      });
+      let text = "";
+      if (typeof response?.text === "string") text = response.text;
+      else text = (response?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      let hook = "";
+      try { hook = String(JSON.parse(text)?.hook || "").trim(); } catch { hook = ""; }
+      res.json({ hook, usage: extractUsage(response) });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error al generar el hook" });
+    }
+  });
+
   // Eliminar una cuenta POR COMPLETO (solo admin). Borra Auth + perfil + subcolecciones + Storage.
   app.post("/api/admin/delete-user", async (req, res) => {
     try {
