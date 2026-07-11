@@ -59,42 +59,55 @@ const SUB_PRESETS: { id: string; label: string; group: 'viral' | 'sobrio' | 'mar
 ];
 
 
-// Estilos virales 1-clic: cada uno orquesta subtítulos IA + hook + auto-zoom + SFX con una identidad propia.
+// Estilos virales 1-clic: cada uno orquesta subtítulos IA + auto-zoom + SFX con una identidad propia.
 interface ViralStyle {
   id: string; label: string; desc: string; chip: string;
   capStyle: Partial<TextStyle>;     // estilo que se aplica a TODOS los subtítulos (conserva tipografía y palabra clave)
   capEntrance: TransitionKind;      // transición de entrada de cada subtítulo
   autoZoom: boolean;
   sfx: boolean;
-  hookAccent: string;               // color del gancho de apertura
-  hookEmphasis: EmphasisKind;       // efecto continuo del gancho
 }
 const VIRAL_STYLES: ViralStyle[] = [
   {
     id: 'impacto', label: 'Impacto', chip: '#22C55E',
-    desc: 'Estilo Hormozi: palabras en caja verde, MAYÚSCULAS, zooms y golpe de apertura.',
+    desc: 'Estilo Hormozi: palabras en caja verde, MAYÚSCULAS y zooms.',
     capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#22C55E', glow: false, anim: 'wordbox', karaoke: false, upper: true },
-    capEntrance: 'none', autoZoom: true, sfx: true, hookAccent: '#22C55E', hookEmphasis: 'pulse',
+    capEntrance: 'none', autoZoom: true, sfx: true,
   },
   {
     id: 'viral', label: 'Viral', chip: '#FFE600',
     desc: 'Karaoke amarillo con emojis, auto-zoom y whoosh en cada corte.',
     capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7, accent: '#FFE600', glow: false, anim: 'karaoke', karaoke: true, upper: false },
-    capEntrance: 'none', autoZoom: true, sfx: true, hookAccent: '#FFE600', hookEmphasis: 'tada',
+    capEntrance: 'none', autoZoom: true, sfx: true,
   },
   {
     id: 'energia', label: 'Energía', chip: '#FF3B6B',
     desc: 'MAYÚSCULAS que estallan palabra por palabra, pops y zooms al ritmo.',
     capStyle: { color: '#FFFFFF', bg: null, stroke: true, weight: 900, size: 7.5, accent: '#FF3B6B', glow: false, anim: 'pop', karaoke: false, upper: true },
-    capEntrance: 'pop', autoZoom: true, sfx: true, hookAccent: '#FF3B6B', hookEmphasis: 'shake',
+    capEntrance: 'pop', autoZoom: true, sfx: true,
   },
   {
     id: 'pro', label: 'Pro', chip: '#5CC2DB',
     desc: 'Sobrio para marcas: caja limpia, sin zooms ni efectos de sonido.',
     capStyle: { color: '#FFFFFF', bg: '#000000', stroke: false, weight: 800, size: 6, accent: '#5CC2DB', glow: false, anim: 'none', karaoke: false, upper: false },
-    capEntrance: 'fade', autoZoom: false, sfx: false, hookAccent: '#FFFFFF', hookEmphasis: 'none',
+    capEntrance: 'fade', autoZoom: false, sfx: false,
   },
 ];
+
+// Sección desplegable de los paneles laterales: agrupa las opciones para que no se mezcle todo.
+const Collapse: React.FC<{ title: string; icon?: string; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, icon, defaultOpen, children }) => {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white/60 hover:bg-white/5">
+        {icon && <i className={`fa-solid ${icon}`} style={{ color: BRAND }} />}
+        <span className="flex-1 text-left">{title}</span>
+        <i className={`fa-solid fa-chevron-down text-white/35 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="px-3 pb-3 pt-1 space-y-2 border-t border-white/5">{children}</div>}
+    </div>
+  );
+};
 
 interface Props {
   profile: UserProfile | null;
@@ -142,6 +155,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [snap, setSnap] = useState(true);
   // Guías magnéticas del canvas: muestran las líneas de centro cuando el elemento arrastrado se alinea.
   const [guides, setGuides] = useState<{ x: boolean; y: boolean }>({ x: false, y: false });
+  // Overlay de márgenes de seguridad: zonas que tapa la UI de Instagram/TikTok (solo guía, no se exporta).
+  const [safeZones, setSafeZones] = useState(false);
   const [tab, setTab] = useState<'media' | 'viral' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [ttsText, setTtsText] = useState('');
@@ -762,8 +777,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       .map(t => ({ ...t, elements: t.elements.filter(e => !(e.type === 'audio' && /^SFX/.test(e.name))) }))
       .filter(t => !(t.kind === 'audio' && t.name === 'SFX' && t.elements.length === 0)),
   });
-  // SFX automáticos estilo Submagic: whoosh en cada corte de video, pop en las palabras clave
-  // y un impacto grave bajo el hook de apertura. Van todos juntos en una pista "SFX".
+  // SFX automáticos estilo Submagic: whoosh en cada corte de video y pop en las palabras clave
+  // de los subtítulos. Van todos juntos en una pista "SFX".
   const buildAutoSfx = async (p0: ReelProject): Promise<ReelProject> => {
     const p = stripSfx(p0);
     const els: AudioElement[] = [];
@@ -783,11 +798,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       for (const s of keySubs) {
         if (s.start - last >= 1.5) { els.push(makeAudioElement(pop.url, pop.duration, { name: 'SFX Pop', start: s.start, volume: 0.5 })); last = s.start; }
       }
-    }
-    const hasHook = p.tracks.some(t => t.elements.some(e => e.type === 'text' && e.name === 'Hook'));
-    if (hasHook) {
-      const boom = await getSfx('boom');
-      els.push(makeAudioElement(boom.url, boom.duration, { name: 'SFX Impacto', start: 0, volume: 0.55 }));
     }
     if (!els.length) return p;
     const track: Track = { id: genId('trk'), kind: 'audio', name: 'SFX', elements: els.sort((a, b) => a.start - b.start), muted: false, hidden: false, locked: false };
@@ -817,7 +827,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
   // ---------- estilos virales 1-clic ----------
   // Orquesta todo el look estilo Submagic: subtítulos IA (si faltan) → estilo de captions →
-  // hook de apertura con IA → auto-zoom → SFX. Cada paso que falla se salta sin romper el resto.
+  // auto-zoom → SFX. Cada paso que falla se salta sin romper el resto.
   const applyViralStyle = async (vs: ViralStyle) => {
     if (viralBusy) return;
     setViralBusy(vs.id);
@@ -837,22 +847,6 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
           transitionDur: vs.capEntrance === 'none' ? 0 : 0.3,
         } as any);
       }
-      // Hook de apertura: borra el anterior (para re-aplicar sin duplicar) y genera uno nuevo con IA.
-      for (const t of p.tracks) for (const el of t.elements) if (el.type === 'text' && el.name === 'Hook') p = removeElement(p, el.id);
-      setViralMsg('Generando el gancho de apertura…');
-      try {
-        const res = await fetch('/api/hook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: subs.map(s => s.text) }) });
-        const data = await res.json().catch(() => null);
-        const hookText = String(data?.hook || '').trim();
-        if (hookText) {
-          const base = makeTextElement(hookText, {
-            name: 'Hook', start: 0, duration: 2.6,
-            transform: { x: 50, y: 34, scale: 100, rotation: 0, opacity: 100 },
-            style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 9, weight: 900, bg: null, stroke: true, align: 'center', karaoke: false, accent: vs.hookAccent, upper: true, anim: 'pop' },
-          });
-          p = addOverlayElement(p, { ...base, transition: 'pop' as TransitionKind, transitionDur: 0.45, emphasis: vs.hookEmphasis });
-        }
-      } catch (e) { console.warn('[viral] hook falló, sigo sin gancho', e); }
       if (vs.autoZoom) {
         setViralMsg('Calculando los zooms…');
         const { points, src } = await computeZoomPoints(p);
@@ -1228,7 +1222,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             </>)}
             {tab === 'viral' && (
               <div className="space-y-3">
-                <p className="text-[11px] text-white/40 leading-relaxed">Un clic y el reel queda listo: <b className="text-white/70">subtítulos con IA</b>, <b className="text-white/70">gancho de apertura</b>, <b className="text-white/70">auto-zoom</b> y <b className="text-white/70">efectos de sonido</b>. Necesitás un video o audio con voz.</p>
+                <p className="text-[11px] text-white/40 leading-relaxed">Un clic y el reel queda listo: <b className="text-white/70">subtítulos con IA</b>, <b className="text-white/70">auto-zoom</b> y <b className="text-white/70">efectos de sonido</b>. Necesitás un video o audio con voz.</p>
                 {VIRAL_STYLES.map(vs => (
                   <button key={vs.id} onClick={() => applyViralStyle(vs)} disabled={!!viralBusy}
                     className="w-full text-left p-3 rounded-xl border transition-colors disabled:opacity-60"
@@ -1240,7 +1234,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     </div>
                     <div className="text-[11px] text-white/45 mt-1 leading-relaxed">{vs.desc}</div>
                     <div className="flex gap-1 mt-2 flex-wrap">
-                      {['Subtítulos IA', 'Hook IA', ...(vs.autoZoom ? ['Auto-zoom'] : []), ...(vs.sfx ? ['SFX'] : [])].map(chip => (
+                      {['Subtítulos IA', ...(vs.autoZoom ? ['Auto-zoom'] : []), ...(vs.sfx ? ['SFX'] : [])].map(chip => (
                         <span key={chip} className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-white/60">{chip}</span>
                       ))}
                     </div>
@@ -1268,8 +1262,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 </button>
                 <p className="text-[11px] text-white/40 leading-relaxed">Aplica tus tipografías y colores de marca a los textos y agrega tu logo. El logo lo movés arrastrándolo en el preview (y lo escalás/rotás con las manijas).</p>
 
-                <div className="pt-2 border-t border-white/5">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Logos</div>
+                <Collapse title="Logos" icon="fa-stamp" defaultOpen>
                   {kit?.logoUrls?.length ? (
                     <div className="grid grid-cols-3 gap-2">
                       {kit.logoUrls.map((u, i) => (
@@ -1280,25 +1273,23 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                     </div>
                   ) : <p className="text-[11px] text-white/40">Tu marca no tiene logos cargados.</p>}
                   <button onClick={addLogo} className="w-full mt-2 py-2.5 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-upload mr-2" />Subir otro logo</button>
-                </div>
+                </Collapse>
 
                 {kit && (kit.headlineFont || kit.descriptionFont) && (
-                  <div className="pt-2 border-t border-white/5">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Tipografías</div>
+                  <Collapse title="Tipografías" icon="fa-font">
                     <div className="text-[11px] text-white/60 space-y-0.5">
                       {kit.headlineFont && <div>Título: <b className="text-white" style={{ fontFamily: kit.headlineFont }}>{kit.headlineFont}</b></div>}
                       {kit.descriptionFont && <div>Texto: <b className="text-white" style={{ fontFamily: kit.descriptionFont }}>{kit.descriptionFont}</b></div>}
                     </div>
-                  </div>
+                  </Collapse>
                 )}
 
                 {kit?.brandColors?.length ? (
-                  <div className="pt-2 border-t border-white/5">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Colores</div>
+                  <Collapse title="Colores" icon="fa-palette">
                     <div className="flex gap-1.5 flex-wrap">
                       {kit.brandColors.map((c, i) => <span key={i} className="w-6 h-6 rounded-md border border-white/15" style={{ background: c }} title={c} />)}
                     </div>
-                  </div>
+                  </Collapse>
                 ) : null}
 
                 {!kit && <p className="text-[11px] text-amber-300/80 leading-relaxed"><i className="fa-solid fa-triangle-exclamation mr-1" />No tenés un brand kit configurado: cargá tu marca (logo, tipografías, colores) desde Ajustes de marca para aprovechar esta sección.</p>}
@@ -1315,15 +1306,16 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </div>
             )}
             {tab === 'audio' && (<>
-              <button onClick={() => fileAudioRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-music mr-2" />Subir música / audio</button>
-              <button onClick={recording ? stopRec : startRec} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: recording ? '#dc2626' : `linear-gradient(135deg,${BRAND},#f0814f)` }}>
-                {recording ? <><i className="fa-solid fa-stop mr-2" />Detener grabación</> : <><i className="fa-solid fa-microphone mr-2" />Grabar voz en off</>}
-              </button>
-              <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio. La grabación pide permiso del micrófono.</p>
+              <Collapse title="Música y voz" icon="fa-music" defaultOpen>
+                <button onClick={() => fileAudioRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-music mr-2" />Subir música / audio</button>
+                <button onClick={recording ? stopRec : startRec} className="w-full py-3 rounded-xl text-white text-xs font-bold" style={{ background: recording ? '#dc2626' : `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  {recording ? <><i className="fa-solid fa-stop mr-2" />Detener grabación</> : <><i className="fa-solid fa-microphone mr-2" />Grabar voz en off</>}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">La música/voz se agrega en la pista de audio. La grabación pide permiso del micrófono.</p>
+              </Collapse>
 
               {/* Efectos de sonido (sintetizados en el navegador, $0) */}
-              <div className="pt-3 mt-1 border-t border-white/10 space-y-2">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40"><i className="fa-solid fa-volume-high mr-1" />Efectos de sonido</div>
+              <Collapse title="Efectos de sonido" icon="fa-volume-high">
                 <button onClick={toggleAutoSfx} disabled={sfxBusy}
                   className="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 disabled:opacity-50"
                   style={hasSfx ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff', borderColor: BRAND } : { borderColor: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.75)' }}>
@@ -1339,12 +1331,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   ))}
                 </div>
                 <p className="text-[11px] text-white/40 leading-relaxed">Pasá el mouse para escucharlos; el clic lo inserta en el cabezal.</p>
-              </div>
+              </Collapse>
 
               {/* Narración con IA (Gemini TTS) */}
-              <div className="pt-3 mt-1 border-t border-white/10 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40"><i className="fa-solid fa-wand-magic-sparkles mr-1" />Narración con IA</div>
+              <Collapse title="Narración con IA" icon="fa-microphone-lines">
+                <div className="flex justify-end">
                   <button
                     onClick={() => {
                       const txt = project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text').map(e => (e as TextElement).text).join('. ').trim();
@@ -1375,7 +1366,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   {ttsBusy ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Generando…</> : <><i className="fa-solid fa-microphone-lines mr-2" />Generar narración</>}
                 </button>
                 <p className="text-[11px] text-white/40 leading-relaxed">Se agrega como pista de audio en la posición del cursor. Usa tu misma clave de Gemini (consume tokens del plan).</p>
-              </div>
+              </Collapse>
             </>)}
             {tab === 'animacion' && (
               <div className="space-y-4">
@@ -1383,8 +1374,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   ? <p className="text-[11px] text-amber-300/80"><i className="fa-solid fa-hand-pointer mr-1" />Tocá un elemento en la timeline para animarlo.</p>
                   : <p className="text-[11px] text-white/40 leading-relaxed">Aplicá efectos al elemento seleccionado.</p>}
 
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Entrada</div>
+                <Collapse title="Entrada" icon="fa-arrow-right-to-bracket" defaultOpen>
                   <div className="grid grid-cols-2 gap-2">
                     {([
                       { id: 'fade', label: 'Aparecer', icon: 'fa-circle-half-stroke' },
@@ -1411,10 +1401,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       );
                     })}
                   </div>
-                </div>
+                </Collapse>
 
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">Énfasis (continuo)</div>
+                <Collapse title="Énfasis (continuo)" icon="fa-heart-pulse">
                   <div className="grid grid-cols-2 gap-2">
                     {([
                       { id: 'pulse', label: 'Pulso', icon: 'fa-heart' },
@@ -1439,7 +1428,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       );
                     })}
                   </div>
-                </div>
+                </Collapse>
 
                 {selected && selected.type === 'image' && findElement(project, selected.id)?.track.kind === 'video' && (
                   <label className="flex items-center gap-2 text-xs text-white/70 pt-1"><input type="checkbox" checked={!!(selected as any).kenBurns} onChange={(e) => patchSel({ kenBurns: e.target.checked } as any)} /> Zoom lento en la imagen (Ken Burns)</label>
@@ -1452,18 +1441,27 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               </div>
             )}
             {tab === 'ajustes' && (<>
-              <label className="text-[11px] text-white/50 font-semibold block mb-1.5"><i className="fa-solid fa-mobile-screen mr-1" /> Formato del reel</label>
-              <div className="grid grid-cols-3 gap-2 mb-2">
-                {([['9:16', 'Reel / Story'], ['4:5', 'Feed'], ['1:1', 'Cuadrado']] as [AspectId, string][]).map(([a, lbl]) => (
-                  <button key={a} onClick={() => commit({ ...project, aspect: a })} className="py-2 rounded-lg text-xs font-semibold border flex flex-col items-center gap-0.5"
-                    style={project.aspect === a ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>
-                    <span className="font-bold">{a}</span><span className="text-[9px] opacity-70">{lbl}</span>
-                  </button>
-                ))}
-              </div>
+              <Collapse title="Formato del reel" icon="fa-mobile-screen" defaultOpen>
+                <div className="grid grid-cols-3 gap-2">
+                  {([['9:16', 'Reel / Story'], ['4:5', 'Feed'], ['1:1', 'Cuadrado']] as [AspectId, string][]).map(([a, lbl]) => (
+                    <button key={a} onClick={() => commit({ ...project, aspect: a })} className="py-2 rounded-lg text-xs font-semibold border flex flex-col items-center gap-0.5"
+                      style={project.aspect === a ? { borderColor: BRAND, color: BRAND } : { borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.6)' }}>
+                      <span className="font-bold">{a}</span><span className="text-[9px] opacity-70">{lbl}</span>
+                    </button>
+                  ))}
+                </div>
+              </Collapse>
 
-              <div className="pt-4 mt-2 border-t border-white/5 space-y-2">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Dinamismo</div>
+              <Collapse title="Guías del preview" icon="fa-vector-square">
+                <button onClick={() => setSafeZones(s => !s)}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2"
+                  style={safeZones ? { background: '#22D3EE22', color: '#22D3EE', borderColor: '#22D3EE' } : { borderColor: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.75)' }}>
+                  <i className="fa-solid fa-vector-square" />Márgenes de seguridad {safeZones ? 'visibles' : ''}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">Muestra las zonas que tapa la interfaz de Instagram/TikTok (perfil, íconos, descripción). Mantené logos y textos dentro del recuadro punteado. Es solo una guía: <b className="text-white/70">no se exporta</b>.</p>
+              </Collapse>
+
+              <Collapse title="Dinamismo" icon="fa-magnifying-glass-plus">
                 <button onClick={toggleAutoZoom} disabled={autoZoomBusy}
                   className="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 disabled:opacity-50"
                   style={project.autoZoom ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff', borderColor: BRAND } : { borderColor: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.75)' }}>
@@ -1475,10 +1473,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       : autoZoomSrc === 'música' ? <><i className="fa-solid fa-music mr-1" style={{ color: BRAND }} />{project.zoomBeats?.length || 0} zooms al ritmo de la música.</>
                       : 'Sin voz ni música → zooms en ritmo fijo (cada ~3s).'}</p>
                   : <p className="text-[11px] text-white/40 leading-relaxed">Punch-ins de zoom para dar dinamismo. Toma como referencia la <b className="text-white/70">voz</b> (los subtítulos); si no hay, la música; si no, un ritmo fijo.</p>}
-              </div>
+              </Collapse>
 
-              <div className="pt-4 mt-2 border-t border-white/5 space-y-3">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-white/40">Auto-compaginado</div>
+              <Collapse title="Auto-compaginado" icon="fa-scissors">
                 <label className="text-[11px] text-white/50 font-semibold block">Duración objetivo</label>
                 <div className="grid grid-cols-4 gap-2">
                   {([['auto', 'Auto'], [15, '15s'], [30, '30s'], [60, '60s']] as [ 'auto' | 15 | 30 | 60, string ][]).map(([val, lbl]) => (
@@ -1492,7 +1489,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   {compaginating ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{autoMsg || 'Compaginando…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Compaginar automático</>}
                 </button>
                 <p className="text-[11px] text-white/40 leading-relaxed">Re-corta los clips de la pista principal en orden para llegar a la duración elegida.</p>
-              </div>
+              </Collapse>
             </>)}
           </div>
         </section>
@@ -1509,6 +1506,29 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               {/* Guías magnéticas: líneas de centro cuando el elemento arrastrado se alinea */}
               {guides.x && <div className="absolute top-0 bottom-0" style={{ left: '50%', width: 1.5, transform: 'translateX(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
               {guides.y && <div className="absolute left-0 right-0" style={{ top: '50%', height: 1.5, transform: 'translateY(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
+              {/* Márgenes de seguridad: en 9:16 usa las zonas oficiales de Reels (UI superior, íconos a la derecha,
+                  descripción y botones abajo); en otros formatos, un margen uniforme. Solo visual: no se exporta. */}
+              {safeZones && (() => {
+                const z = project.aspect === '9:16'
+                  ? { top: 11.5, bottom: 22, left: 4, right: 11 }
+                  : { top: 4, bottom: 4, left: 4, right: 4 };
+                const strip: React.CSSProperties = { position: 'absolute', background: 'rgba(0,0,0,.45)' };
+                const lbl: React.CSSProperties = { position: 'absolute', color: 'rgba(255,255,255,.75)', fontSize: 9, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', textShadow: '0 1px 2px rgba(0,0,0,.8)' };
+                return (
+                  <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ pointerEvents: 'none', zIndex: 5 }}>
+                    <div style={{ ...strip, top: 0, left: 0, right: 0, height: `${z.top}%` }} />
+                    <div style={{ ...strip, bottom: 0, left: 0, right: 0, height: `${z.bottom}%` }} />
+                    <div style={{ ...strip, top: `${z.top}%`, bottom: `${z.bottom}%`, left: 0, width: `${z.left}%` }} />
+                    <div style={{ ...strip, top: `${z.top}%`, bottom: `${z.bottom}%`, right: 0, width: `${z.right}%` }} />
+                    <div style={{ position: 'absolute', top: `${z.top}%`, bottom: `${z.bottom}%`, left: `${z.left}%`, right: `${z.right}%`, border: '1.5px dashed #22D3EE', borderRadius: 8 }} />
+                    {project.aspect === '9:16' && (<>
+                      <span style={{ ...lbl, top: '4.5%', left: 0, right: 0, textAlign: 'center' }}>Perfil y cámara</span>
+                      <span style={{ ...lbl, top: '48%', right: '1.5%', writingMode: 'vertical-rl' }}>Íconos</span>
+                      <span style={{ ...lbl, bottom: '9%', left: 0, right: 0, textAlign: 'center' }}>Descripción y botones</span>
+                    </>)}
+                  </div>
+                );
+              })()}
               {/* Handles para escalar/rotar el sticker seleccionado directo en el preview */}
               {selected && selected.type === 'text' && (selected as TextElement).name === 'Sticker' && currentTime >= selected.start && currentTime < selected.start + selected.duration && (
                 <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
@@ -1526,6 +1546,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             <div className="flex-1" />
             {isMobile && selected && <button onClick={() => setMobileSheet('props')} className="h-8 px-3 rounded-lg bg-white/10 text-white/80 text-[11px] font-bold"><i className="fa-solid fa-sliders mr-1" />Editar</button>}
             <div className="flex items-center gap-1">
+              <button onClick={() => setSafeZones(s => !s)} title="Márgenes de seguridad: zonas que tapa la UI de Instagram/TikTok (solo guía, no se exporta)"
+                className="text-[11px] font-bold px-2 py-1 rounded border transition-colors mr-1"
+                style={safeZones ? { color: '#22D3EE', background: '#22D3EE22', borderColor: '#22D3EE' } : { color: 'rgba(255,255,255,.5)', borderColor: 'rgba(255,255,255,.15)' }}>
+                <i className="fa-solid fa-vector-square mr-1" /><span className="hidden sm:inline">Zonas</span>
+              </button>
               {(['9:16', '4:5', '1:1'] as AspectId[]).map(a => (
                 <button key={a} onClick={() => commit({ ...project, aspect: a })} title={`Formato ${a}`}
                   className="text-[11px] font-bold px-2 py-1 rounded border transition-colors"
