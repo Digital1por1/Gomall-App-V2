@@ -72,11 +72,8 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     <div className="h-screen w-full overflow-y-auto bg-gradient-to-b from-[#FBFBFD] to-[#F1F2F6] text-slate-900">
       {/* Nav */}
       <nav className="sticky top-0 z-20 h-18 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 py-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white flex items-center justify-center shadow-lg shadow-orange-200/40">
-            <i className="fa-solid fa-wand-magic-sparkles"></i>
-          </div>
-          <span className="font-display text-lg text-slate-900">Gomall Studio</span>
+        <div className="flex items-center">
+          <img src="/logo-gomall.png" alt="Gomall Studio" className="h-9 w-auto" />
         </div>
         <div className="flex items-center gap-5">
           <a href="#planes" className="hidden sm:inline text-[11px] font-black uppercase tracking-widest text-slate-500 hover:text-[#EA5B25] transition-colors">Planes</a>
@@ -233,9 +230,8 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
       {/* Footer */}
       <footer className="border-t border-slate-100 py-8 text-center">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white flex items-center justify-center text-xs"><i className="fa-solid fa-wand-magic-sparkles"></i></div>
-          <span className="font-display text-sm text-slate-700">Gomall Studio</span>
+        <div className="flex items-center justify-center mb-2">
+          <img src="/logo-gomall.png" alt="Gomall Studio" className="h-7 w-auto" />
         </div>
         <p className="text-[11px] text-slate-400 font-medium">Creá el marketing de tu negocio con IA.</p>
       </footer>
