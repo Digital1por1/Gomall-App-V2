@@ -189,6 +189,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [beatMarks, setBeatMarks] = useState<number[]>([]); // beats (s, timeline) marcados en la línea de tiempo
   const [beatsBusy, setBeatsBusy] = useState(false);
   const [sfxBusy, setSfxBusy] = useState(false);
+  // B-roll: clips de stock (Pexels vía server) insertados como overlays a pantalla completa.
+  const [brollQuery, setBrollQuery] = useState('');
+  const [brollResults, setBrollResults] = useState<{ id: number; thumb: string; duration: number; url: string }[]>([]);
+  const [brollBusy, setBrollBusy] = useState(false);
+  const [brollAutoBusy, setBrollAutoBusy] = useState(false);
+  const [brollMsg, setBrollMsg] = useState('');
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
   const [viralMsg, setViralMsg] = useState('');
   // Cortes mágicos: elimina silencios (internos y de las puntas) transcribiendo la voz.
@@ -879,6 +885,79 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } catch (e) { console.warn('[sfx]', e); }
   };
 
+  // ---------- b-roll (videos de stock, Pexels vía server) ----------
+  const searchBroll = async () => {
+    const q = brollQuery.trim();
+    if (!q) return;
+    setBrollBusy(true); setBrollMsg('');
+    try {
+      const res = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || 'No se pudo buscar.');
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setBrollResults(items);
+      if (!items.length) setBrollMsg('Sin resultados: probá otras palabras (en inglés funciona mejor).');
+    } catch (e: any) { alert(e?.message || 'No se pudo buscar b-roll.'); }
+    finally { setBrollBusy(false); }
+  };
+
+  // Descarga el clip por el proxy del server (canvas-safe) y lo inserta como overlay a pantalla completa,
+  // muteado (la voz/música del reel sigue abajo). Devuelve el proyecto nuevo, sin commit.
+  const insertBroll = async (item: { url: string }, at: number, p0: ReelProject): Promise<ReelProject | null> => {
+    try {
+      const r = await fetch(`/api/broll-file?url=${encodeURIComponent(item.url)}`);
+      if (!r.ok) return null;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const dur = await probeDuration(url, 'video');
+      const clipDur = Math.min(dur, 4);
+      const el = makeVideoElement(url, dur, { name: 'B-roll', start: at, duration: clipDur, trimEnd: clipDur, muted: true, volume: 0 });
+      return addOverlayElement(p0, el);
+    } catch { return null; }
+  };
+
+  const addBrollAtPlayhead = async (item: { url: string }) => {
+    setBrollBusy(true);
+    try {
+      const p = await insertBroll(item, currentTime, project);
+      if (p) commit(p); else alert('No se pudo descargar el clip.');
+    } finally { setBrollBusy(false); }
+  };
+
+  // B-roll automático: la IA elige los momentos según los subtítulos, busca el clip y lo inserta.
+  const autoBroll = async () => {
+    const subs = (project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[]).sort((a, b) => a.start - b.start);
+    if (!subs.length) { alert('Primero generá los subtítulos: el b-roll automático elige los momentos según lo que se dice.'); return; }
+    setBrollAutoBusy(true); setBrollMsg('');
+    try {
+      // Quita los b-rolls anteriores → re-aplicable sin duplicar.
+      let p = project;
+      for (const t of p.tracks) for (const el of t.elements) if (el.name === 'B-roll') p = removeElement(p, el.id);
+      setBrollMsg('Eligiendo los momentos…');
+      const res = await fetch('/api/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: subs.map(s => s.text) }) });
+      const data = await res.json().catch(() => null);
+      const plan: { line: number; query: string }[] = Array.isArray(data?.items) ? data.items : [];
+      if (!plan.length) { alert('La IA no encontró momentos claros para b-roll en este guion.'); return; }
+      let added = 0, lastEnd = -Infinity;
+      for (const it of plan.slice(0, 4)) {
+        const sub = subs[Math.max(0, Math.min(subs.length - 1, Math.round(it.line) - 1))];
+        if (!sub || sub.start < lastEnd + 3) continue; // b-rolls separados: no tapar todo el video
+        setBrollMsg(`Buscando "${it.query}"…`);
+        const sr = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: it.query, perPage: 3 }) });
+        const sd = await sr.json().catch(() => null);
+        const item = sd?.items?.[0];
+        if (!item) continue;
+        setBrollMsg('Descargando el clip…');
+        const np = await insertBroll(item, sub.start, p);
+        if (np) { p = np; added++; lastEnd = sub.start + 4; }
+      }
+      if (!added) { alert('No encontré clips para esos momentos: probá la búsqueda manual.'); return; }
+      commit(p);
+      alert(`Listo: ${added} clip${added === 1 ? '' : 's'} de b-roll. En el timeline los movés, acortás o borrás como cualquier elemento.`);
+    } catch (e: any) { console.warn('[broll]', e); alert(e?.message || 'No se pudo generar el b-roll.'); }
+    finally { setBrollAutoBusy(false); setBrollMsg(''); }
+  };
+
   // ---------- estilos virales 1-clic ----------
   // Orquesta todo el look estilo Submagic: subtítulos IA (si faltan) → estilo de captions →
   // auto-zoom → SFX. Cada paso que falla se salta sin romper el resto.
@@ -1398,6 +1477,34 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               <button onClick={() => fileImageRef.current?.click()} className="w-full py-3 rounded-xl border border-dashed border-white/20 hover:border-[color:var(--b)] text-white/70 text-xs font-semibold" style={{ ['--b' as any]: BRAND }}><i className="fa-solid fa-image mr-2" />Subir imagen</button>
               <button onClick={addLogo} className="w-full py-3 rounded-xl border border-white/15 text-white/80 text-xs font-semibold hover:bg-white/5"><i className="fa-solid fa-stamp mr-2" />Subir logo</button>
               <p className="text-[11px] text-white/40 leading-relaxed">Los videos van en fila en la pista principal; imágenes y logo como overlay que reposicionás arrastrando en el preview.</p>
+
+              <Collapse title="B-roll (videos de stock)" icon="fa-film">
+                <button onClick={autoBroll} disabled={brollAutoBusy || brollBusy}
+                  className="w-full py-2.5 rounded-xl text-white text-xs font-bold disabled:opacity-50" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  {brollAutoBusy ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{brollMsg || 'Generando…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />B-roll automático (IA)</>}
+                </button>
+                <p className="text-[11px] text-white/40 leading-relaxed">La IA elige los momentos según <b className="text-white/70">lo que se dice</b> (necesita los subtítulos) e inserta clips de stock gratuitos que refuerzan el mensaje. Re-aplicable: reemplaza los anteriores.</p>
+                <div className="flex gap-2">
+                  <input value={brollQuery} onChange={(e) => setBrollQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') searchBroll(); }} placeholder="Buscar clip (ej: coffee shop)"
+                    className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30" />
+                  <button onClick={searchBroll} disabled={brollBusy} className="px-3 rounded-lg border border-white/15 text-white/70 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
+                    {brollBusy ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-magnifying-glass" />}
+                  </button>
+                </div>
+                {brollMsg && !brollAutoBusy && <p className="text-[11px] text-white/50">{brollMsg}</p>}
+                {brollResults.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {brollResults.map(it => (
+                      <button key={it.id} onClick={() => addBrollAtPlayhead(it)} disabled={brollBusy} title="Insertar en el cabezal"
+                        className="relative rounded-lg overflow-hidden border border-white/10 hover:border-white/40 aspect-[9/16] bg-black/40 disabled:opacity-50">
+                        <img src={it.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                        <span className="absolute bottom-1 right-1 text-[9px] font-bold bg-black/70 text-white px-1 rounded">{Math.round(it.duration)}s</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[11px] text-white/40 leading-relaxed">Clic en un clip para insertarlo en el cabezal, a pantalla completa y sin audio (tu voz/música sigue sonando). Videos de Pexels, gratis para uso comercial.</p>
+              </Collapse>
             </>)}
             {tab === 'viral' && (
               <div className="space-y-3">

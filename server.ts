@@ -550,6 +550,94 @@ ${numbered}` }] }],
     }
   });
 
+
+  // B-roll: busca videos de stock VERTICALES en Pexels (gratis, uso comercial). La key vive en env.
+  app.post("/api/broll-search", async (req, res) => {
+    try {
+      const g = await guard(req, res); if (!g.ok) return; // identidad: no descuenta cuota
+      const key = process.env.PEXELS_API_KEY;
+      if (!key) return res.status(503).json({ error: "Falta configurar PEXELS_API_KEY en el servidor." });
+      const query = String(req.body?.query || '').trim();
+      if (!query) return res.status(400).json({ error: "Falta la búsqueda." });
+      const perPage = Math.min(12, Math.max(1, Number(req.body?.perPage) || 9));
+      const r = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&orientation=portrait&per_page=${perPage}`, { headers: { Authorization: key } });
+      if (!r.ok) return res.status(502).json({ error: `Pexels respondió ${r.status}.` });
+      const data: any = await r.json();
+      const items = (data?.videos || []).map((v: any) => {
+        const files = (v.video_files || []).filter((f: any) => /mp4/.test(f.file_type || '') && (f.height || 0) >= (f.width || 0));
+        files.sort((a: any, b: any) => Math.abs((a.width || 0) - 720) - Math.abs((b.width || 0) - 720)); // ~720p: buena calidad sin descargas gigantes
+        const file = files[0];
+        if (!file) return null;
+        return { id: v.id, thumb: v.image, duration: v.duration, url: file.link };
+      }).filter(Boolean);
+      res.json({ items });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error buscando b-roll" });
+    }
+  });
+
+  // Descarga del clip vía el server (evita CORS en el canvas). Solo dominios de Pexels.
+  app.get("/api/broll-file", async (req, res) => {
+    try {
+      const url = String(req.query?.url || '');
+      let host = '';
+      try { host = new URL(url).hostname; } catch { /* inválida */ }
+      if (!/(^|\.)pexels\.com$/.test(host)) return res.status(400).json({ error: "URL no permitida." });
+      const r = await fetch(url);
+      if (!r.ok) return res.status(502).json({ error: `No se pudo descargar (${r.status}).` });
+      res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
+      res.set("Cache-Control", "public, max-age=86400");
+      res.send(Buffer.from(await r.arrayBuffer()));
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error descargando el clip" });
+    }
+  });
+
+  // B-roll automático: la IA elige en qué frases conviene un clip de apoyo y qué buscar.
+  app.post("/api/broll-plan", async (req, res) => {
+    try {
+      const g = await guard(req, res); if (!g.ok) return; // texto: no descuenta cuota
+      const lines: string[] = Array.isArray(req.body?.lines) ? req.body.lines.map((l: any) => String(l || '')) : [];
+      if (!lines.length) return res.status(400).json({ error: "Faltan los subtítulos." });
+      const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text:
+`Sos editor de reels. Estas son las frases (subtítulos) de un video hablado. Elegí hasta 4 momentos donde un clip de stock (b-roll) refuerce lo que se dice, y devolvé para cada uno:
+- "line": el número de la frase (1 a ${lines.length})
+- "query": qué buscar en el stock, en INGLÉS, 2-3 palabras concretas y visuales (ej: "barista pouring coffee")
+Elegí momentos separados entre sí. Solo JSON.
+
+Frases:
+${numbered}` }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              items: {
+                type: Type.ARRAY,
+                items: { type: Type.OBJECT, properties: { line: { type: Type.NUMBER }, query: { type: Type.STRING } }, required: ["line", "query"] },
+              },
+            },
+            required: ["items"],
+          },
+        },
+      });
+      let text = "";
+      if (typeof response?.text === "string") text = response.text;
+      else text = (response?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      let items: any[] = [];
+      try { items = (JSON.parse(text)?.items) || []; } catch { items = []; }
+      res.json({ items, usage: extractUsage(response) });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Error planificando el b-roll" });
+    }
+  });
+
   // Eliminar una cuenta POR COMPLETO (solo admin). Borra Auth + perfil + subcolecciones + Storage.
   app.post("/api/admin/delete-user", async (req, res) => {
     try {
