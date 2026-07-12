@@ -73,7 +73,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       {/* Nav */}
       <nav className="sticky top-0 z-20 h-18 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 py-3">
         <div className="flex items-center">
-          <img src="/logo-gomall.png" alt="Gomall Studio" className="h-9 w-auto" />
+          <img src="/logo-gomall.png?v=2" alt="Gomall Studio" className="h-9 w-auto" />
         </div>
         <div className="flex items-center gap-5">
           <a href="#planes" className="hidden sm:inline text-[11px] font-black uppercase tracking-widest text-slate-500 hover:text-[#EA5B25] transition-colors">Planes</a>
@@ -231,7 +231,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       {/* Footer */}
       <footer className="border-t border-slate-100 py-8 text-center">
         <div className="flex items-center justify-center mb-2">
-          <img src="/logo-gomall.png" alt="Gomall Studio" className="h-7 w-auto" />
+          <img src="/logo-gomall.png?v=2" alt="Gomall Studio" className="h-7 w-auto" />
         </div>
         <p className="text-[11px] text-slate-400 font-medium">Creá el marketing de tu negocio con IA.</p>
       </footer>

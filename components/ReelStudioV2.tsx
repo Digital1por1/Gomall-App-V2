@@ -1341,7 +1341,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     <div className="fixed inset-0 z-[200] bg-[#0F172A] text-[#F1F5F9] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Top bar */}
       <header className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 h-14 border-b border-white/10 bg-[#1E293B]">
-        <img src="/logo-gomall-dark.png" alt="Gomall Studio" className="h-7 w-auto shrink-0 hidden sm:block" />
+        <img src="/logo-gomall-dark.png?v=2" alt="Gomall Studio" className="h-7 w-auto shrink-0 hidden sm:block" />
         <div className="w-9 h-9 rounded-xl grid place-items-center text-white shrink-0 shadow-lg shadow-black/25 sm:hidden" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>
           <i className="fa-solid fa-clapperboard text-sm" />
         </div>
