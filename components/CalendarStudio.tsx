@@ -125,7 +125,7 @@ const CalendarStudio: React.FC<CalendarStudioProps> = ({ profile, userId, onClos
     <div className="fixed inset-0 z-[90] bg-gradient-to-b from-[#FBFBFD] to-[#F4F5F8] flex flex-col animate-in fade-in duration-300">
       <header className="h-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 bg-gradient-to-br from-sky-500 to-blue-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-sky-200/50"><i className="fa-solid fa-calendar-days text-lg"></i></div>
+          <div className="w-11 h-11 bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-200/50"><i className="fa-solid fa-calendar-days text-lg"></i></div>
           <div>
             <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Calendario</h2>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Qué publicar y cuándo</span>

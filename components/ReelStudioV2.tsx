@@ -1341,13 +1341,15 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     <div className="fixed inset-0 z-[200] bg-[#0F172A] text-[#F1F5F9] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Top bar */}
       <header className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 h-14 border-b border-white/10 bg-[#1E293B]">
-        <div className="w-9 h-9 rounded-xl grid place-items-center text-white shrink-0 shadow-lg shadow-black/25" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>
+        <img src="/logo-gomall-dark.png" alt="Gomall Studio" className="h-7 w-auto shrink-0 hidden sm:block" />
+        <div className="w-9 h-9 rounded-xl grid place-items-center text-white shrink-0 shadow-lg shadow-black/25 sm:hidden" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>
           <i className="fa-solid fa-clapperboard text-sm" />
         </div>
-        <div className="min-w-0 ml-1 sm:ml-2">
+        <div className="w-px h-6 bg-white/15 hidden sm:block" />
+        <div className="min-w-0 ml-1">
           <input value={project.name} onChange={(e) => setProject(p => ({ ...p, name: e.target.value }))} placeholder="Reel sin título"
             className="block w-24 sm:w-48 text-sm bg-transparent text-white/80 outline-none border-b border-transparent focus:border-white/30 focus:text-white placeholder:text-white/30" />
-          <span className="hidden sm:block text-[8px] font-black uppercase tracking-[0.2em] text-white/30 leading-tight">Editor de reels · Gomall Studio</span>
+          <span className="hidden sm:block text-[8px] font-black uppercase tracking-[0.2em] text-white/30 leading-tight">Editor de reels</span>
         </div>
         <div className="flex-1" />
         {saveState !== 'idle' && (

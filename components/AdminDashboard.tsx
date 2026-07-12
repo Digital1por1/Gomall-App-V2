@@ -322,17 +322,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   return (
     <div className="flex-1 flex flex-col bg-[#F8F9FA] h-full absolute inset-0 z-[200] overflow-y-auto">
       {/* Header */}
-      <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-6 shrink-0 sticky top-0 z-10 shadow-sm">
+      <header className="h-20 bg-white/85 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-6 shrink-0 sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center shadow-lg">
             <i className="fa-solid fa-shield-halved text-lg"></i>
           </div>
           <div>
-            <h1 className="text-lg font-[900] uppercase tracking-tight text-slate-900 leading-none">Panel de Control</h1>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#EA5B25]">Administrador Global</span>
+            <h1 className="font-display text-xl text-slate-900 tracking-tight leading-none">Panel de control</h1>
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[#EA5B25]">Administrador global</span>
           </div>
         </div>
-        <button onClick={onClose} className="h-10 px-6 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl transition-all hover:bg-slate-200 active:scale-95 text-xs font-bold uppercase tracking-widest gap-2">
+        <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest">
           <i className="fa-solid fa-arrow-left"></i> Volver al Editor
         </button>
       </header>

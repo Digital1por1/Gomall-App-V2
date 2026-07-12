@@ -200,12 +200,12 @@ const CampaignStudio: React.FC<CampaignStudioProps> = ({ profile, userId, onClos
   return (
     <div className="fixed inset-0 z-[100] bg-[#F8F9FA] flex flex-col animate-in fade-in duration-300">
       {/* Header */}
-      <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 shrink-0 shadow-sm">
+      <header className="h-20 bg-white/85 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 sm:px-8 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-orange-50 text-[#EA5B25] rounded-2xl flex items-center justify-center"><i className="fa-solid fa-bullhorn text-lg"></i></div>
+          <div className="w-11 h-11 bg-gradient-to-br from-[#EA5B25] to-[#f0814f] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-200/50"><i className="fa-solid fa-bullhorn text-lg"></i></div>
           <div>
             <h2 className="font-display text-xl text-slate-900 tracking-tight leading-none">Campañas IA</h2>
-            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Estrategia de contenido</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Estrategia de contenido</span>
           </div>
         </div>
         <button onClick={onClose} className="h-11 px-4 flex items-center gap-2 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95 text-[10px] font-black uppercase tracking-widest"><i className="fa-solid fa-arrow-left"></i> Volver</button>
