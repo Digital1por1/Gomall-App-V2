@@ -560,7 +560,8 @@ ${numbered}` }] }],
       const query = String(req.body?.query || '').trim();
       if (!query) return res.status(400).json({ error: "Falta la búsqueda." });
       const perPage = Math.min(12, Math.max(1, Number(req.body?.perPage) || 9));
-      const r = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&orientation=portrait&per_page=${perPage}`, { headers: { Authorization: key } });
+      const page = Math.min(20, Math.max(1, Number(req.body?.page) || 1));
+      const r = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&orientation=portrait&per_page=${perPage}&page=${page}`, { headers: { Authorization: key } });
       if (!r.ok) return res.status(502).json({ error: `Pexels respondió ${r.status}.` });
       const data: any = await r.json();
       const items = (data?.videos || []).map((v: any) => {

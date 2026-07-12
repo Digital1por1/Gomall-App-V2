@@ -193,6 +193,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [brollQuery, setBrollQuery] = useState('');
   const [brollResults, setBrollResults] = useState<{ id: number; thumb: string; duration: number; url: string }[]>([]);
   const [brollBusy, setBrollBusy] = useState(false);
+  const [brollPage, setBrollPage] = useState(1);
+  const [brollHasMore, setBrollHasMore] = useState(false);
   const [brollAutoBusy, setBrollAutoBusy] = useState(false);
   const [brollMsg, setBrollMsg] = useState('');
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
@@ -886,17 +888,19 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   };
 
   // ---------- b-roll (videos de stock, Pexels vía server) ----------
-  const searchBroll = async () => {
+  const searchBroll = async (page = 1) => {
     const q = brollQuery.trim();
     if (!q) return;
     setBrollBusy(true); setBrollMsg('');
     try {
-      const res = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
+      const res = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, page }) });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error || 'No se pudo buscar.');
       const items = Array.isArray(data?.items) ? data.items : [];
-      setBrollResults(items);
-      if (!items.length) setBrollMsg('Sin resultados: probá otras palabras (en inglés funciona mejor).');
+      setBrollResults(prev => page === 1 ? items : [...prev, ...items]);
+      setBrollPage(page);
+      setBrollHasMore(items.length >= 9); // página llena → probablemente hay más
+      if (page === 1 && !items.length) setBrollMsg('Sin resultados: probá otras palabras (en inglés funciona mejor).');
     } catch (e: any) { alert(e?.message || 'No se pudo buscar b-roll.'); }
     finally { setBrollBusy(false); }
   };
@@ -1485,24 +1489,30 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 </button>
                 <p className="text-[11px] text-white/40 leading-relaxed">La IA elige los momentos según <b className="text-white/70">lo que se dice</b> (necesita los subtítulos) e inserta clips de stock gratuitos que refuerzan el mensaje. Re-aplicable: reemplaza los anteriores.</p>
                 <div className="flex gap-2">
-                  <input value={brollQuery} onChange={(e) => setBrollQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') searchBroll(); }} placeholder="Buscar clip (ej: coffee shop)"
+                  <input value={brollQuery} onChange={(e) => setBrollQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') searchBroll(1); }} placeholder="Buscar clip (ej: coffee shop)"
                     className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30" />
-                  <button onClick={searchBroll} disabled={brollBusy} className="px-3 rounded-lg border border-white/15 text-white/70 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
+                  <button onClick={() => searchBroll(1)} disabled={brollBusy} className="px-3 rounded-lg border border-white/15 text-white/70 text-xs font-bold hover:bg-white/5 disabled:opacity-50">
                     {brollBusy ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-magnifying-glass" />}
                   </button>
                 </div>
                 {brollMsg && !brollAutoBusy && <p className="text-[11px] text-white/50">{brollMsg}</p>}
-                {brollResults.length > 0 && (
+                {brollResults.length > 0 && (<>
                   <div className="grid grid-cols-3 gap-2">
-                    {brollResults.map(it => (
-                      <button key={it.id} onClick={() => addBrollAtPlayhead(it)} disabled={brollBusy} title="Insertar en el cabezal"
+                    {brollResults.map((it, i) => (
+                      <button key={`${it.id}_${i}`} onClick={() => addBrollAtPlayhead(it)} disabled={brollBusy} title="Insertar en el cabezal"
                         className="relative rounded-lg overflow-hidden border border-white/10 hover:border-white/40 aspect-[9/16] bg-black/40 disabled:opacity-50">
                         <img src={it.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                         <span className="absolute bottom-1 right-1 text-[9px] font-bold bg-black/70 text-white px-1 rounded">{Math.round(it.duration)}s</span>
                       </button>
                     ))}
                   </div>
-                )}
+                  {brollHasMore && (
+                    <button onClick={() => searchBroll(brollPage + 1)} disabled={brollBusy}
+                      className="w-full py-2 rounded-lg border border-white/15 text-white/70 text-[11px] font-bold hover:bg-white/5 disabled:opacity-50">
+                      {brollBusy ? <><i className="fa-solid fa-circle-notch fa-spin mr-1.5" />Cargando…</> : <><i className="fa-solid fa-angles-down mr-1.5" />Ver más resultados</>}
+                    </button>
+                  )}
+                </>)}
                 <p className="text-[11px] text-white/40 leading-relaxed">Clic en un clip para insertarlo en el cabezal, a pantalla completa y sin audio (tu voz/música sigue sonando). Videos de Pexels, gratis para uso comercial.</p>
               </Collapse>
             </>)}
