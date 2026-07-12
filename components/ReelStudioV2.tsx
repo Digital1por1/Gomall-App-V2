@@ -5,6 +5,8 @@
 // Pendiente para próximas iteraciones: subtítulos karaoke, transiciones, stickers, persistencia, snapping.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 import { UserProfile, CustomFont } from '../types';
 import {
   ReelProject, ReelElement, TextElement, TextStyle, VideoElement, ImageElement, AudioElement, Track,
@@ -1131,30 +1133,72 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     }
   };
 
-  // ---------- persistencia local (IndexedDB) ----------
+  // ---------- persistencia local (IndexedDB) + plano en la nube (Firestore) ----------
+  // Snapshot serializable del proyecto: la media pesada queda en IndexedDB referenciada por mediaId;
+  // los data-URLs (SFX sintetizados) viajan inline para que el plano en la nube sea autosuficiente.
+  const buildSnapshot = async (): Promise<any> => {
+    const tracks: any[] = [];
+    for (const track of project.tracks) {
+      const els: any[] = [];
+      for (const el of track.elements) {
+        const anyEl = el as any;
+        const url: string | undefined = anyEl.url;
+        if (url && url.startsWith('data:')) { els.push({ ...el }); continue; }
+        let mediaId: string | undefined = anyEl.mediaId;
+        if (url) {
+          mediaId = mediaIdRef.current.get(url);
+          if (!mediaId) {
+            try { const blob = await (await fetch(url)).blob(); mediaId = 'v2_' + newMediaId(); await putMedia(mediaId, blob); mediaIdRef.current.set(url, mediaId); }
+            catch { mediaId = undefined; }
+          }
+        }
+        els.push({ ...el, mediaId, url: url ? '' : undefined });
+      }
+      tracks.push({ ...track, elements: els });
+    }
+    return { ...project, tracks };
+  };
+
+  // Miniatura chica del frame actual para la galería "Mis reels" (~10 KB).
+  const makeThumb = (): string | null => {
+    try {
+      const src = canvasRef.current; if (!src) return null;
+      const H = 240, W = Math.max(1, Math.round((src.width / src.height) * H));
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      c.getContext('2d')!.drawImage(src, 0, 0, W, H);
+      return c.toDataURL('image/jpeg', 0.55);
+    } catch { return null; }
+  };
+
+  // Guarda el PLANO del proyecto (sin los videos) en la cuenta del usuario → galería "Mis reels".
+  // Los clips fuente siguen locales (paso 2 pendiente: subirlos a Storage con cupo por plan).
+  const cloudTimerRef = useRef<number | null>(null);
+  const saveCloudPlan = async (snapshot: any) => {
+    if (!userId) return;
+    try {
+      const plan = JSON.stringify(snapshot);
+      if (plan.length > 950_000) { console.warn('[reel cloud] plano demasiado grande, no se sube'); return; }
+      const thumb = plan.length > 850_000 ? null : makeThumb();
+      await firebase.firestore().collection('usuarios').doc(userId).collection('proyectosReel').doc(project.id).set({
+        name: project.name || 'Reel sin título',
+        aspect: project.aspect,
+        dur: Math.round(projectDuration(project) * 10) / 10,
+        thumb,
+        plan,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) { console.warn('[reel cloud] no se pudo guardar el plano', e); }
+  };
+
   const persistV2 = async () => {
     if (projectDuration(project) <= 0) { try { await clearProjectAt(V2_KEY); } catch { /* noop */ } setSaveState('idle'); return; }
     try {
-      const tracks: any[] = [];
-      for (const track of project.tracks) {
-        const els: any[] = [];
-        for (const el of track.elements) {
-          const anyEl = el as any;
-          const url: string | undefined = anyEl.url;
-          let mediaId: string | undefined = anyEl.mediaId;
-          if (url) {
-            mediaId = mediaIdRef.current.get(url);
-            if (!mediaId) {
-              try { const blob = await (await fetch(url)).blob(); mediaId = 'v2_' + newMediaId(); await putMedia(mediaId, blob); mediaIdRef.current.set(url, mediaId); }
-              catch { mediaId = undefined; }
-            }
-          }
-          els.push({ ...el, mediaId, url: url ? '' : undefined });
-        }
-        tracks.push({ ...track, elements: els });
-      }
-      await putProjectAt(V2_KEY, { ...project, tracks });
+      const snapshot = await buildSnapshot();
+      await putProjectAt(V2_KEY, snapshot);
       setSaveState('saved');
+      // El plano a la nube va con su propio debounce más largo (menos escrituras de Firestore).
+      if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current);
+      cloudTimerRef.current = window.setTimeout(() => saveCloudPlan(snapshot), 4000);
     } catch (e) { console.warn('[reel v2] autosave falló', e); setSaveState('idle'); }
   };
 
@@ -1166,6 +1210,36 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
+  useEffect(() => () => { if (cloudTimerRef.current) window.clearTimeout(cloudTimerRef.current); }, []);
+
+  // Reconstruye un proyecto desde un snapshot: re-enlaza la media guardada en IndexedDB.
+  // Los elementos cuya media no está en ESTA computadora se omiten y se reportan en `missing`.
+  const hydrateSnapshot = async (saved: any): Promise<{ proj: ReelProject; missing: string[] } | null> => {
+    if (!saved || !Array.isArray(saved.tracks)) return null;
+    const missing: string[] = [];
+    const tracks: any[] = [];
+    for (const track of saved.tracks) {
+      const els: any[] = [];
+      for (const el of track.elements || []) {
+        if (el.url && String(el.url).startsWith('data:')) { els.push({ ...el }); continue; } // SFX inline
+        if (el.mediaId) {
+          const blob = await getMedia(el.mediaId);
+          if (!blob) { missing.push(el.name || 'clip'); continue; } // media faltante → se omite
+          const url = URL.createObjectURL(blob);
+          mediaIdRef.current.set(url, el.mediaId);
+          els.push({ ...el, url });
+        } else if (el.type === 'text') {
+          els.push({ ...el });
+        } else if (el.url) {
+          els.push({ ...el }); // url http(s) persistente (ej: logo del brand kit)
+        } else {
+          missing.push(el.name || 'clip');
+        }
+      }
+      tracks.push({ ...track, elements: els });
+    }
+    return { proj: { ...saved, tracks, aspect: saved.aspect || '9:16' } as ReelProject, missing };
+  };
 
   useEffect(() => {
     // Si vino un proyecto pre-armado (ej: "Animar" un diseño), no restaurar el reel guardado.
@@ -1173,35 +1247,78 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     (async () => {
       try {
         const saved: any = await getProjectAt(V2_KEY);
-        if (saved && Array.isArray(saved.tracks)) {
-          const tracks: any[] = [];
-          for (const track of saved.tracks) {
-            const els: any[] = [];
-            for (const el of track.elements || []) {
-              if (el.mediaId) {
-                const blob = await getMedia(el.mediaId);
-                if (!blob) continue; // media faltante → se omite el elemento
-                const url = URL.createObjectURL(blob);
-                mediaIdRef.current.set(url, el.mediaId);
-                els.push({ ...el, url });
-              } else {
-                els.push({ ...el });
-              }
-            }
-            tracks.push({ ...track, elements: els });
-          }
-          if (tracks.some((t: any) => t.elements.length)) { setProject({ ...saved, tracks, aspect: saved.aspect || '9:16' }); setSaveState('saved'); }
-        }
+        const res = await hydrateSnapshot(saved);
+        if (res && res.proj.tracks.some(t => t.elements.length)) { setProject(res.proj); setSaveState('saved'); }
       } catch (e) { console.warn('[reel v2] no se pudo restaurar', e); }
       finally { hydratedRef.current = true; }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---------- galería "Mis reels" (planos guardados en la cuenta) ----------
+  interface GalleryItem { id: string; name: string; dur: number; thumb: string | null; plan: string; updated: Date | null }
+  const [showGallery, setShowGallery] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryBusy, setGalleryBusy] = useState(false);
+
+  const openGallery = async () => {
+    if (!userId) { alert('Iniciá sesión para ver tus reels guardados.'); return; }
+    setShowGallery(true); setGalleryBusy(true);
+    try {
+      const qs = await firebase.firestore().collection('usuarios').doc(userId).collection('proyectosReel').orderBy('updatedAt', 'desc').limit(60).get();
+      setGalleryItems(qs.docs.map(d => {
+        const v: any = d.data();
+        return { id: d.id, name: v.name || 'Reel', dur: v.dur || 0, thumb: v.thumb || null, plan: v.plan || '', updated: v.updatedAt?.toDate?.() || null };
+      }));
+    } catch (e) {
+      console.warn('[mis reels]', e);
+      alert('No se pudieron cargar tus reels (¿faltan publicar las reglas de Firestore?).');
+      setShowGallery(false);
+    } finally { setGalleryBusy(false); }
+  };
+
+  const openCloudProject = async (item: GalleryItem) => {
+    if (item.id === project.id) { setShowGallery(false); return; }
+    try {
+      // Guarda el proyecto actual antes de cambiar (local + plano en la nube).
+      if (projectDuration(project) > 0) {
+        const snap = await buildSnapshot();
+        await putProjectAt(V2_KEY, snap);
+        await saveCloudPlan(snap);
+      }
+      const res = await hydrateSnapshot(JSON.parse(item.plan));
+      if (!res) { alert('Este proyecto está dañado y no se puede abrir.'); return; }
+      pause();
+      histRef.current = { past: [], future: [] }; setCanUndo(false); setCanRedo(false);
+      setSelectedId(null); setCurrentTime(0);
+      setProject(res.proj);
+      setShowGallery(false);
+      setSaveState('saved');
+      if (res.missing.length) {
+        const names = [...new Set(res.missing)].slice(0, 5).join(', ');
+        alert(`Ojo: ${res.missing.length} archivo(s) de este reel no están en esta computadora (${names}). Se abrió el resto del proyecto; volvé a subir esos videos para completarlo.`);
+      }
+    } catch (e) { console.warn('[mis reels] abrir', e); alert('No se pudo abrir el reel.'); }
+  };
+
+  const deleteCloudProject = async (id: string, name: string) => {
+    if (id === project.id) { alert('Ese es el reel abierto ahora: empezá uno nuevo antes de eliminarlo.'); return; }
+    if (!confirm(`¿Eliminar "${name}" de Mis reels? Esta acción no se puede deshacer.`)) return;
+    try {
+      await firebase.firestore().collection('usuarios').doc(userId!).collection('proyectosReel').doc(id).delete();
+      setGalleryItems(items => items.filter(i => i.id !== id));
+    } catch { alert('No se pudo eliminar.'); }
+  };
+
   const newProjectV2 = async () => {
-    if (totalDur > 0 && !confirm('¿Empezar un reel nuevo? Se borrará el reel guardado.')) return;
+    if (totalDur > 0) {
+      if (userId) {
+        // El reel actual queda guardado en "Mis reels": empezar uno nuevo ya no destruye nada.
+        const snap = await buildSnapshot();
+        await saveCloudPlan(snap);
+      } else if (!confirm('¿Empezar un reel nuevo? Se borrará el reel actual (iniciá sesión para conservar tus proyectos).')) return;
+    }
     try { await clearProjectAt(V2_KEY); } catch { /* noop */ }
-    mediaIdRef.current.clear();
     histRef.current = { past: [], future: [] }; setCanUndo(false); setCanRedo(false);
     pause();
     setProject(createProject(project.aspect));
@@ -1233,6 +1350,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             {saveState === 'saving' ? <><i className="fa-solid fa-circle-notch fa-spin" /> Guardando</> : <><i className="fa-solid fa-cloud text-emerald-400" /> Guardado</>}
           </span>
         )}
+        <button onClick={openGallery} title="Mis reels — todos tus proyectos guardados" className="h-9 px-3 rounded-lg bg-white/10 text-white/70 text-xs font-bold hover:bg-white/20 shrink-0">
+          <i className="fa-solid fa-folder-open" /><span className="hidden md:inline ml-1.5">Mis reels</span>
+        </button>
         <button onClick={newProjectV2} title="Nuevo reel" className="h-9 px-3 rounded-lg bg-white/10 text-white/70 text-xs font-bold hover:bg-white/20"><i className="fa-solid fa-file-circle-plus" /></button>
         <div className="flex items-center rounded-xl overflow-hidden border border-white/10">
           <button onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className="w-9 h-9 grid place-items-center text-white/60 hover:bg-white/10 disabled:opacity-30"><i className="fa-solid fa-rotate-left" /></button>
@@ -1794,6 +1914,52 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
             );
           })}
         </nav>
+      )}
+
+      {/* galería "Mis reels": planos guardados en la cuenta del usuario */}
+      {showGallery && (
+        <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4" onClick={() => setShowGallery(false)}>
+          <div className="bg-[#3b3b42] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <div className="text-sm font-bold"><i className="fa-solid fa-folder-open mr-2" style={{ color: BRAND }} />Mis reels</div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setShowGallery(false); newProjectV2(); }} className="h-8 px-3 rounded-lg text-white text-[11px] font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
+                  <i className="fa-solid fa-plus mr-1" />Nuevo reel
+                </button>
+                <button onClick={() => setShowGallery(false)} className="w-8 h-8 rounded-lg text-white/50 hover:text-white hover:bg-white/10"><i className="fa-solid fa-xmark" /></button>
+              </div>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1 min-h-0">
+              {galleryBusy ? (
+                <p className="text-xs text-white/50"><i className="fa-solid fa-circle-notch fa-spin mr-2" />Cargando tus reels…</p>
+              ) : !galleryItems.length ? (
+                <p className="text-xs text-white/50 leading-relaxed">Todavía no tenés reels guardados. Se guardan solos mientras editás: empezá uno y va a aparecer acá.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {galleryItems.map(it => (
+                    <div key={it.id} onClick={() => openCloudProject(it)} className="rounded-xl border overflow-hidden group relative cursor-pointer hover:border-white/30 transition-colors"
+                      style={{ borderColor: it.id === project.id ? BRAND : 'rgba(255,255,255,.1)' }}>
+                      <div className="h-36 w-full bg-black/40 grid place-items-center overflow-hidden">
+                        {it.thumb ? <img src={it.thumb} className="w-full h-full object-cover" alt="" /> : <i className="fa-solid fa-clapperboard text-white/20 text-2xl" />}
+                      </div>
+                      <div className="p-2">
+                        <div className="text-[11px] font-bold text-white truncate">{it.name}</div>
+                        <div className="text-[10px] text-white/40">
+                          {it.dur ? `${it.dur}s` : ''}{it.dur && it.updated ? ' · ' : ''}{it.updated ? it.updated.toLocaleDateString('es-AR') : ''}{it.id === project.id ? ' · abierto' : ''}
+                        </div>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); deleteCloudProject(it.id, it.name); }} title="Eliminar"
+                        className="absolute top-1.5 right-1.5 w-7 h-7 rounded-lg bg-black/60 text-red-300 opacity-0 group-hover:opacity-100 hover:bg-black/85">
+                        <i className="fa-solid fa-trash text-xs" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-white/35 mt-4 leading-relaxed">Los proyectos se guardan solos en tu cuenta mientras editás. Los videos fuente quedan en esta computadora: si abrís un reel en otro dispositivo vas a ver la estructura y los textos, pero habrá que volver a subir los clips.</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* inputs de archivo ocultos */}

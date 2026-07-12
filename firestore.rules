@@ -33,5 +33,11 @@ service cloud.firestore {
     match /usuarios/{userId}/historial/{docId} {
       allow read, write: if isAdmin() || (request.auth != null && request.auth.uid == userId);
     }
+
+    // Proyectos de reel (planos de la galería "Mis reels"): solo el dueño (admin puede leer)
+    match /usuarios/{userId}/proyectosReel/{projId} {
+      allow read:  if isAdmin() || (request.auth != null && request.auth.uid == userId);
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }

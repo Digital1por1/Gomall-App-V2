@@ -48,11 +48,15 @@ export const getProjectAt = <T = unknown>(key: string) => run<T | undefined>(STO
 export const clearProjectAt = (key: string) => run<void>(STORE_PROJ, 'readwrite', s => s.delete(key));
 
 // Borra los blobs de media que ya no referencia ningún proyecto (evita que la base crezca sin control).
+// OJO: nunca toca la media del editor V2 (prefijo "v2_") — esos blobs pertenecen a los proyectos de la
+// galería "Mis reels" (múltiples planos en la nube) y solo el V2 sabe cuáles siguen en uso.
 export async function pruneMedia(keepIds: Set<string>): Promise<void> {
   try {
     const keys = await allMediaKeys();
     for (const k of keys) {
-      if (!keepIds.has(String(k))) await delMedia(String(k));
+      const id = String(k);
+      if (id.startsWith('v2_')) continue;
+      if (!keepIds.has(id)) await delMedia(id);
     }
   } catch { /* no-op */ }
 }
