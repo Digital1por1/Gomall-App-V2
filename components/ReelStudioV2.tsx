@@ -938,7 +938,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       let p = project;
       for (const t of p.tracks) for (const el of t.elements) if (el.name === 'B-roll') p = removeElement(p, el.id);
       setBrollMsg('Eligiendo los momentos…');
-      const res = await fetch('/api/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: subs.map(s => s.text) }) });
+      const res = await fetch('/api/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: subs.map(s => s.text), business: profile?.business || '', industry: profile?.industry || '' }) });
       const data = await res.json().catch(() => null);
       const plan: { line: number; query: string }[] = Array.isArray(data?.items) ? data.items : [];
       if (!plan.length) { alert('La IA no encontró momentos claros para b-roll en este guion.'); return; }
@@ -1953,8 +1953,8 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
           <button onClick={() => setSnap(s => !s)} title="Imán (snapping)" className="w-8 h-8 grid place-items-center rounded-lg text-xs"
             style={snap ? { background: `linear-gradient(135deg,${BRAND},#f0814f)`, color: '#fff' } : { color: 'rgba(255,255,255,.5)' }}><i className="fa-solid fa-magnet" /></button>
           <div className="w-px h-5 bg-white/10 mx-1" />
-          <button onClick={() => moveSelTrack(-1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Subir la pista del elemento seleccionado"><i className="fa-solid fa-arrow-up text-xs" /></button>
-          <button onClick={() => moveSelTrack(1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Bajar la pista del elemento seleccionado"><i className="fa-solid fa-arrow-down text-xs" /></button>
+          <button onClick={() => moveSelTrack(1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Subir la pista del elemento seleccionado (traer al frente)"><i className="fa-solid fa-arrow-up text-xs" /></button>
+          <button onClick={() => moveSelTrack(-1)} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Bajar la pista del elemento seleccionado (mandar al fondo)"><i className="fa-solid fa-arrow-down text-xs" /></button>
           <button onClick={toggleBeatMarks} disabled={beatsBusy} title="Mostrar los beats de la música en la línea de tiempo (los clips se pegan a ellos)"
             className="h-8 px-2.5 grid place-items-center rounded-lg text-xs font-bold gap-1.5 flex items-center disabled:opacity-50"
             style={beatMarks.length ? { background: '#22D3EE22', color: '#22D3EE' } : { color: 'rgba(255,255,255,.55)' }}>
@@ -1978,7 +1978,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               ))}
             </div>
             {/* Pistas (solo las que tienen algo — sin filas vacías) */}
-            {project.tracks.filter(track => track.elements.length > 0).map(track => (
+            {[
+              ...[...project.tracks].filter(t => t.kind !== 'audio').reverse(), // frente arriba, base abajo
+              ...project.tracks.filter(t => t.kind === 'audio'),                // audio al fondo
+            ].filter(track => track.elements.length > 0).map(track => (
               <div key={track.id} className="h-14 relative border-b border-white/5">
                 <div className="absolute left-0 top-0 bottom-0 w-0 z-10" />
                 {track.elements.map(el => {

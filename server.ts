@@ -603,13 +603,16 @@ ${numbered}` }] }],
       const lines: string[] = Array.isArray(req.body?.lines) ? req.body.lines.map((l: any) => String(l || '')) : [];
       if (!lines.length) return res.status(400).json({ error: "Faltan los subtítulos." });
       const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+      const business = String(req.body?.business || '').trim().slice(0, 120);
+      const industry = String(req.body?.industry || '').trim().slice(0, 60);
+      const ctx = (business || industry) ? `Contexto: el video es de un negocio${business ? ` llamado "${business}"` : ''}${industry ? ` del rubro ${industry}` : ''}. Las búsquedas deben ser coherentes con ese negocio.\n\n` : '';
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text:
-`Sos editor de reels. Estas son las frases (subtítulos) de un video hablado. Elegí hasta 4 momentos donde un clip de stock (b-roll) refuerce lo que se dice, y devolvé para cada uno:
+`Sos editor de reels. Estas son las frases (subtítulos) de un video hablado. ${ctx}Elegí hasta 4 momentos donde un clip de stock (b-roll) refuerce lo que se dice, y devolvé para cada uno:
 - "line": el número de la frase (1 a ${lines.length})
-- "query": qué buscar en el stock, en INGLÉS, 2-3 palabras concretas y visuales (ej: "barista pouring coffee")
-Elegí momentos separados entre sí. Solo JSON.
+- "query": qué buscar en el stock, en INGLÉS, 2-3 palabras concretas y visuales que reflejen el TEMA LITERAL de esa frase (y el rubro del negocio si la frase es ambigua). No propongas temas ajenos al negocio.
+Elegí momentos separados entre sí. Si ninguna frase amerita b-roll, devolvé menos ítems. Solo JSON.
 
 Frases:
 ${numbered}` }] }],
