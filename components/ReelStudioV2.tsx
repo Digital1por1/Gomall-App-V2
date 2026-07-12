@@ -1338,12 +1338,17 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   ];
 
   return (
-    <div className="fixed inset-0 z-[200] bg-[#313137] text-[#f3eeec] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
+    <div className="fixed inset-0 z-[200] bg-[#0F172A] text-[#F1F5F9] flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Top bar */}
-      <header className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 h-14 border-b border-white/10 bg-[#3b3b42]">
-        <div className="w-8 h-8 rounded-lg grid place-items-center text-white font-black shrink-0" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>G</div>
-        <input value={project.name} onChange={(e) => setProject(p => ({ ...p, name: e.target.value }))} placeholder="Reel sin título"
-          className="ml-1 sm:ml-3 text-sm bg-transparent text-white/70 outline-none border-b border-transparent focus:border-white/30 focus:text-white w-20 sm:w-48 placeholder:text-white/30" />
+      <header className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 h-14 border-b border-white/10 bg-[#1E293B]">
+        <div className="w-9 h-9 rounded-xl grid place-items-center text-white shrink-0 shadow-lg shadow-black/25" style={{ background: `linear-gradient(140deg,${BRAND},#f0814f)` }}>
+          <i className="fa-solid fa-clapperboard text-sm" />
+        </div>
+        <div className="min-w-0 ml-1 sm:ml-2">
+          <input value={project.name} onChange={(e) => setProject(p => ({ ...p, name: e.target.value }))} placeholder="Reel sin título"
+            className="block w-24 sm:w-48 text-sm bg-transparent text-white/80 outline-none border-b border-transparent focus:border-white/30 focus:text-white placeholder:text-white/30" />
+          <span className="hidden sm:block text-[8px] font-black uppercase tracking-[0.2em] text-white/30 leading-tight">Editor de reels · Gomall Studio</span>
+        </div>
         <div className="flex-1" />
         {saveState !== 'idle' && (
           <span className="hidden sm:flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-white/40 mr-1">
@@ -1367,7 +1372,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       {/* Cuerpo: rail | panel | preview | propiedades (desktop) — apilado con hojas (mobile) */}
       <div className={isMobile ? 'flex-1 flex min-h-0 relative' : 'flex-1 grid min-h-0'} style={isMobile ? undefined : { gridTemplateColumns: '56px 280px 1fr 300px' }}>
         {/* rail (solo desktop; en mobile es la barra inferior) */}
-        <nav className={`bg-[#3b3b42] border-r border-white/10 flex-col items-center gap-1 py-3 ${isMobile ? 'hidden' : 'flex'}`}>
+        <nav className={`bg-[#1E293B] border-r border-white/10 flex-col items-center gap-1 py-3 ${isMobile ? 'hidden' : 'flex'}`}>
           {RAIL.map(r => (
             <button key={r.id} onClick={() => setTab(r.id)} title={r.label}
               className="w-10 h-10 rounded-xl grid place-items-center text-white/60 hover:bg-white/10"
@@ -1379,10 +1384,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
         {/* panel izquierdo (según tab) — hoja inferior en mobile */}
         <section className={isMobile
-          ? `fixed inset-x-0 bottom-0 z-50 h-[62%] rounded-t-2xl border-t border-white/10 bg-[#3b3b42] flex flex-col shadow-2xl transition-transform duration-200 ${mobileSheet === 'panel' ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`
-          : 'bg-[#3b3b42] border-r border-white/10 flex flex-col min-h-0'}>
-          <div className="px-4 py-3 text-sm font-bold border-b border-white/5 flex items-center justify-between">
-            {RAIL.find(r => r.id === tab)?.label}
+          ? `fixed inset-x-0 bottom-0 z-50 h-[62%] rounded-t-2xl border-t border-white/10 bg-[#1E293B] flex flex-col shadow-2xl transition-transform duration-200 ${mobileSheet === 'panel' ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`
+          : 'bg-[#1E293B] border-r border-white/10 flex flex-col min-h-0'}>
+          <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+            <span className="font-display text-base text-white">{RAIL.find(r => r.id === tab)?.label}</span>
             {isMobile && <button onClick={() => setMobileSheet('none')} className="text-white/50 hover:text-white"><i className="fa-solid fa-xmark" /></button>}
           </div>
           <div className="p-4 overflow-y-auto text-sm space-y-3 flex-1 min-h-0">
@@ -1683,7 +1688,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
         </section>
 
         {/* preview */}
-        <section className="bg-[#2a2a30] flex flex-col min-h-0 flex-1">
+        <section className="bg-[#0B1220] flex flex-col min-h-0 flex-1">
           <div className="flex-1 flex items-center justify-center p-5 min-h-0 overflow-hidden">
             {/* Flexbox: el alto del canvas = alto disponible; el ancho sale del aspecto 9:16 → siempre vertical. */}
             <div className="relative" style={{ height: '100%', aspectRatio: `${CW} / ${CH}`, maxWidth: '100%' }}>
@@ -1750,10 +1755,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
         {/* propiedades — hoja inferior en mobile */}
         <aside className={isMobile
-          ? `fixed inset-x-0 bottom-0 z-50 h-[68%] rounded-t-2xl border-t border-white/10 bg-[#3b3b42] flex flex-col shadow-2xl transition-transform duration-200 ${mobileSheet === 'props' ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`
-          : 'bg-[#3b3b42] border-l border-white/10 flex flex-col min-h-0'}>
-          <div className="px-4 py-3 text-sm font-bold border-b border-white/5 flex items-center justify-between">
-            <span>Propiedades</span>
+          ? `fixed inset-x-0 bottom-0 z-50 h-[68%] rounded-t-2xl border-t border-white/10 bg-[#1E293B] flex flex-col shadow-2xl transition-transform duration-200 ${mobileSheet === 'props' ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`
+          : 'bg-[#1E293B] border-l border-white/10 flex flex-col min-h-0'}>
+          <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+            <span className="font-display text-base text-white">Propiedades</span>
             <div className="flex items-center gap-3">
               {selected && <button onClick={deleteSel} className="text-red-400 hover:text-red-300 text-xs"><i className="fa-solid fa-trash" /></button>}
               {isMobile && <button onClick={() => setMobileSheet('none')} className="text-white/50 hover:text-white"><i className="fa-solid fa-xmark" /></button>}
@@ -1821,7 +1826,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       </div>
 
       {/* Timeline */}
-      <div className={`${isMobile ? 'h-[150px]' : 'h-[240px]'} bg-[#3b3b42] border-t border-white/10 flex flex-col min-h-0`}>
+      <div className={`${isMobile ? 'h-[150px]' : 'h-[240px]'} bg-[#1E293B] border-t border-white/10 flex flex-col min-h-0`}>
         <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
           <button onClick={splitAtPlayhead} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10" title="Cortar en el cabezal (S)"><i className="fa-solid fa-scissors text-xs" /></button>
           <button onClick={deleteSel} disabled={!selected} className="w-8 h-8 grid place-items-center rounded-lg text-white/60 hover:bg-white/10 disabled:opacity-30" title="Eliminar"><i className="fa-solid fa-trash text-xs" /></button>
@@ -1902,7 +1907,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
 
       {/* barra inferior de tabs (solo mobile) */}
       {isMobile && (
-        <nav className="flex items-stretch justify-around bg-[#3b3b42] border-t border-white/10 py-1.5 shrink-0">
+        <nav className="flex items-stretch justify-around bg-[#1E293B] border-t border-white/10 py-1.5 shrink-0">
           {RAIL.map(r => {
             const on = tab === r.id && mobileSheet === 'panel';
             return (
@@ -1919,9 +1924,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       {/* galería "Mis reels": planos guardados en la cuenta del usuario */}
       {showGallery && (
         <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4" onClick={() => setShowGallery(false)}>
-          <div className="bg-[#3b3b42] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[#1E293B] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-              <div className="text-sm font-bold"><i className="fa-solid fa-folder-open mr-2" style={{ color: BRAND }} />Mis reels</div>
+              <div className="font-display text-lg text-white"><i className="fa-solid fa-folder-open mr-2 text-sm" style={{ color: BRAND }} />Mis reels</div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setShowGallery(false); newProjectV2(); }} className="h-8 px-3 rounded-lg text-white text-[11px] font-bold" style={{ background: `linear-gradient(135deg,${BRAND},#f0814f)` }}>
                   <i className="fa-solid fa-plus mr-1" />Nuevo reel
