@@ -24,18 +24,35 @@ const nthWeekday = (m: number, weekday: number, n: number) => (year: number) => 
   const offset = (weekday - first.getDay() + 7) % 7;
   return new Date(year, m - 1, 1 + offset + (n - 1) * 7);
 };
+// Domingo de Pascua (algoritmo de computus, calendario gregoriano) — para Semana Santa.
+const easter = (year: number): Date => {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+};
 
+// Fechas comerciales de ARGENTINA (Día de la Madre en octubre, Día del Amigo 20/7, Hot Sale y
+// CyberMonday de CACE, fiestas patrias). Las de CACE varían cada año: usamos la semana típica.
 const COMMERCIAL_DATES: CommercialDate[] = [
   { label: 'Año Nuevo', emoji: '🎉', resolve: fixed(1, 1) },
+  { label: 'Reyes', emoji: '👑', rubros: ['Entretenimiento', 'Moda y Vestimenta', 'Tecnología'], resolve: fixed(1, 6) },
   { label: 'San Valentín', emoji: '💝', rubros: ['Gastronomía', 'Joyería y Accesorios', 'Moda y Vestimenta', 'Belleza y Estética'], resolve: fixed(2, 14) },
   { label: 'Día de la Mujer', emoji: '💜', resolve: fixed(3, 8) },
+  { label: 'Pascuas', emoji: '🐣', rubros: ['Gastronomía', 'Entretenimiento'], resolve: easter },
   { label: 'Día del Libro', emoji: '📚', rubros: ['Educación'], resolve: fixed(4, 23) },
   { label: 'Día del Trabajador', emoji: '🛠️', resolve: fixed(5, 1) },
+  { label: 'Hot Sale (CACE)', emoji: '🔥', resolve: nthWeekday(5, 1, 2) },
+  { label: '25 de Mayo', emoji: '🇦🇷', rubros: ['Gastronomía'], resolve: fixed(5, 25) },
   { label: 'Día de la Madre', emoji: '💐', rubros: ['Moda y Vestimenta', 'Belleza y Estética', 'Joyería y Accesorios', 'Gastronomía'], resolve: nthWeekday(10, 0, 3) },
   { label: 'Día del Padre', emoji: '👔', rubros: ['Moda y Vestimenta', 'Gastronomía', 'Tecnología'], resolve: nthWeekday(6, 0, 3) },
-  { label: 'Día del Niño', emoji: '🧸', resolve: nthWeekday(8, 0, 3) },
+  { label: '9 de Julio', emoji: '🇦🇷', rubros: ['Gastronomía'], resolve: fixed(7, 9) },
+  { label: 'Día de la Niñez', emoji: '🧸', resolve: nthWeekday(8, 0, 3) },
   { label: 'Día del Amigo', emoji: '🤝', rubros: ['Gastronomía', 'Entretenimiento'], resolve: fixed(7, 20) },
   { label: 'Día del Estudiante / Primavera', emoji: '🌸', resolve: fixed(9, 21) },
+  { label: 'CyberMonday (CACE)', emoji: '💻', resolve: nthWeekday(11, 1, 1) },
   { label: 'Black Friday', emoji: '🛍️', resolve: nthWeekday(11, 5, 4) },
   { label: 'Navidad', emoji: '🎄', resolve: fixed(12, 25) },
   { label: 'Fin de Año', emoji: '🎆', resolve: fixed(12, 31) },
