@@ -47,7 +47,7 @@ const PostMockup: React.FC = () => {
     <div className="w-full max-w-[300px] mx-auto bg-white rounded-[28px] shadow-2xl shadow-slate-300/50 border border-slate-100 p-3 rotate-[1.5deg]">
       <div className="rounded-[20px] overflow-hidden aspect-[4/5] relative flex flex-col justify-end p-5">
         {imgOk ? (
-          <img src="/hero.jpg" alt="Ejemplo de post" className="absolute inset-0 w-full h-full object-cover" onError={() => setImgOk(false)} />
+          <img src="/hero.jpg?v=2" alt="Ejemplo de post" className="absolute inset-0 w-full h-full object-cover" onError={() => setImgOk(false)} />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#EA5B25] via-[#f0814f] to-amber-400" />
         )}
