@@ -905,6 +905,19 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     finally { setBrollBusy(false); }
   };
 
+  // El b-roll va SIEMPRE en una pista overlay pegada al video base: tapa el video (esa es su función)
+  // pero queda DETRÁS de textos, logo y subtítulos, que viven en las pistas de más arriba.
+  const addBrollToProject = (p: ReelProject, el: ReelElement): ReelProject => {
+    const overlaps = (t: Track) => t.elements.some(e => !(el.start + el.duration <= e.start || el.start >= e.start + e.duration));
+    const free = p.tracks.find(t => t.kind === 'overlay' && t.name === 'B-roll' && !overlaps(t));
+    if (free) return addElement(p, free.id, el);
+    const track: Track = { id: genId('trk'), kind: 'overlay', name: 'B-roll', elements: [el], muted: false, hidden: false, locked: false };
+    const vIdx = p.tracks.findIndex(t => t.kind === 'video');
+    const tracks = [...p.tracks];
+    tracks.splice(vIdx >= 0 ? vIdx + 1 : 0, 0, track);
+    return { ...p, tracks };
+  };
+
   // Descarga el clip por el proxy del server (canvas-safe) y lo inserta como overlay a pantalla completa,
   // muteado (la voz/música del reel sigue abajo). Devuelve el proyecto nuevo, sin commit.
   const insertBroll = async (item: { url: string }, at: number, p0: ReelProject): Promise<ReelProject | null> => {
@@ -916,7 +929,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const dur = await probeDuration(url, 'video');
       const clipDur = Math.min(dur, 4);
       const el = makeVideoElement(url, dur, { name: 'B-roll', start: at, duration: clipDur, trimEnd: clipDur, muted: true, volume: 0 });
-      return addOverlayElement(p0, el);
+      return addBrollToProject(p0, el);
     } catch { return null; }
   };
 
