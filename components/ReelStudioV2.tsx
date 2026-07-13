@@ -157,8 +157,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [snap, setSnap] = useState(true);
   // Guías magnéticas del canvas: muestran las líneas de centro cuando el elemento arrastrado se alinea.
   const [guides, setGuides] = useState<{ x: boolean; y: boolean }>({ x: false, y: false });
-  // Overlay de márgenes de seguridad: zonas que tapa la UI de Instagram/TikTok (solo guía, no se exporta).
+  // Overlay de márgenes de seguridad: maqueta de la UI real de Instagram (solo guía, no se exporta).
   const [safeZones, setSafeZones] = useState(false);
+  const [zonesMode, setZonesMode] = useState<'reel' | 'story'>('reel'); // en 9:16: Reel o Historia
   const [tab, setTab] = useState<'media' | 'viral' | 'texto' | 'marca' | 'stickers' | 'audio' | 'animacion' | 'ajustes'>('media');
   const [recording, setRecording] = useState(false);
   const [ttsText, setTtsText] = useState('');
@@ -196,6 +197,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [brollPage, setBrollPage] = useState(1);
   const [brollHasMore, setBrollHasMore] = useState(false);
   const [brollAutoBusy, setBrollAutoBusy] = useState(false);
+  const [brollPhraseBusy, setBrollPhraseBusy] = useState(''); // id del subtítulo al que se le está buscando clip
   const [brollMsg, setBrollMsg] = useState('');
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
   const [viralMsg, setViralMsg] = useState('');
@@ -942,6 +944,25 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } finally { setBrollBusy(false); }
   };
 
+  // B-roll para UNA frase puntual (panel "por frases" estilo Submagic): la IA convierte la frase
+  // en búsqueda de stock, toma el mejor resultado y lo inserta al inicio de esa frase.
+  const brollForPhrase = async (sub: TextElement) => {
+    if (brollPhraseBusy) return;
+    setBrollPhraseBusy(sub.id);
+    try {
+      const pr = await fetch('/api/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: [sub.text], business: profile?.business || '', industry: profile?.industry || '' }) });
+      const pd = await pr.json().catch(() => null);
+      const query = String(pd?.items?.[0]?.query || sub.text).trim();
+      const sr = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, perPage: 3 }) });
+      const sd = await sr.json().catch(() => null);
+      const item = sd?.items?.[0];
+      if (!item) { alert(`No encontré clips para "${query}". Probá el buscador manual con otras palabras.`); return; }
+      const np = await insertBroll(item, sub.start, project);
+      if (np) commit(np); else alert('No se pudo descargar el clip.');
+    } catch (e: any) { console.warn('[broll frase]', e); alert(e?.message || 'No se pudo buscar el clip.'); }
+    finally { setBrollPhraseBusy(''); }
+  };
+
   // B-roll automático: la IA elige los momentos según los subtítulos, busca el clip y lo inserta.
   const autoBroll = async () => {
     const subs = (project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[]).sort((a, b) => a.start - b.start);
@@ -1516,6 +1537,38 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                   {brollAutoBusy ? <><i className="fa-solid fa-circle-notch fa-spin mr-2" />{brollMsg || 'Generando…'}</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />B-roll automático (IA)</>}
                 </button>
                 <p className="text-[11px] text-white/40 leading-relaxed">La IA elige los momentos según <b className="text-white/70">lo que se dice</b> (necesita los subtítulos) e inserta clips de stock gratuitos que refuerzan el mensaje. Re-aplicable: reemplaza los anteriores.</p>
+                {(() => {
+                  const subsList = (project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[]).sort((a, b) => a.start - b.start);
+                  if (!subsList.length) return null;
+                  const brolls = project.tracks.flatMap(t => t.elements).filter(e => e.name === 'B-roll');
+                  const clipAt = (sub: TextElement) => brolls.find(b => b.start < sub.start + Math.max(1, sub.duration) && sub.start < b.start + b.duration) || null;
+                  return (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-white/35">Por frase</div>
+                      {subsList.map(sub => {
+                        const clip = clipAt(sub);
+                        return (
+                          <div key={sub.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03]">
+                            <span className="text-[9px] tabular-nums text-white/35 shrink-0 w-8">{sub.start.toFixed(1)}s</span>
+                            <span className="text-[11px] text-white/70 flex-1 min-w-0 truncate" title={sub.text}>{sub.text}</span>
+                            {clip ? (
+                              <button onClick={() => commit(removeElement(project, clip.id))} title="Quitar el b-roll de esta frase"
+                                className="w-7 h-7 shrink-0 grid place-items-center rounded-lg bg-emerald-400/15 text-emerald-300 hover:bg-red-500/20 hover:text-red-300">
+                                <i className="fa-solid fa-film text-xs" />
+                              </button>
+                            ) : (
+                              <button onClick={() => brollForPhrase(sub)} disabled={!!brollPhraseBusy} title="Buscar e insertar un clip para esta frase"
+                                className="w-7 h-7 shrink-0 grid place-items-center rounded-lg border border-white/15 text-white/60 hover:bg-white/10 disabled:opacity-40">
+                                {brollPhraseBusy === sub.id ? <i className="fa-solid fa-circle-notch fa-spin text-xs" /> : <i className="fa-solid fa-plus text-xs" />}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <p className="text-[11px] text-white/35 leading-relaxed">El ícono verde = esa frase ya tiene clip (clic para quitarlo). El + le busca uno con IA.</p>
+                    </div>
+                  );
+                })()}
                 <div className="flex gap-2">
                   <input value={brollQuery} onChange={(e) => setBrollQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') searchBroll(1); }} placeholder="Buscar clip (ej: coffee shop)"
                     className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30" />
@@ -1846,26 +1899,68 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               {/* Guías magnéticas: líneas de centro cuando el elemento arrastrado se alinea */}
               {guides.x && <div className="absolute top-0 bottom-0" style={{ left: '50%', width: 1.5, transform: 'translateX(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
               {guides.y && <div className="absolute left-0 right-0" style={{ top: '50%', height: 1.5, transform: 'translateY(-50%)', background: '#FF2D78', boxShadow: '0 0 6px #FF2D78', pointerEvents: 'none' }} />}
-              {/* Márgenes de seguridad: en 9:16 usa las zonas oficiales de Reels (UI superior, íconos a la derecha,
-                  descripción y botones abajo); en otros formatos, un margen uniforme. Solo visual: no se exporta. */}
+              {/* Zonas seguras: maqueta de la UI real de Instagram encima del preview (estilo Submagic).
+                  9:16 = Reel u Historia (switch); 4:5 = recorte de la grilla; 1:1 = sin tapados. No se exporta. */}
               {safeZones && (() => {
-                const z = project.aspect === '9:16'
-                  ? { top: 11.5, bottom: 22, left: 4, right: 11 }
-                  : { top: 4, bottom: 4, left: 4, right: 4 };
-                const strip: React.CSSProperties = { position: 'absolute', background: 'rgba(0,0,0,.45)' };
-                const lbl: React.CSSProperties = { position: 'absolute', color: 'rgba(255,255,255,.75)', fontSize: 9, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', textShadow: '0 1px 2px rgba(0,0,0,.8)' };
-                return (
-                  <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ pointerEvents: 'none', zIndex: 5 }}>
-                    <div style={{ ...strip, top: 0, left: 0, right: 0, height: `${z.top}%` }} />
-                    <div style={{ ...strip, bottom: 0, left: 0, right: 0, height: `${z.bottom}%` }} />
-                    <div style={{ ...strip, top: `${z.top}%`, bottom: `${z.bottom}%`, left: 0, width: `${z.left}%` }} />
-                    <div style={{ ...strip, top: `${z.top}%`, bottom: `${z.bottom}%`, right: 0, width: `${z.right}%` }} />
-                    <div style={{ position: 'absolute', top: `${z.top}%`, bottom: `${z.bottom}%`, left: `${z.left}%`, right: `${z.right}%`, border: '1.5px dashed #22D3EE', borderRadius: 8 }} />
-                    {project.aspect === '9:16' && (<>
-                      <span style={{ ...lbl, top: '4.5%', left: 0, right: 0, textAlign: 'center' }}>Perfil y cámara</span>
-                      <span style={{ ...lbl, top: '48%', right: '1.5%', writingMode: 'vertical-rl' }}>Íconos</span>
-                      <span style={{ ...lbl, bottom: '9%', left: 0, right: 0, textAlign: 'center' }}>Descripción y botones</span>
+                const sh: React.CSSProperties = { textShadow: '0 1px 3px rgba(0,0,0,.65)' };
+                const handle = '@' + (profile?.business || 'tunegocio').toLowerCase().replace(/[^a-z0-9]+/g, '');
+                if (project.aspect === '9:16') return (
+                  <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ pointerEvents: 'none', zIndex: 5, fontFamily: 'Inter, sans-serif' }}>
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1" style={{ pointerEvents: 'auto' }}>
+                      {(['reel', 'story'] as const).map(m => (
+                        <button key={m} onClick={() => setZonesMode(m)} className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
+                          style={zonesMode === m ? { background: '#22D3EE', color: '#0F172A' } : { background: 'rgba(0,0,0,.55)', color: 'rgba(255,255,255,.75)' }}>
+                          {m === 'reel' ? 'Reel' : 'Historia'}
+                        </button>
+                      ))}
+                    </div>
+                    {zonesMode === 'reel' ? (<>
+                      <div className="absolute inset-x-0 bottom-0" style={{ height: '30%', background: 'linear-gradient(180deg, transparent, rgba(0,0,0,.55))' }} />
+                      <div className="absolute flex flex-col items-center gap-4 text-white/90" style={{ right: '3.5%', bottom: '21%', ...sh }}>
+                        <i className="fa-solid fa-heart text-xl" />
+                        <i className="fa-solid fa-comment-dots text-xl" />
+                        <i className="fa-solid fa-paper-plane text-lg" />
+                        <i className="fa-solid fa-ellipsis text-lg" />
+                      </div>
+                      <div className="absolute text-white/90" style={{ left: '4%', right: '18%', bottom: '3.5%', ...sh }}>
+                        <div className="text-[12px] font-bold truncate">{handle}</div>
+                        <div className="text-[10px] text-white/75 mt-0.5">Descripción del video…</div>
+                        <div className="text-[10px] text-white/75">#hashtags</div>
+                        <div className="text-[10px] text-white/75 mt-0.5"><i className="fa-solid fa-music mr-1 text-[9px]" />Audio original</div>
+                      </div>
+                    </>) : (<>
+                      <div className="absolute inset-x-0 top-0 px-2 pt-2 pb-4" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.5), transparent)' }}>
+                        <div className="flex gap-0.5 mb-2">
+                          {[0, 1, 2].map(i => <div key={i} className="h-0.5 flex-1 rounded-full" style={{ background: i === 0 ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.35)' }} />)}
+                        </div>
+                        <div className="flex items-center gap-2 text-white/90" style={sh}>
+                          <div className="w-7 h-7 rounded-full bg-white/25 border border-white/60 shrink-0" />
+                          <span className="text-[11px] font-bold truncate">{profile?.business || 'Tu negocio'}</span>
+                          <span className="text-[10px] text-white/60">2 h</span>
+                          <i className="fa-solid fa-xmark ml-auto text-base" />
+                        </div>
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 px-2 pb-2 pt-5 flex items-center gap-3" style={{ background: 'linear-gradient(0deg, rgba(0,0,0,.5), transparent)' }}>
+                        <div className="flex-1 h-9 rounded-full border border-white/50 flex items-center px-3 text-[11px] text-white/70">Enviar mensaje</div>
+                        <i className="fa-regular fa-heart text-white/90 text-xl" style={sh} />
+                        <i className="fa-solid fa-paper-plane text-white/90 text-lg" style={sh} />
+                      </div>
                     </>)}
+                  </div>
+                );
+                if (project.aspect === '4:5') return (
+                  <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ pointerEvents: 'none', zIndex: 5 }}>
+                    <div className="absolute inset-x-0 top-0 bg-black/45 border-b border-dashed border-cyan-300/80 flex items-end justify-center pb-1" style={{ height: '10%' }}>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-white/80" style={sh}>La grilla recorta esta franja</span>
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 bg-black/45 border-t border-dashed border-cyan-300/80 flex items-start justify-center pt-1" style={{ height: '10%' }}>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-white/80" style={sh}>La grilla recorta esta franja</span>
+                    </div>
+                  </div>
+                );
+                return (
+                  <div className="absolute inset-0 rounded-xl overflow-hidden grid place-items-end justify-center pb-3" style={{ pointerEvents: 'none', zIndex: 5 }}>
+                    <span className="px-2 py-1 rounded-full bg-black/55 text-[9px] font-bold uppercase tracking-wider text-white/80">En el feed y la grilla se ve completa ✓</span>
                   </div>
                 );
               })()}
