@@ -1006,6 +1006,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } finally { setViralBusy(''); setViralMsg(''); }
   };
 
+  // Orden de LECTURA del timeline (pedido por el usuario): videos subidos → b-rolls → gráficos/
+  // textos/logo → voz (en off o IA) → subtítulos → música y SFX al fondo. Es solo orden visual:
+  // la composición del canvas (qué tapa a qué) no cambia.
+  const timelineRank = (t: Track): number => {
+    if (t.kind === 'video') return 0;
+    if (t.kind === 'overlay') {
+      if (t.elements.some(e => e.name === 'B-roll')) return 1;
+      if (t.elements.some(e => e.name === 'Subtítulo')) return 4;
+      return 2; // textos, logo, stickers
+    }
+    if (t.elements.some(e => /voz|voice|narrac/i.test(e.name))) return 3; // voz en off / narración IA
+    return 5; // música y SFX
+  };
+
   // Sube/baja la pista del elemento seleccionado en la timeline (reordena las capas).
   const moveSelTrack = (dir: -1 | 1) => {
     if (!selectedId) return;
@@ -1978,10 +1992,10 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
               ))}
             </div>
             {/* Pistas (solo las que tienen algo — sin filas vacías) */}
-            {[
-              ...[...project.tracks].filter(t => t.kind !== 'audio').reverse(), // frente arriba, base abajo
-              ...project.tracks.filter(t => t.kind === 'audio'),                // audio al fondo
-            ].filter(track => track.elements.length > 0).map(track => (
+            {[...project.tracks]
+              .filter(track => track.elements.length > 0)
+              .sort((a, b) => timelineRank(a) - timelineRank(b))
+              .map(track => (
               <div key={track.id} className="h-14 relative border-b border-white/5">
                 <div className="absolute left-0 top-0 bottom-0 w-0 z-10" />
                 {track.elements.map(el => {
