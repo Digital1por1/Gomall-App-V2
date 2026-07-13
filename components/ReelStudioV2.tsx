@@ -582,7 +582,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     let srcUrl: string | undefined = voice?.url;
     if (!srcUrl) { for (const t of p0.tracks) for (const el of t.elements) if (el.type === 'video') { srcUrl = (el as VideoElement).url; break; } }
     if (!srcUrl) throw new Error('Agregá una voz en off, un audio o un video con voz para generar subtítulos.');
-    let segs: { text: string; start: number; end: number; hlWord?: string }[] = await transcribe(srcUrl, onMsg);
+    let segs: { text: string; start: number; end: number; hlWord?: string; emojiTop?: string }[] = await transcribe(srcUrl, onMsg);
     if (!segs.length) throw new Error('No se detectó voz en el audio.');
     // Captions con IA (fase 1: emoji · fase 2: palabra clave destacada). Si falla, seguimos sin enriquecer.
     if (aiCaptions) {
@@ -595,15 +595,16 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
           const it = items[i] || {};
           const emoji = String(it.emoji || '').trim();
           const keyword = String(it.keyword || '').trim();
-          return { ...s, text: emoji ? `${s.text} ${emoji}` : s.text, hlWord: keyword || undefined };
+          // El emoji ya no se pega al texto: va aparte, animado arriba del subtítulo (estilo Submagic).
+          return { ...s, emojiTop: emoji || undefined, hlWord: keyword || undefined };
         });
       } catch (e) { console.warn('[captions IA] no se pudo enriquecer, sigo sin emojis', e); }
     }
-    const mkSub = (s: { text: string; start: number; end: number; hlWord?: string }) => makeTextElement(s.text, {
+    const mkSub = (s: { text: string; start: number; end: number; hlWord?: string; emojiTop?: string }) => makeTextElement(s.text, {
       start: s.start, duration: Math.max(0.4, s.end - s.start),
       name: 'Subtítulo',
       transform: { x: 50, y: 86, scale: 100, rotation: 0, opacity: 100 },
-      style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600', ...(s.hlWord ? { hlWord: s.hlWord } : {}) },
+      style: { font: kit?.headlineFont || 'Inter', color: '#FFFFFF', size: 6, weight: 900, bg: null, stroke: true, align: 'center', karaoke: true, accent: '#FFE600', ...(s.hlWord ? { hlWord: s.hlWord } : {}), ...(s.emojiTop ? { emojiTop: s.emojiTop } : {}) },
     });
     let p = p0;
     // Los subtítulos van a una pista de overlay DEDICADA (una vacía, o una nueva) para no pisar logo/textos.
