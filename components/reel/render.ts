@@ -113,6 +113,24 @@ function drawTextEl(ctx: CanvasRenderingContext2D, el: TextElement, W: number, H
   const totalH = lines.length * lineH;
   let y = cy - totalH / 2 + lineH / 2;
 
+  // Emoji animado ARRIBA del subtítulo (captions IA estilo Submagic): entra con pop y queda flotando.
+  if (s.emojiTop) {
+    const life = Math.max(0, t - el.start);
+    const popIn = Math.min(1, life / 0.35);
+    const scale = 0.3 + 0.7 * easeOutBack(popIn);
+    const eSize = fontPx * 1.6 * scale;
+    const bob = Math.sin(t * 2.4) * fontPx * 0.10;   // flote vertical suave
+    const wob = Math.sin(t * 1.7 + 1) * 0.09;        // balanceo leve
+    const ey = Math.max(eSize * 0.7, cy - totalH / 2 - fontPx * 1.05 + bob);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fontPx * 0.18;
+    ctx.translate(cx, ey); ctx.rotate(wob);
+    ctx.font = `${Math.max(8, eSize)}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(s.emojiTop, 0, 0);
+    ctx.restore();
+  }
+
   // Animación palabra por palabra. En vez de repartir el tiempo parejo entre las palabras, se pondera por
   // el largo de cada palabra (las largas duran más) para seguir mejor el ritmo del habla, con un pequeño
   // adelanto (LEAD) para que el destaque no se sienta atrasado respecto al audio.
