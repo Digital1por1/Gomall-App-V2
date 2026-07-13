@@ -2032,38 +2032,27 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                         </button>
                       ))}
                     </div>
-                    {zonesMode === 'reel' ? (<>
-                      <div className="absolute inset-x-0 bottom-0" style={{ height: '30%', background: 'linear-gradient(180deg, transparent, rgba(0,0,0,.55))' }} />
-                      <div className="absolute flex flex-col items-center gap-4 text-white/90" style={{ right: '3.5%', bottom: '21%', ...sh }}>
-                        <i className="fa-solid fa-heart text-xl" />
-                        <i className="fa-solid fa-comment-dots text-xl" />
-                        <i className="fa-solid fa-paper-plane text-lg" />
-                        <i className="fa-solid fa-ellipsis text-lg" />
-                      </div>
-                      <div className="absolute text-white/90" style={{ left: '4%', right: '18%', bottom: '3.5%', ...sh }}>
-                        <div className="text-[12px] font-bold truncate">{handle}</div>
-                        <div className="text-[10px] text-white/75 mt-0.5">Descripción del video…</div>
-                        <div className="text-[10px] text-white/75">#hashtags</div>
-                        <div className="text-[10px] text-white/75 mt-0.5"><i className="fa-solid fa-music mr-1 text-[9px]" />Audio original</div>
-                      </div>
-                    </>) : (<>
-                      <div className="absolute inset-x-0 top-0 px-2 pt-2 pb-4" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.5), transparent)' }}>
-                        <div className="flex gap-0.5 mb-2">
-                          {[0, 1, 2].map(i => <div key={i} className="h-0.5 flex-1 rounded-full" style={{ background: i === 0 ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.35)' }} />)}
+                    {(() => {
+                      // Zonas oficiales de Meta (template de ads): Reels = 14% sup / 35% inf / 6% laterales.
+                      // Stories = 250px sup (13%) / 340px inf (18%) sobre 1920.
+                      const z = zonesMode === 'reel'
+                        ? { top: 14, bottom: 35, left: 6, right: 6 }
+                        : { top: 13, bottom: 18, left: 0, right: 0 };
+                      const hatch: React.CSSProperties = {
+                        position: 'absolute',
+                        background: 'repeating-linear-gradient(45deg, rgba(0,0,0,.42), rgba(0,0,0,.42) 7px, rgba(0,0,0,.58) 7px, rgba(0,0,0,.58) 14px)',
+                      };
+                      const zlbl: React.CSSProperties = { color: 'rgba(255,255,255,.85)', fontSize: 9, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', textShadow: '0 1px 2px rgba(0,0,0,.8)' };
+                      return (<>
+                        <div style={{ ...hatch, top: 0, left: 0, right: 0, height: `${z.top}%` }} className="grid place-items-center"><span style={zlbl}>La app tapa esta zona</span></div>
+                        <div style={{ ...hatch, bottom: 0, left: 0, right: 0, height: `${z.bottom}%` }} className="grid place-items-center"><span style={zlbl}>Descripción y botones</span></div>
+                        {z.left > 0 && <div style={{ ...hatch, top: `${z.top}%`, bottom: `${z.bottom}%`, left: 0, width: `${z.left}%` }} />}
+                        {z.right > 0 && <div style={{ ...hatch, top: `${z.top}%`, bottom: `${z.bottom}%`, right: 0, width: `${z.right}%` }} />}
+                        <div style={{ position: 'absolute', top: `${z.top}%`, bottom: `${z.bottom}%`, left: `${z.left}%`, right: `${z.right}%`, border: '2px solid rgba(255,255,255,.9)', boxShadow: '0 0 0 1px rgba(0,0,0,.4)' }}>
+                          <span style={{ ...zlbl, position: 'absolute', top: 6, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,.6)' }}>Zona segura · Meta</span>
                         </div>
-                        <div className="flex items-center gap-2 text-white/90" style={sh}>
-                          <div className="w-7 h-7 rounded-full bg-white/25 border border-white/60 shrink-0" />
-                          <span className="text-[11px] font-bold truncate">{profile?.business || 'Tu negocio'}</span>
-                          <span className="text-[10px] text-white/60">2 h</span>
-                          <i className="fa-solid fa-xmark ml-auto text-base" />
-                        </div>
-                      </div>
-                      <div className="absolute inset-x-0 bottom-0 px-2 pb-2 pt-5 flex items-center gap-3" style={{ background: 'linear-gradient(0deg, rgba(0,0,0,.5), transparent)' }}>
-                        <div className="flex-1 h-9 rounded-full border border-white/50 flex items-center px-3 text-[11px] text-white/70">Enviar mensaje</div>
-                        <i className="fa-regular fa-heart text-white/90 text-xl" style={sh} />
-                        <i className="fa-solid fa-paper-plane text-white/90 text-lg" style={sh} />
-                      </div>
-                    </>)}
+                      </>);
+                    })()}
                   </div>
                 );
                 if (project.aspect === '4:5') return (
