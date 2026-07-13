@@ -438,15 +438,11 @@ export function seekVideosAt(pool: MediaPool, project: ReelProject, t: number): 
       const hasRVFC = typeof v.requestVideoFrameCallback === 'function';
       const already = Math.abs(v.currentTime - target) < 0.001 && v.readyState >= 2;
       const ensure = () => {
+        if (already) { fin(); return; } // ya está en el frame correcto: no hay nada que esperar
         // Registrar el aviso de "frame listo" ANTES de disparar el seek.
         if (hasRVFC) v.requestVideoFrameCallback!(() => fin());
         else v.onseeked = fin;
-        if (already) {
-          // Ya está en el frame correcto: rVFC puede no dispararse (no hay frame nuevo) → resolver por timeout corto.
-          setTimeout(fin, 40);
-        } else {
-          try { v.currentTime = target; } catch { fin(); }
-        }
+        try { v.currentTime = target; } catch { fin(); }
       };
       if (v.readyState >= 1) ensure();
       else { const h = () => { v.removeEventListener('loadedmetadata', h); ensure(); }; v.addEventListener('loadedmetadata', h); }

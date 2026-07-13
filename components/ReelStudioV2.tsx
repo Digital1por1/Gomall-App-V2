@@ -319,7 +319,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   async function renderStatic(t: number) {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    try { await seekVideosAt(poolRef.current, project, t); } catch { /* noop */ }
+    // Durante un arrastre de elementos (mover/recortar en timeline o canvas) el frame de video NO
+    // cambia: saltearse la re-sincronización evita trabar la app con esperas por cada mousemove.
+    const d = dragRef.current;
+    const dragging = !!canvasDragRef.current || (!!d && d.mode !== 'playhead');
+    if (!dragging) { try { await seekVideosAt(poolRef.current, project, t); } catch { /* noop */ } }
     drawReelFrame(ctx, project, t, poolRef.current);
   }
 
