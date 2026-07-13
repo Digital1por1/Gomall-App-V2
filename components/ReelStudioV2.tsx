@@ -217,6 +217,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [brollHasMore, setBrollHasMore] = useState(false);
   const [brollAutoBusy, setBrollAutoBusy] = useState(false);
   const [brollPhraseBusy, setBrollPhraseBusy] = useState(''); // id del subtítulo al que se le está buscando clip
+  const [phrasePick, setPhrasePick] = useState<{ subId: string; query: string; items: { id: number; thumb: string; duration: number; url: string }[] } | null>(null);
   const [brollMsg, setBrollMsg] = useState('');
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
   const [viralMsg, setViralMsg] = useState('');
@@ -975,23 +976,52 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     } finally { setBrollBusy(false); }
   };
 
-  // B-roll para UNA frase puntual (panel "por frases" estilo Submagic): la IA convierte la frase
-  // en búsqueda de stock, toma el mejor resultado y lo inserta al inicio de esa frase.
-  const brollForPhrase = async (sub: TextElement) => {
+  // B-roll de una frase existente (si lo hay): solapa el rango de la frase.
+  const brollClipAt = (sub: TextElement) => {
+    const brolls = project.tracks.flatMap(t => t.elements).filter(e => e.name === 'B-roll');
+    return brolls.find(b => b.start < sub.start + Math.max(1, sub.duration) && sub.start < b.start + b.duration) || null;
+  };
+
+  // Abre el selector de clips para UNA frase: la IA convierte la frase en búsqueda de stock y
+  // muestra 6 candidatos en miniatura para elegir VIENDO (insertar nuevo o reemplazar el actual).
+  const openPhrasePicker = async (sub: TextElement) => {
     if (brollPhraseBusy) return;
+    if (phrasePick?.subId === sub.id) { setPhrasePick(null); return; } // toggle
     setBrollPhraseBusy(sub.id);
     try {
       const pr = await fetch('/api/broll-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: [sub.text], business: profile?.business || '', industry: profile?.industry || '' }) });
       const pd = await pr.json().catch(() => null);
       const query = String(pd?.items?.[0]?.query || sub.text).trim();
-      const sr = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, perPage: 3 }) });
+      const sr = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, perPage: 6 }) });
       const sd = await sr.json().catch(() => null);
-      const item = sd?.items?.[0];
-      if (!item) { alert(`No encontré clips para "${query}". Probá el buscador manual con otras palabras.`); return; }
-      const np = await insertBroll(item, sub.start, project);
-      if (np) commit(np); else alert('No se pudo descargar el clip.');
+      const items = Array.isArray(sd?.items) ? sd.items : [];
+      if (!items.length) { alert(`No encontré clips para "${query}". Probá el buscador manual con otras palabras.`); return; }
+      setPhrasePick({ subId: sub.id, query, items });
     } catch (e: any) { console.warn('[broll frase]', e); alert(e?.message || 'No se pudo buscar el clip.'); }
     finally { setBrollPhraseBusy(''); }
+  };
+
+  // Inserta el candidato elegido para esa frase (reemplaza el clip anterior si había uno).
+  const pickPhraseClip = async (sub: TextElement, item: { url: string }) => {
+    if (brollPhraseBusy) return;
+    setBrollPhraseBusy(sub.id);
+    try {
+      let p = project;
+      const existing = brollClipAt(sub);
+      if (existing) p = removeElement(p, existing.id);
+      const np = await insertBroll(item, sub.start, p);
+      if (np) { commit(np); setPhrasePick(null); setCurrentTime(sub.start + 0.1); }
+      else alert('No se pudo descargar el clip.');
+    } finally { setBrollPhraseBusy(''); }
+  };
+
+  // Ver el clip de esa frase: lleva el cabezal ahí y lo selecciona en el timeline.
+  const viewPhraseClip = (sub: TextElement) => {
+    const clip = brollClipAt(sub);
+    if (!clip) return;
+    pause();
+    setCurrentTime(clip.start + Math.min(0.2, clip.duration / 2));
+    setSelectedId(clip.id);
   };
 
   // B-roll automático: la IA elige los momentos según los subtítulos, busca el clip y lo inserta.
@@ -1571,32 +1601,59 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                 {(() => {
                   const subsList = (project.tracks.flatMap(t => t.elements).filter(e => e.type === 'text' && e.name === 'Subtítulo') as TextElement[]).sort((a, b) => a.start - b.start);
                   if (!subsList.length) return null;
-                  const brolls = project.tracks.flatMap(t => t.elements).filter(e => e.name === 'B-roll');
-                  const clipAt = (sub: TextElement) => brolls.find(b => b.start < sub.start + Math.max(1, sub.duration) && sub.start < b.start + b.duration) || null;
                   return (
-                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+                    <div className="space-y-1.5 max-h-72 overflow-y-auto pr-0.5">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-white/35">Por frase</div>
                       {subsList.map(sub => {
-                        const clip = clipAt(sub);
+                        const clip = brollClipAt(sub);
+                        const busy = brollPhraseBusy === sub.id;
+                        const picking = phrasePick?.subId === sub.id;
                         return (
-                          <div key={sub.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03]">
-                            <span className="text-[9px] tabular-nums text-white/35 shrink-0 w-8">{sub.start.toFixed(1)}s</span>
-                            <span className="text-[11px] text-white/70 flex-1 min-w-0 truncate" title={sub.text}>{sub.text}</span>
-                            {clip ? (
-                              <button onClick={() => commit(removeElement(project, clip.id))} title="Quitar el b-roll de esta frase"
-                                className="w-7 h-7 shrink-0 grid place-items-center rounded-lg bg-emerald-400/15 text-emerald-300 hover:bg-red-500/20 hover:text-red-300">
-                                <i className="fa-solid fa-film text-xs" />
-                              </button>
-                            ) : (
-                              <button onClick={() => brollForPhrase(sub)} disabled={!!brollPhraseBusy} title="Buscar e insertar un clip para esta frase"
-                                className="w-7 h-7 shrink-0 grid place-items-center rounded-lg border border-white/15 text-white/60 hover:bg-white/10 disabled:opacity-40">
-                                {brollPhraseBusy === sub.id ? <i className="fa-solid fa-circle-notch fa-spin text-xs" /> : <i className="fa-solid fa-plus text-xs" />}
-                              </button>
+                          <div key={sub.id} className="rounded-lg border border-white/[0.07] bg-white/[0.03]">
+                            <div className="flex items-center gap-2 px-2 py-1.5">
+                              <span className="text-[9px] tabular-nums text-white/35 shrink-0 w-8">{sub.start.toFixed(1)}s</span>
+                              <span className="text-[11px] text-white/70 flex-1 min-w-0 truncate" title={sub.text}>{sub.text}</span>
+                              {clip ? (<>
+                                <button onClick={() => viewPhraseClip(sub)} title="Ver este clip en el preview"
+                                  className="w-7 h-7 shrink-0 grid place-items-center rounded-lg bg-emerald-400/15 text-emerald-300 hover:bg-emerald-400/30">
+                                  <i className="fa-solid fa-eye text-xs" />
+                                </button>
+                                <button onClick={() => openPhrasePicker(sub)} disabled={!!brollPhraseBusy} title="Cambiar por otro clip"
+                                  className="w-7 h-7 shrink-0 grid place-items-center rounded-lg border border-white/15 text-white/60 hover:bg-white/10 disabled:opacity-40">
+                                  {busy ? <i className="fa-solid fa-circle-notch fa-spin text-xs" /> : <i className="fa-solid fa-arrows-rotate text-xs" />}
+                                </button>
+                                <button onClick={() => commit(removeElement(project, clip.id))} title="Quitar el b-roll de esta frase"
+                                  className="w-7 h-7 shrink-0 grid place-items-center rounded-lg border border-white/15 text-white/50 hover:bg-red-500/20 hover:text-red-300">
+                                  <i className="fa-solid fa-trash text-[10px]" />
+                                </button>
+                              </>) : (
+                                <button onClick={() => openPhrasePicker(sub)} disabled={!!brollPhraseBusy} title="Elegir un clip para esta frase"
+                                  className="w-7 h-7 shrink-0 grid place-items-center rounded-lg border border-white/15 text-white/60 hover:bg-white/10 disabled:opacity-40">
+                                  {busy ? <i className="fa-solid fa-circle-notch fa-spin text-xs" /> : <i className="fa-solid fa-plus text-xs" />}
+                                </button>
+                              )}
+                            </div>
+                            {picking && phrasePick && (
+                              <div className="px-2 pb-2">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">Resultados: "{phrasePick.query}"</span>
+                                  <button onClick={() => setPhrasePick(null)} className="text-white/40 hover:text-white text-xs"><i className="fa-solid fa-xmark" /></button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {phrasePick.items.map(it => (
+                                    <button key={it.id} onClick={() => pickPhraseClip(sub, it)} disabled={!!brollPhraseBusy} title={clip ? 'Reemplazar por este clip' : 'Usar este clip'}
+                                      className="relative rounded-md overflow-hidden border border-white/10 hover:border-cyan-300/70 aspect-[9/16] bg-black/40 disabled:opacity-50">
+                                      <img src={it.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                                      <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold bg-black/70 text-white px-1 rounded">{Math.round(it.duration)}s</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
                             )}
                           </div>
                         );
                       })}
-                      <p className="text-[11px] text-white/35 leading-relaxed">El ícono verde = esa frase ya tiene clip (clic para quitarlo). El + le busca uno con IA.</p>
+                      <p className="text-[11px] text-white/35 leading-relaxed"><i className="fa-solid fa-eye mr-1 text-emerald-300" />ver el clip · <i className="fa-solid fa-arrows-rotate mx-1" />cambiarlo · <i className="fa-solid fa-trash mx-1" />quitarlo · <i className="fa-solid fa-plus mx-1" />elegir uno (muestra opciones antes de insertar).</p>
                     </div>
                   );
                 })()}
