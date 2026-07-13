@@ -37,6 +37,17 @@ export async function decodeAudioUniversal(url: string, ctx: BaseAudioContext): 
   } catch { return null; }
 }
 
+// Caché de audio decodificado, persistente durante la sesión: sin esto, CADA play tras una edición
+// re-decodificaba todos los audios del proyecto (música completa incluida) y la app se sentía trabada.
+const decodedCache = new Map<string, AudioBuffer | null>();
+async function decodeCached(url: string, ctx: BaseAudioContext): Promise<AudioBuffer | null> {
+  if (decodedCache.has(url)) return decodedCache.get(url) ?? null;
+  const b = await decodeAudioUniversal(url, ctx);
+  if (decodedCache.size > 40) { const k = decodedCache.keys().next().value; if (k !== undefined) decodedCache.delete(k); }
+  decodedCache.set(url, b);
+  return b;
+}
+
 // Mezcla offline (determinística) de todas las pistas de audio del proyecto → un AudioBuffer.
 export async function buildMixedAudio(project: ReelProject): Promise<AudioBuffer | null> {
   const SR = 48000;
@@ -44,12 +55,7 @@ export async function buildMixedAudio(project: ReelProject): Promise<AudioBuffer
   if (total <= 0) return null;
   const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
   try {
-    const cache: Record<string, AudioBuffer | null> = {};
-    const decode = async (url: string) => {
-      if (url in cache) return cache[url];
-      const b = await decodeAudioUniversal(url, decodeCtx);
-      cache[url] = b; return b;
-    };
+    const decode = (url: string) => decodeCached(url, decodeCtx);
     const off = new OfflineAudioContext(2, Math.max(1, Math.ceil(total * SR)), SR);
     let any = false;
     for (const track of project.tracks) {

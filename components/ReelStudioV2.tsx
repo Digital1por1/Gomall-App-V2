@@ -418,6 +418,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     await startAudio(startAt);
     if (!playingRef.current) return; // se pausó mientras se preparaba el audio
     clockRef.current = { base: performance.now() - startAt * 1000 };
+    let lastUiT = -1; // el estado de React (playhead, contador) se actualiza ~8 veces/s; el canvas va a 60
     const loop = () => {
       const c = canvasRef.current; if (!c) { setPlaying(false); return; }
       const ctx = c.getContext('2d'); if (!ctx) { setPlaying(false); return; }
@@ -437,7 +438,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
         }
       }
       drawReelFrame(ctx, project, t, poolRef.current);
-      setCurrentTime(t);
+      if (t - lastUiT >= 0.12) { lastUiT = t; setCurrentTime(t); }
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
