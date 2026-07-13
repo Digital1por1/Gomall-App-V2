@@ -2034,24 +2034,25 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                       ))}
                     </div>
                     {(() => {
-                      // Zonas oficiales de Meta (template de ads): Reels = 14% sup / 35% inf / 6% laterales.
-                      // Stories = 250px sup (13%) / 340px inf (18%) sobre 1920.
+                      // Estilo del ejemplo OFICIAL de Meta (help 980593475366490): franjas claras translúcidas
+                      // sobre la imagen con la medida escrita. Reels: 14% sup / 35% inf / 6% laterales.
+                      // Historias: 250 px sup (13%) / 340 px inf (18%) sobre 1920.
                       const z = zonesMode === 'reel'
-                        ? { top: 14, bottom: 35, left: 6, right: 6 }
-                        : { top: 13, bottom: 18, left: 0, right: 0 };
-                      const hatch: React.CSSProperties = {
-                        position: 'absolute',
-                        background: 'repeating-linear-gradient(45deg, rgba(0,0,0,.42), rgba(0,0,0,.42) 7px, rgba(0,0,0,.58) 7px, rgba(0,0,0,.58) 14px)',
-                      };
-                      const zlbl: React.CSSProperties = { color: 'rgba(255,255,255,.85)', fontSize: 9, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', textShadow: '0 1px 2px rgba(0,0,0,.8)' };
+                        ? { top: 14, bottom: 35, left: 6, right: 6, topLbl: '14% · 270 px', botLbl: '35% · 670 px' }
+                        : { top: 13, bottom: 18, left: 0, right: 0, topLbl: '250 px', botLbl: '340 px' };
+                      const band: React.CSSProperties = { position: 'absolute', background: 'rgba(255,255,255,.55)', backdropFilter: 'blur(1.5px)' };
+                      const chip: React.CSSProperties = { background: 'rgba(255,255,255,.92)', color: '#0F172A', fontSize: 9, fontWeight: 800, letterSpacing: '.04em', padding: '2px 8px', borderRadius: 999, boxShadow: '0 1px 3px rgba(0,0,0,.18)' };
+                      const edge = '1.5px dashed rgba(15,23,42,.45)';
                       return (<>
-                        <div style={{ ...hatch, top: 0, left: 0, right: 0, height: `${z.top}%` }} className="grid place-items-center"><span style={zlbl}>La app tapa esta zona</span></div>
-                        <div style={{ ...hatch, bottom: 0, left: 0, right: 0, height: `${z.bottom}%` }} className="grid place-items-center"><span style={zlbl}>Descripción y botones</span></div>
-                        {z.left > 0 && <div style={{ ...hatch, top: `${z.top}%`, bottom: `${z.bottom}%`, left: 0, width: `${z.left}%` }} />}
-                        {z.right > 0 && <div style={{ ...hatch, top: `${z.top}%`, bottom: `${z.bottom}%`, right: 0, width: `${z.right}%` }} />}
-                        <div style={{ position: 'absolute', top: `${z.top}%`, bottom: `${z.bottom}%`, left: `${z.left}%`, right: `${z.right}%`, border: '2px solid rgba(255,255,255,.9)', boxShadow: '0 0 0 1px rgba(0,0,0,.4)' }}>
-                          <span style={{ ...zlbl, position: 'absolute', top: 6, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,.6)' }}>Zona segura · Meta</span>
+                        <div style={{ ...band, top: 0, left: 0, right: 0, height: `${z.top}%`, borderBottom: edge }} className="grid place-items-center">
+                          <span style={chip}>{z.topLbl}</span>
                         </div>
+                        <div style={{ ...band, bottom: 0, left: 0, right: 0, height: `${z.bottom}%`, borderTop: edge }} className="grid place-items-center">
+                          <span style={chip}>{z.botLbl}</span>
+                        </div>
+                        {z.left > 0 && <div style={{ ...band, top: `${z.top}%`, bottom: `${z.bottom}%`, left: 0, width: `${z.left}%`, borderRight: edge }} />}
+                        {z.right > 0 && <div style={{ ...band, top: `${z.top}%`, bottom: `${z.bottom}%`, right: 0, width: `${z.right}%`, borderLeft: edge }} />}
+                        <span style={{ position: 'absolute', top: `calc(${z.top}% + 6px)`, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,.65)', fontSize: 8, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase', textShadow: '0 1px 2px rgba(0,0,0,.6)' }}>Zona segura</span>
                       </>);
                     })()}
                   </div>
