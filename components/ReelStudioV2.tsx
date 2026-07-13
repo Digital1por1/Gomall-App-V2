@@ -217,7 +217,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
   const [brollHasMore, setBrollHasMore] = useState(false);
   const [brollAutoBusy, setBrollAutoBusy] = useState(false);
   const [brollPhraseBusy, setBrollPhraseBusy] = useState(''); // id del subtítulo al que se le está buscando clip
-  const [phrasePick, setPhrasePick] = useState<{ subId: string; query: string; items: { id: number; thumb: string; duration: number; url: string }[] } | null>(null);
+  const [phrasePick, setPhrasePick] = useState<{ subId: string; query: string; page: number; hasMore: boolean; items: { id: number; thumb: string; duration: number; url: string }[] } | null>(null);
   const [brollMsg, setBrollMsg] = useState('');
   const [viralBusy, setViralBusy] = useState(''); // id del estilo viral que se está aplicando
   const [viralMsg, setViralMsg] = useState('');
@@ -996,8 +996,21 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const sd = await sr.json().catch(() => null);
       const items = Array.isArray(sd?.items) ? sd.items : [];
       if (!items.length) { alert(`No encontré clips para "${query}". Probá el buscador manual con otras palabras.`); return; }
-      setPhrasePick({ subId: sub.id, query, items });
+      setPhrasePick({ subId: sub.id, query, page: 1, hasMore: items.length >= 6, items });
     } catch (e: any) { console.warn('[broll frase]', e); alert(e?.message || 'No se pudo buscar el clip.'); }
+    finally { setBrollPhraseBusy(''); }
+  };
+
+  // Trae la página siguiente de candidatos para la misma frase.
+  const morePhraseClips = async () => {
+    if (!phrasePick || brollPhraseBusy) return;
+    setBrollPhraseBusy(phrasePick.subId);
+    try {
+      const sr = await fetch('/api/broll-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: phrasePick.query, perPage: 6, page: phrasePick.page + 1 }) });
+      const sd = await sr.json().catch(() => null);
+      const items = Array.isArray(sd?.items) ? sd.items : [];
+      setPhrasePick(prev => prev ? { ...prev, page: prev.page + 1, hasMore: items.length >= 6, items: [...prev.items, ...items] } : prev);
+    } catch { /* noop */ }
     finally { setBrollPhraseBusy(''); }
   };
 
@@ -1640,14 +1653,20 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
                                   <button onClick={() => setPhrasePick(null)} className="text-white/40 hover:text-white text-xs"><i className="fa-solid fa-xmark" /></button>
                                 </div>
                                 <div className="grid grid-cols-3 gap-1.5">
-                                  {phrasePick.items.map(it => (
-                                    <button key={it.id} onClick={() => pickPhraseClip(sub, it)} disabled={!!brollPhraseBusy} title={clip ? 'Reemplazar por este clip' : 'Usar este clip'}
+                                  {phrasePick.items.map((it, i) => (
+                                    <button key={`${it.id}_${i}`} onClick={() => pickPhraseClip(sub, it)} disabled={!!brollPhraseBusy} title={clip ? 'Reemplazar por este clip' : 'Usar este clip'}
                                       className="relative rounded-md overflow-hidden border border-white/10 hover:border-cyan-300/70 aspect-[9/16] bg-black/40 disabled:opacity-50">
                                       <img src={it.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                                       <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold bg-black/70 text-white px-1 rounded">{Math.round(it.duration)}s</span>
                                     </button>
                                   ))}
                                 </div>
+                                {phrasePick.hasMore && (
+                                  <button onClick={morePhraseClips} disabled={!!brollPhraseBusy}
+                                    className="w-full mt-1.5 py-1.5 rounded-md border border-white/15 text-white/60 text-[10px] font-bold hover:bg-white/5 disabled:opacity-40">
+                                    {busy ? <><i className="fa-solid fa-circle-notch fa-spin mr-1" />Cargando…</> : <><i className="fa-solid fa-angles-down mr-1" />Ver más opciones</>}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
