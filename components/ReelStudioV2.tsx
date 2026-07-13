@@ -121,6 +121,25 @@ interface Props {
   userId?: string | null; // para que el reel guardado localmente sea POR usuario (no se mezcle entre cuentas)
 }
 
+// ¿El navegador puede DECODIFICAR este video? Los .mov HEVC (iPhone) cargan metadata pero no
+// dibujan ni un frame en Chrome → el reel se ve "pausado". Detectamos eso al importar.
+function probeDecodable(url: string): Promise<boolean> {
+  return new Promise((res) => {
+    const v = document.createElement('video');
+    v.muted = true; v.preload = 'auto'; v.src = url;
+    let settled = false;
+    const finish = (ok: boolean) => { if (!settled) { settled = true; try { v.pause(); v.removeAttribute('src'); } catch { /* noop */ } res(ok); } };
+    v.onerror = () => finish(false);
+    v.oncanplay = () => {
+      v.play().then(() => setTimeout(() => {
+        const q = (v as any).getVideoPlaybackQuality?.();
+        finish(q ? q.totalVideoFrames > 0 : v.videoWidth > 0);
+      }, 400)).catch(() => finish(v.videoWidth > 0));
+    };
+    setTimeout(() => finish(v.videoWidth > 0 && v.readyState >= 2), 3500);
+  });
+}
+
 // Mide la duración de un archivo de media.
 function probeDuration(url: string, kind: 'video' | 'audio'): Promise<number> {
   return new Promise((res) => {
@@ -429,6 +448,11 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     let cursor = totalDur;
     for (const f of Array.from(files)) {
       const url = URL.createObjectURL(f);
+      const ok = await probeDecodable(url);
+      if (!ok) {
+        alert(`"${f.name}" no se puede reproducir en este navegador (probablemente sea un .mov HEVC de iPhone). Convertilo a MP4 (H.264) o editá desde Safari, que sí lo soporta.`);
+        continue;
+      }
       const dur = await probeDuration(url, 'video');
       const track = p.tracks.find(t => t.kind === 'video')!;
       const el = makeVideoElement(url, dur, { start: cursor, name: f.name.replace(/\.[^.]+$/, '') });
@@ -567,7 +591,9 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
     let p = project;
     for (const t of p.tracks) for (const el of t.elements) {
       if (el.type === 'text' && el.id !== selected.id) {
-        p = updateElement(p, el.id, { style: { ...style }, transform: { ...(el as TextElement).transform, x: src.transform.x, y: src.transform.y } } as any);
+        const own = (el as TextElement).style;
+        // El emoji y la palabra clave son POR FRASE: se conservan los de cada subtítulo.
+        p = updateElement(p, el.id, { style: { ...style, hlWord: own.hlWord, emojiTop: own.emojiTop }, transform: { ...(el as TextElement).transform, x: src.transform.x, y: src.transform.y } } as any);
       }
     }
     commit(p);
@@ -931,7 +957,12 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const url = URL.createObjectURL(blob);
       const dur = await probeDuration(url, 'video');
       const clipDur = Math.min(dur, 4);
-      const el = makeVideoElement(url, dur, { name: 'B-roll', start: at, duration: clipDur, trimEnd: clipDur, muted: true, volume: 0 });
+      const el = {
+        ...makeVideoElement(url, dur, { name: 'B-roll', start: at, duration: clipDur, trimEnd: clipDur, muted: true, volume: 0 }),
+        // Transiciones dinámicas: el b-roll entra con un golpe de zoom y sale con fundido.
+        transition: 'zoom' as TransitionKind, transitionDur: 0.3,
+        transitionOut: 'fade' as TransitionKind, transitionOutDur: 0.25,
+      };
       return addBrollToProject(p0, el);
     } catch { return null; }
   };

@@ -305,19 +305,25 @@ function easeOutBounce(x: number): number {
 // Auto-zoom (punch-in dinámico estilo Submagic): en cada "punto" (beat de la música, o ritmo fijo si no hay),
 // el video hace un zoom rápido y se asienta. Devuelve el multiplicador de escala en el instante t.
 function autoZoomScale(t: number, points: number[] | undefined, intensity: number): number {
-  const ATTACK = 0.18, DECAY = 1.3; // s: sube (algo más suave) y baja lento → menos "nervioso"
-  let p: number;
+  // Punch-in estilo Submagic: en cada punto el zoom ENTRA o SALE de golpe (0,16 s) y se queda ahí
+  // hasta el punto siguiente. El corte seco + mantener es lo que se siente "dinámico".
+  const SNAP = 0.16;
+  let idx = -1, last = 0;
   if (points && points.length) {
-    // Último punto <= t (búsqueda lineal simple; la lista suele ser corta).
-    p = -Infinity;
-    for (let i = 0; i < points.length; i++) { if (points[i] <= t) p = points[i]; else break; }
-    if (p === -Infinity) return 1;
+    for (let i = 0; i < points.length; i++) { if (points[i] <= t) { idx = i; last = points[i]; } else break; }
+    if (idx < 0) return 1;
   } else {
-    p = Math.floor(t / 3.2) * 3.2; // sin voz ni música → cada 3,2 s
+    const P = 3.2; // sin voz ni música → cada 3,2 s
+    idx = Math.floor(t / P);
+    if (idx < 0) return 1;
+    last = idx * P;
   }
-  const dt = t - p;
-  if (dt < ATTACK) return 1 + intensity * (dt / ATTACK);
-  return 1 + intensity * Math.max(0, 1 - (dt - ATTACK) / DECAY);
+  const zoomIn = idx % 2 === 0; // punto par: entra el zoom; impar: sale
+  const from = zoomIn ? 1 : 1 + intensity;
+  const to = zoomIn ? 1 + intensity : 1;
+  const p = Math.min(1, (t - last) / SNAP);
+  const e = 1 - Math.pow(1 - p, 3); // easeOutCubic: golpe rápido con frenada
+  return from + (to - from) * e;
 }
 
 // Tiempo de la fuente para un elemento de media en el instante t de la timeline.
@@ -401,7 +407,7 @@ export function drawReelFrame(ctx: CanvasRenderingContext2D, project: ReelProjec
       if (rot || flipScaleX !== 1) { ctx.translate(W / 2, H / 2); if (rot) ctx.rotate((rot * Math.PI) / 180); if (flipScaleX !== 1) ctx.scale(flipScaleX, 1); ctx.translate(-W / 2, -H / 2); }
       const baseOpacity = media.transform.opacity * alpha * em.alpha;
       // Auto-zoom dinámico (punch-in): solo sobre la pista base y con "cover" (para no mostrar bordes al ampliar).
-      const az = project.autoZoom ? autoZoomScale(t, project.zoomBeats, 0.1) : 1;
+      const az = project.autoZoom ? autoZoomScale(t, project.zoomBeats, 0.12) : 1;
       if ((media as any).fit === 'contain') drawContain(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale);
       else drawCover(ctx, src, sw, sh, W, H, baseOpacity, media.transform.scale * extraScale * kb * em.scale * az);
       ctx.restore();
