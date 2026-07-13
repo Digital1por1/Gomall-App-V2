@@ -121,22 +121,29 @@ interface Props {
   userId?: string | null; // para que el reel guardado localmente sea POR usuario (no se mezcle entre cuentas)
 }
 
-// ¿El navegador puede DECODIFICAR este video? Los .mov HEVC (iPhone) cargan metadata pero no
-// dibujan ni un frame en Chrome → el reel se ve "pausado". Detectamos eso al importar.
+// ¿El navegador puede DECODIFICAR este video? Algunos códecs (ej: HEVC de iPhone en Chromes sin
+// soporte de hardware) cargan la metadata pero no dibujan ni un frame → el reel se ve "pausado".
+// Señal confiable y multi-navegador: requestVideoFrameCallback se dispara SOLO cuando un cuadro
+// se presentó de verdad. (La versión anterior contaba frames con getVideoPlaybackQuality y daba
+// falsos rechazos en Safari.)
 function probeDecodable(url: string): Promise<boolean> {
   return new Promise((res) => {
-    const v = document.createElement('video');
-    v.muted = true; v.preload = 'auto'; v.src = url;
+    const v = document.createElement('video') as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
     let settled = false;
-    const finish = (ok: boolean) => { if (!settled) { settled = true; try { v.pause(); v.removeAttribute('src'); } catch { /* noop */ } res(ok); } };
+    const finish = (ok: boolean) => { if (!settled) { settled = true; try { v.pause(); v.removeAttribute('src'); v.load(); } catch { /* noop */ } res(ok); } };
+    v.muted = true; (v as any).playsInline = true; v.preload = 'auto'; v.src = url;
     v.onerror = () => finish(false);
-    v.oncanplay = () => {
-      v.play().then(() => setTimeout(() => {
-        const q = (v as any).getVideoPlaybackQuality?.();
-        finish(q ? q.totalVideoFrames > 0 : v.videoWidth > 0);
-      }, 400)).catch(() => finish(v.videoWidth > 0));
-    };
-    setTimeout(() => finish(v.videoWidth > 0 && v.readyState >= 2), 3500);
+    const hasRvfc = typeof v.requestVideoFrameCallback === 'function';
+    if (hasRvfc) {
+      v.requestVideoFrameCallback!(() => finish(true)); // un frame presentado = decodifica seguro
+      v.oncanplay = () => { v.play().catch(() => { try { v.currentTime = 0.05; } catch { /* noop */ } }); };
+    } else {
+      // Navegadores sin rVFC: canplay + dimensiones reales alcanzan como aproximación.
+      v.oncanplay = () => finish(v.videoWidth > 0);
+    }
+    // Timeout: con rVFC, si en 5s no se presentó ni un cuadro → no decodifica.
+    // Sin rVFC, beneficio de la duda si hay dimensiones.
+    setTimeout(() => finish(hasRvfc ? false : v.videoWidth > 0), 5000);
   });
 }
 
@@ -451,7 +458,7 @@ const ReelStudioV2: React.FC<Props> = ({ profile, onClose, initialCopy, initialP
       const url = URL.createObjectURL(f);
       const ok = await probeDecodable(url);
       if (!ok) {
-        alert(`"${f.name}" no se puede reproducir en este navegador (probablemente sea un .mov HEVC de iPhone). Convertilo a MP4 (H.264) o editá desde Safari, que sí lo soporta.`);
+        alert(`"${f.name}" usa un códec de video que ESTE navegador no puede reproducir (típico de los .mov HEVC de iPhone). Opciones: convertirlo a MP4 (H.264) o probar en otro navegador — Safari y los Chrome recientes con soporte de hardware suelen reproducirlo.`);
         continue;
       }
       const dur = await probeDuration(url, 'video');
