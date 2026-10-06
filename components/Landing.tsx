@@ -91,7 +91,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <i className="fa-solid fa-bolt"></i> Marketing con Inteligencia Artificial
             </span>
             <h1 className="font-display text-[34px] sm:text-5xl text-slate-900 leading-[1.05]">
-              Tu equipo de marketing,<br /><span className="text-[#EA5B25]">sin contratar una agencia.</span>
+              Creá piezas que venden,<br /><span className="text-[#EA5B25]">en minutos.</span>
             </h1>
             <p className="text-slate-500 text-base sm:text-lg leading-relaxed font-medium max-w-lg mx-auto lg:mx-0">
               Creá campañas, posts y reels profesionales para tu negocio en minutos. La IA hace el trabajo pesado; vos solo aprobás y publicás.
